@@ -1,0 +1,32 @@
+{
+    "name": "Scripts",
+    "rootNamespace": "",
+    "references": [
+        "meta.xr.mrutilitykit",
+        "Oculus.VR",
+        "glTFast",
+        "Unity.XR.CoreUtils",
+        "Unity.XR.Interaction.Toolkit",
+        "Unity.TextMeshPro"
+    ],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": [],
+    "versionDefines": [
+        {
+            "name": "com.meta.xr.mrutilitykit",
+            "expression": "",
+            "define": "META_XR_SDK_INSTALLED"
+        },
+        {
+            "name": "com.atteneder.gltfast",
+            "expression": "",
+            "define": "GLTFAST_PRESENT"
+        }
+    ],
+    "noEngineReferences": false
+}

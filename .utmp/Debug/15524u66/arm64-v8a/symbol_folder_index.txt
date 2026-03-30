@@ -1,0 +1,1 @@
+C:\Users\veks\source\repos\XRHouseDesignExport\Library\Bee\Android\Prj\IL2CPP\Gradle\unityLibrary\build\intermediates\cxx\Debug\15524u66\obj\arm64-v8a
