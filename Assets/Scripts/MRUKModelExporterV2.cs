@@ -10,6 +10,16 @@ using Meta.XR.MRUtilityKit;
 #endif
 
 public static class MRUKModelExporterV2 {
+    private static string GetGameObjectPath(GameObject obj) {
+        string path = "/" + obj.name;
+        Transform t = obj.transform;
+        while (t.parent != null) {
+            t = t.parent;
+            path = "/" + t.name + path;
+        }
+        return path;
+    }
+
     public static string GenerateOBJ(List<MRUKRoom> rooms, bool rawMesh, float globalRotation = 0, bool includeGlobalMeshes = false) {
         StringBuilder sb = new StringBuilder();
         if (!rawMesh) sb.AppendLine("mtllib house_model.mtl");
@@ -19,23 +29,33 @@ public static class MRUKModelExporterV2 {
         if (rawMesh) {
             // Collect all meshes to export
             List<MeshFilter> meshTargets = new List<MeshFilter>();
-            foreach (var r in rooms) {
-                meshTargets.AddRange(r.GetComponentsInChildren<MeshFilter>(true));
-            }
-
+            
             if (includeGlobalMeshes) {
                 var allInScene = GameObject.FindObjectsByType<MeshFilter>(FindObjectsSortMode.None);
                 foreach(var mf in allInScene) {
-                    // Include if it has vertices and isn't obviously a tool/UI or analytical box
-                    if (mf.sharedMesh != null && mf.sharedMesh.vertexCount > 100 && 
-                        !mf.name.Contains("XRMenu") && !mf.name.Contains("Box") && !mf.name.Contains("Analytical")) {
-                        if (!meshTargets.Contains(mf)) meshTargets.Add(mf);
+                    string n = mf.name.ToUpper();
+                    string path = GetGameObjectPath(mf.gameObject).ToUpper();
+                    
+                    // EXCLUDE: Anything in Dollhouse, UI, or our analytical cube names
+                    if (path.Contains("DOLLHOUSE") || n.Contains("XRMENU")) continue;
+                    // Exclude analytical cubes by exact label name if they are our cubes
+                    if (n.Contains("WALL") || n.Contains("FLOOR") || n.Contains("DOOR") || n.Contains("WINDOW") || n.Contains("OPENING")) {
+                        // If it's a simple Cube mesh, it's likely our analytical one
+                        if (mf.sharedMesh != null && mf.sharedMesh.name == "Cube" && mf.sharedMesh.vertexCount == 24) continue;
                     }
+
+                    if (mf.sharedMesh == null || mf.sharedMesh.vertexCount < 10) continue;
+
+                    if (!meshTargets.Contains(mf)) meshTargets.Add(mf);
+                }
+            } else {
+                foreach (var r in rooms) {
+                    meshTargets.AddRange(r.GetComponentsInChildren<MeshFilter>(true));
                 }
             }
 
             foreach (var mf in meshTargets) {
-                if (mf.sharedMesh == null || mf.name.Contains("XRMenu") || mf.name.Contains("Box")) continue;
+                if (mf.sharedMesh == null) continue;
                 var m = mf.sharedMesh;
                 for (int i = 0; i < m.vertexCount; i++) {
                     Vector3 v = gRot * mf.transform.TransformPoint(m.vertices[i]);
@@ -59,8 +79,20 @@ public static class MRUKModelExporterV2 {
         var allAnchors = rooms.SelectMany(r => r.Anchors).ToList();
         var walls = allAnchors.Where(a => a.Label.ToString().ToUpper().Contains("WALL") && a.PlaneRect.HasValue).ToList();
         var floors = allAnchors.Where(a => a.Label.ToString().ToUpper().Contains("FLOOR") && a.PlaneRect.HasValue).ToList();
-        var openings = allAnchors.Where(a => (a.Label.ToString().ToUpper().Contains("DOOR") || a.Label.ToString().ToUpper().Contains("WINDOW")) && a.PlaneRect.HasValue)
-            .GroupBy(a => a.transform.position.ToString("F2")).Select(g => g.First()).ToList();
+        
+        // openingsToExport: only those belonging to the rooms we are currently exporting
+        var openingsToExport = allAnchors.Where(a => (a.Label.ToString().ToUpper().Contains("DOOR") || a.Label.ToString().ToUpper().Contains("WINDOW")) && a.PlaneRect.HasValue)
+            .GroupBy(a => a.transform.position.ToString("F3")).Select(g => g.First()).ToList();
+
+        // openingsForHoleCutting: potentially ALL openings in the house to ensure holes are cut even if the door "belongs" to a neighbor room
+        List<MRUKAnchor> openingsForHoleCutting = openingsToExport;
+        #if META_XR_SDK_INSTALLED
+        if (MRUK.Instance != null) {
+            openingsForHoleCutting = MRUK.Instance.Rooms.SelectMany(r => r.Anchors)
+                .Where(a => (a.Label.ToString().ToUpper().Contains("DOOR") || a.Label.ToString().ToUpper().Contains("WINDOW")) && a.PlaneRect.HasValue)
+                .GroupBy(a => a.transform.position.ToString("F3")).Select(g => g.First()).ToList();
+        }
+        #endif
 
         foreach (var f in floors) {
             // Apply 0.1m thickness. Local Z points DOWN at 270 deg X rot.
@@ -69,11 +101,15 @@ public static class MRUKModelExporterV2 {
                 new Vector3(f.PlaneRect.Value.width, f.PlaneRect.Value.height, 0.1f), "Floor", new Vector3(0, 0, 0.05f));
         }
 
+        HashSet<MRUKAnchor> usedOpenings = new HashSet<MRUKAnchor>();
+
         foreach (var w in walls) {
             float wW = w.PlaneRect.Value.width; float wH = w.PlaneRect.Value.height;
-            var wallHoles = openings.Where(o => {
+            var wallHoles = openingsForHoleCutting.Where(o => {
                 Vector3 lp = w.transform.InverseTransformPoint(o.transform.position);
-                return Mathf.Abs(lp.z) < 0.3f && Mathf.Abs(lp.x) < (wW/2f + 0.1f) && Mathf.Abs(lp.y) < (wH/2f + 0.1f);
+                bool intersect = Mathf.Abs(lp.z) < 0.3f && Mathf.Abs(lp.x) < (wW/2f + 0.1f) && Mathf.Abs(lp.y) < (wH/2f + 0.1f);
+                if (intersect) usedOpenings.Add(o);
+                return intersect;
             }).ToList();
 
             if (wallHoles.Count > 0) {
@@ -102,7 +138,7 @@ public static class MRUKModelExporterV2 {
             } else AppendBox(sb, ref vOff, gRot * w.transform.position, gRot * w.transform.rotation, new Vector3(wW, wH, 0.25f), "Wall", Vector3.zero);
         }
 
-        foreach (var o in openings) {
+        foreach (var o in usedOpenings) {
             string l = o.Label.ToString().ToUpper();
             AppendBox(sb, ref vOff, gRot * o.transform.position, gRot * o.transform.rotation, new Vector3(o.PlaneRect.Value.width, o.PlaneRect.Value.height, l.Contains("DOOR") ? 0.10f : 0.12f), l.Contains("DOOR") ? "Door" : "Window", Vector3.zero);
         }
