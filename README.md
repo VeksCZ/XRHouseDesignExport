@@ -6,7 +6,8 @@
 XRHouseDesignExporter is a specialized utility designed for Meta Quest developers and designers. It allows users to capture and export environmental data scanned using the Meta Mixed Reality Utility Kit (MRUK), facilitating the transition from physical space capture to digital design workflows.
 
 ## Key Features
-- **MRUK Data Export**: Streamlined process for exporting scene anchors, meshes, and plane data.
+- **MRUK Data Export**: Streamlined process for exporting scene anchors, meshes, and plane data (.obj, .glb, .json, .html).
+- **GLB/glTF Support**: Modern binary format for direct import into Blender, Unity, or Windows 3D Viewer.
 - **Quest Native**: Optimized for standalone execution on Meta Quest headsets.
 - **Design Ready**: Outputs data in formats compatible with further architectural or interior design processing.
 

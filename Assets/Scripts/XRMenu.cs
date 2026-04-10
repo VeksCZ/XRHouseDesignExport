@@ -22,6 +22,8 @@ public class XRMenu : MonoBehaviour
 
     void Start()
     {
+        AddLog("<color=yellow>Build: " + VersionDisplay.BuildTime + "</color>");
+
         AddLog("System initialized.");
         if (exportAllButton != null) exportAllButton.onClick.AddListener(OnExportAll);
         if (viewHouseButton != null) viewHouseButton.onClick.AddListener(OnToggleHouseView);
@@ -49,6 +51,20 @@ public class XRMenu : MonoBehaviour
         if (OVRInput.GetDown(OVRInput.Button.Two, OVRInput.Controller.RTouch)) OnExportAll();
         if (OVRInput.GetDown(OVRInput.Button.One, OVRInput.Controller.RTouch)) OnToggleHouseView();
         if (OVRInput.GetDown(OVRInput.Button.Three, OVRInput.Controller.LTouch)) OpenLastReport();
+        if (OVRInput.GetDown(OVRInput.Button.Two, OVRInput.Controller.LTouch) || OVRInput.GetDown(OVRInput.Button.Four, OVRInput.Controller.LTouch)) SaveLogToFile();
+    }
+
+    public void SaveLogToFile() {
+        try {
+            string root = Application.isEditor ? "Exports/Logs" : "/sdcard/Download/XRHouseExports/Logs";
+            System.IO.Directory.CreateDirectory(root);
+            string filename = $"SessionLog_{System.DateTime.Now:yyyyMMdd_HHmmss}.txt";
+            string path = System.IO.Path.Combine(root, filename);
+            System.IO.File.WriteAllText(path, GetLogHistory());
+            AddLog("<color=yellow>LOG ULOŽEN:</color> " + filename);
+        } catch (System.Exception ex) {
+            Debug.LogError("Failed to save log: " + ex.Message);
+        }
     }
 
     public async void OnToggleHouseView()
@@ -181,16 +197,22 @@ public class XRMenu : MonoBehaviour
 
     public async void OnExportAll() {
         if (statusText != null) statusText.text = "Working...";
-        AddLog("Starting export...");
-        bool ok = await exporter.ExportAllRooms(this);
-        if (statusText != null) statusText.text = ok ? "SUCCESS" : "FAILED";
-        if (ok) AddLog("Files saved to Download/XRHouseExports");
+        AddLog("<color=cyan>Spouštím export...</color>");
+        try {
+            bool ok = await exporter.ExportAllRooms(this);
+            if (statusText != null) statusText.text = ok ? "DOKONČENO" : "CHYBA";
+            if (ok) AddLog("<color=green>Export hotov!</color> Soubory jsou v Download/XRHouseExports");
+            else AddLog("<color=red>Export selhal.</color> Zkontroluj logy.");
+        } catch (System.Exception ex) {
+            AddLog("<color=red>KRITICKÁ CHYBA:</color> " + ex.Message);
+            if (statusText != null) statusText.text = "CRASH";
+        }
     }
 
     public void OpenLastReport() {
-        if (exporter != null && !string.IsNullOrEmpty(exporter.LastReportPath)) {
-            string p = exporter.LastReportPath;
-            if (Application.platform == RuntimePlatform.Android) {
+        if (!string.IsNullOrEmpty(MRUKExporter.LastReportPath)) {
+            string p = MRUKExporter.LastReportPath;
+if (Application.platform == RuntimePlatform.Android) {
                 AddLog("Report is on Quest: " + p);
                 AddLog("Use 'Pull Exports to PC' in Editor.");
             } else {

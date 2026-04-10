@@ -10,13 +10,13 @@ public class PlayerController : MonoBehaviour
     public float moveSpeed = 2.0f;
     public float gravity = 9.81f;
 
-    private CharacterController m_Controller; // This refers to the built-in component
+    private UnityEngine.CharacterController m_Controller; 
     private Transform mainCameraTransform;
     private Vector3 velocity;
 
     void Start()
     {
-        m_Controller = GetComponent<CharacterController>();
+        m_Controller = GetComponent<UnityEngine.CharacterController>();
         if (Camera.main != null)
         {
             mainCameraTransform = Camera.main.transform;
@@ -24,8 +24,8 @@ public class PlayerController : MonoBehaviour
 
         if (m_Controller == null)
         {
-            Debug.LogError("No CharacterController component found on this GameObject. Adding one...");
-            m_Controller = gameObject.AddComponent<CharacterController>();
+            Debug.Log("No CharacterController component found on this GameObject. Adding one...");
+            m_Controller = gameObject.AddComponent<UnityEngine.CharacterController>();
         }
     }
 
