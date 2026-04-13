@@ -98,9 +98,14 @@ public static class MRUKReportBuilderV2 {
 
         var allAnchors = rooms.SelectMany(r => r.Anchors).ToList();
         
-        // 1. Deduplicate openings globally for this drawing context
-        var openings = allAnchors.Where(a => (a.Label.ToString().Contains("DOOR") || a.Label.ToString().Contains("WINDOW")) && a.PlaneRect.HasValue)
-            .GroupBy(a => a.transform.position.ToString("F3")).Select(g => g.First()).ToList();
+        // 1. Deduplicate openings based on proximity (within 25cm)
+        var rawOpenings = allAnchors.Where(a => (a.Label.ToString().Contains("DOOR") || a.Label.ToString().Contains("WINDOW")) && a.PlaneRect.HasValue).ToList();
+        var openings = new List<MRUKAnchor>();
+        foreach (var o in rawOpenings) {
+            if (!openings.Any(existing => Vector3.Distance(o.transform.position, existing.transform.position) < 0.25f)) {
+                openings.Add(o);
+            }
+        }
             
         var walls = allAnchors.Where(a => a.Label.ToString().Contains("WALL") && a.PlaneRect.HasValue).ToList();
 
