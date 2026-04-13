@@ -25,7 +25,7 @@ public class XRMenu : MonoBehaviour
 
         exportAllButton?.onClick.AddListener(OnExportAll);
         viewHouseButton?.onClick.AddListener(OnToggleHouseView);
-        openReportButton?.onClick.AddListener(OpenLastReport);
+        openReportButton?.onClick.AddListener(OpenReportInApp);
 
         exporter ??= FindAnyObjectByType<MRUKExporter>();
 
@@ -113,24 +113,59 @@ public class XRMenu : MonoBehaviour
         }
     }
 
-    public void OpenLastReport()
+    public void OpenReportInApp()
     {
         if (string.IsNullOrEmpty(MRUKExporter.LastReportPath))
         {
-            AddLog("<color=yellow>Žádný report k otevření.</color>");
+            AddLog("<color=yellow>Žádný report k zobrazení.</color>");
             return;
         }
 
-        string path = MRUKExporter.LastReportPath;
+        string reportUrl = "file://" + MRUKExporter.LastReportPath;
+
         if (Application.platform == RuntimePlatform.Android)
         {
-            AddLog("Report je na Questu: " + path);
-            AddLog("Použij Pull z editoru.");
+            try
+            {
+                // Otevíráme systémový prohlížeč (Oculus Browser) jako overlay
+                using (AndroidJavaClass intentClass = new AndroidJavaClass("android.content.Intent"))
+                using (AndroidJavaObject intentObject = new AndroidJavaObject("android.content.Intent"))
+                {
+                    intentObject.Call<AndroidJavaObject>("setAction", intentClass.GetStatic<string>("ACTION_VIEW"));
+                    
+                    using (AndroidJavaClass uriClass = new AndroidJavaClass("android.net.Uri"))
+                    using (AndroidJavaObject uriObject = uriClass.CallStatic<AndroidJavaObject>("parse", reportUrl))
+                    {
+                        intentObject.Call<AndroidJavaObject>("setData", uriObject);
+                        
+                        // Přidáme flagy pro nové okno
+                        intentObject.Call<AndroidJavaObject>("addFlags", intentClass.GetStatic<int>("FLAG_ACTIVITY_NEW_TASK"));
+
+                        using (AndroidJavaClass unityPlayer = new AndroidJavaClass("com.unity3d.player.UnityPlayer"))
+                        using (AndroidJavaObject currentActivity = unityPlayer.GetStatic<AndroidJavaObject>("currentActivity"))
+                        {
+                            currentActivity.Call("startActivity", intentObject);
+                        }
+                    }
+                }
+                AddLog("Otevírám systémový prohlížeč...");
+            }
+            catch (Exception ex)
+            {
+                AddLog("<color=red>Chyba při otevírání:</color> " + ex.Message);
+                Application.OpenURL(reportUrl);
+            }
         }
         else
         {
-            Application.OpenURL("file://" + path);
-            AddLog("Otevírám report...");
+            // V Editoru na PC
+            Application.OpenURL(reportUrl);
+            AddLog("Otevírám report v systémovém prohlížeči...");
         }
+    }
+
+    public void OpenLastReport()
+    {
+        OpenReportInApp();
     }
 }
