@@ -42,12 +42,19 @@ public class DollHouseVisualizer : MonoBehaviour {
         Vector3 houseCenter = Vector3.zero; int structuralCount = 0;
         float globalAngle = 0; float maxW = 0;
         foreach(var r in rooms) {
-            foreach(var a in r.Anchors.Where(x => x.Label.ToString().Contains("WALL"))) {
+            foreach(var a in r.Anchors.Where(x => x.Label.ToString().Contains("WALL") && x.PlaneRect.HasValue)) {
                 houseCenter += a.transform.position; structuralCount++;
-                if (a.PlaneRect.HasValue && a.PlaneRect.Value.width > maxW) { maxW = a.PlaneRect.Value.width; globalAngle = -a.transform.eulerAngles.y; }
+                if (a.PlaneRect.Value.width > maxW) { 
+                    maxW = a.PlaneRect.Value.width; 
+                    // Snap the angle to nearest 90 degrees to keep it orthogonal
+                    float yRot = a.transform.eulerAngles.y;
+                    globalAngle = -Mathf.Round(yRot / 90f) * 90f;
+                }
             }
         }
         if (structuralCount > 0) houseCenter /= structuralCount;
+        
+        // Final correction rotation
         Quaternion globalCorrection = Quaternion.Euler(0, globalAngle, 0);
 
         Shader unlit = Shader.Find("Universal Render Pipeline/Unlit") ?? Shader.Find("Unlit/Color");

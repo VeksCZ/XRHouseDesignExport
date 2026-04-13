@@ -24,112 +24,88 @@ public class MRUKExporter : MonoBehaviour {
         dLog.AppendLine($"=== EXPORT START {DateTime.Now} ===");
         string root = Application.isEditor ? "Exports/RoomData" : "/sdcard/Download/XRHouseExports";
         
-        if (uiLog != null) uiLog.AddLog("Příprava exportu...");
+        if (uiLog != null) uiLog.AddLog("Příprava scény a oprávnění...");
         
         try {
-            if (MRUK.Instance == null) {
-                dLog.AppendLine("ERROR: MRUK Instance not found.");
-                return false;
-            }
+            // 1. Permissions (Using available Request method)
+            OVRPermissionsRequester.Request(new[] { OVRPermissionsRequester.Permission.Scene });
+            
+            if (MRUK.Instance == null) return false;
+
+            // 2. Modern Scene Loading (Handling v83-v85 patterns)
             if (!Application.isEditor) {
-                dLog.AppendLine("Loading scene from device (V2 High-Fidelity)...");
-                if (uiLog != null) uiLog.AddLog("Načítám High-Fidelity scénu...");
-                // Explicitly request V2 model for dense mesh access in 2026
+                if (uiLog != null) uiLog.AddLog("Načítám scénu z Questu...");
+                
+                // We use the version-safe approach: call the method and wait for event
+                var tcs = new System.Threading.Tasks.TaskCompletionSource<bool>();
+                Action onLoaded = null;
+                onLoaded = () => {
+                    MRUK.Instance.SceneLoadedEvent.RemoveListener(new UnityEngine.Events.UnityAction(onLoaded));
+                    tcs.TrySetResult(true);
+                };
+                MRUK.Instance.SceneLoadedEvent.AddListener(new UnityEngine.Events.UnityAction(onLoaded));
+                
+                // Start loading (V2 provides High-Fidelity data)
                 await MRUK.Instance.LoadSceneFromDevice(true, true, MRUK.SceneModel.V2);
+                
+                // Wait for either the event or a timeout
+                await System.Threading.Tasks.Task.WhenAny(tcs.Task, System.Threading.Tasks.Task.Delay(5000));
             }
 
-            await System.Threading.Tasks.Task.Delay(1500); 
-
-            // Filter rooms: Only include rooms that have at least one floor anchor
-            var rooms = MRUK.Instance.Rooms.Where(r => {
-                try {
-                    var prop = r.GetType().GetProperty("FloorAnchors");
-                    var list = prop?.GetValue(r) as System.Collections.IEnumerable;
-                    return list != null && list.GetEnumerator().MoveNext();
-                } catch { return false; }
-            }).ToList();
-
-            dLog.AppendLine($"Found {rooms.Count} valid structural rooms (filtered from {MRUK.Instance.Rooms.Count}).");
+            var rooms = MRUK.Instance.Rooms.ToList();
             if (uiLog != null) uiLog.AddLog($"Nalezeno {rooms.Count} místností.");
             if (rooms.Count == 0) return false;
 
-            // Global Alignment
+            // Global Alignment (Orthogonal snapping)
             float globalAngle = 0; float maxW = 0;
             foreach (var r in rooms) {
                 foreach (var a in r.Anchors.Where(x => x.Label.ToString().ToUpper().Contains("WALL") && x.PlaneRect.HasValue)) {
                     if (a.PlaneRect.Value.width > maxW) { 
                         maxW = a.PlaneRect.Value.width; 
-                        globalAngle = -a.transform.eulerAngles.y; 
+                        globalAngle = -Mathf.Round(a.transform.eulerAngles.y / 90f) * 90f; 
                     }
                 }
             }
-            if (uiLog != null) uiLog.AddLog($"Zarovnání: {globalAngle:F1}°");
 
             string ts = DateTime.Now.ToString("yyyyMMdd_HHmmss");
             string session = Path.Combine(root, "Export_" + ts);
             Directory.CreateDirectory(session);
 
-            // Metadata
-            if (uiLog != null) uiLog.AddLog("Zapisuji metadata a dump...");
             File.WriteAllText(Path.Combine(session, "full_scene_dump.txt"), MRUKDataProcessor.GenerateSceneDump(rooms));
             File.WriteAllText(Path.Combine(session, "house_data.json"), MRUKDataProcessor.GenerateJson(rooms));
-            
-            // Reports
-            if (uiLog != null) uiLog.AddLog("Generuji HTML report...");
             File.WriteAllText(Path.Combine(session, "house_report_v2.html"), MRUKReportBuilderV2.GenerateFullReport(rooms, true, true, globalAngle));
             
-            // Models (Analytical, Reconstructed, and RAW SCAN)
+            // 3. Models (Standard and High-Fidelity)
             if (uiLog != null) uiLog.AddLog("Exportuji 3D modely...");
+            File.WriteAllText(Path.Combine(session, "house_mesh.obj"), MRUKModelExporterV2.GenerateOBJ(rooms, true, globalAngle));
+            File.WriteAllText(Path.Combine(session, "house_analytical.obj"), MRUKModelExporterV2.GenerateOBJ(rooms, false, globalAngle));
             
-            // 1. Analytical (Boxes)
-            string analyticalObj = MRUKModelExporterV2.GenerateOBJ(rooms, false, globalAngle);
-            File.WriteAllText(Path.Combine(session, "house_analytical.obj"), analyticalObj);
-            byte[] analyticalGlb = MRUKModelExporterV2.GenerateGLB(rooms, false, globalAngle);
-            if (analyticalGlb != null) File.WriteAllBytes(Path.Combine(session, "house_analytical.glb"), analyticalGlb);
-
-            // 2. Reconstructed (Polygonal)
-            string meshObj = MRUKModelExporterV2.GenerateOBJ(rooms, true, globalAngle, false);
-            File.WriteAllText(Path.Combine(session, "house_mesh.obj"), meshObj);
-            byte[] meshGlb = MRUKModelExporterV2.GenerateGLB(rooms, true, globalAngle);
-            if (meshGlb != null) File.WriteAllBytes(Path.Combine(session, "house_mesh.glb"), meshGlb);
-
-            // 3. RAW SCAN (The actual dirty mesh from Quest)
-            if (uiLog != null) uiLog.AddLog("Hledám surový sken...");
-            string rawObj = MRUKModelExporterV2.GenerateRawScanOBJ(globalAngle);
-            if (!string.IsNullOrEmpty(rawObj) && rawObj.Length > 500) {
+            // 4. RAW HIGH-FIDELITY SCAN (OVRTriangleMesh)
+            if (uiLog != null) uiLog.AddLog("Skenuji High-Fidelity mesh...");
+            string rawObj = await MRUKModelExporterV2.GenerateRawHighFidelityMesh(globalAngle);
+            if (!string.IsNullOrEmpty(rawObj) && rawObj.Length > 1000) {
                 File.WriteAllText(Path.Combine(session, "house_mesh_raw.obj"), rawObj);
-                if (uiLog != null) uiLog.AddLog($"Raw Mesh OK ({rawObj.Length / 1024} KB)");
-                byte[] rawGlb = MRUKModelExporterV2.GenerateRawScanGLB(globalAngle);
-                if (rawGlb != null) File.WriteAllBytes(Path.Combine(session, "house_mesh_raw.glb"), rawGlb);
+                if (uiLog != null) uiLog.AddLog($"<color=green>Raw Mesh OK ({rawObj.Length / 1024} KB)</color>");
             } else {
-                if (uiLog != null) uiLog.AddLog("<color=yellow>Raw sken nenalezen v paměti.</color>");
+                if (uiLog != null) uiLog.AddLog("<color=yellow>Raw mesh nebyl nalezen.</color>");
             }
-            
+
             File.WriteAllText(Path.Combine(session, "house_model.mtl"), MRUKModelExporterV2.GenerateMTL());
-            
             LastReportPath = Path.Combine(session, "house_report_v2.html");
 
             foreach(var r in rooms) {
                 string rName = MRUKDataProcessor.GetRoomLabel(r);
-                dLog.AppendLine($"Processing: {r.name} -> {rName}");
                 string rP = Path.Combine(session, MRUKDataProcessor.GetSafeName(rName) + "_-_" + r.name.Substring(Math.Max(0, r.name.Length-4)));
                 Directory.CreateDirectory(rP);
                 var s = new List<MRUKRoom>{r};
-                File.WriteAllText(Path.Combine(rP, "report_v2.html"), MRUKReportBuilderV2.GenerateFullReport(s, true, false, globalAngle));
-                File.WriteAllText(Path.Combine(rP, "analytical.obj"), MRUKModelExporterV2.GenerateOBJ(s, false, globalAngle));
-                File.WriteAllText(Path.Combine(rP, "mesh.obj"), MRUKModelExporterV2.GenerateOBJ(s, true, globalAngle, false));
-                
-                byte[] rGlb = MRUKModelExporterV2.GenerateGLB(s, true, globalAngle);
-                if (rGlb != null) File.WriteAllBytes(Path.Combine(rP, "mesh.glb"), rGlb);
+                File.WriteAllText(Path.Combine(rP, "mesh.obj"), MRUKModelExporterV2.GenerateOBJ(s, true, globalAngle));
             }
 
             dLog.AppendLine("Export successful.");
             File.WriteAllText(Path.Combine(session, "debug_log.txt"), dLog.ToString());
-
             if (uiLog != null) uiLog.AddLog("<color=green>Export hotov!</color>");
             return true;
         } catch (Exception ex) {
-            dLog.AppendLine("CRASH: " + ex.Message + "\n" + ex.StackTrace);
             if (uiLog != null) uiLog.AddLog("<color=red>CHYBA:</color> " + ex.Message);
             return false;
         }

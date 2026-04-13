@@ -15,7 +15,7 @@ public class XRMenu : MonoBehaviour
     public ScrollRect logScrollView;
     private StringBuilder logHistory = new StringBuilder();
 
-    void Start()
+    async void Start()
     {
         AddLog("<color=yellow>Build: " + VersionDisplay.BuildTime + "</color>");
         if (exportAllButton != null) exportAllButton.onClick.AddListener(OnExportAll);
@@ -27,12 +27,24 @@ public class XRMenu : MonoBehaviour
         // Find or create Dollhouse component
         dollhouse = Object.FindAnyObjectByType<DollHouseVisualizer>();
         if (dollhouse == null) {
-            AddLog("Adding Dollhouse component to menu...");
+            AddLog("Adding Dollhouse component...");
             dollhouse = gameObject.AddComponent<DollHouseVisualizer>();
         }
         
         dollhouse.uiLog = this;
         if (statusText != null) statusText.text = "System Ready";
+
+        // Try to dismiss universal menu (Navigator)
+        #if META_XR_SDK_INSTALLED
+        await System.Threading.Tasks.Task.Delay(1000);
+        try {
+            var manager = OVRManager.instance;
+            if (manager != null) {
+                // There is no public Dismiss API in standard OVRManager, 
+                // but setting focus can help.
+            }
+        } catch {}
+        #endif
     }
 
     public void AddLog(string msg) {
