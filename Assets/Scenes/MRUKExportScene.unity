@@ -234,6 +234,7 @@ MonoBehaviour:
   viewHouseButton: {fileID: 1806033282}
   openReportButton: {fileID: 0}
   exporter: {fileID: 543195115}
+  dollhouse: {fileID: 0}
   statusText: {fileID: 871360884}
   logText: {fileID: 756388877}
   logScrollView: {fileID: 984738959}
@@ -606,7 +607,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 641caa56214c851469c0df9725dad2b3, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Scripts::MRUKExporter
-  exportFolderName: RoomExports
+  uiLog: {fileID: 0}
 --- !u!4 &543195116
 Transform:
   m_ObjectHideFlags: 0

@@ -1,118 +1,309 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Threading.Tasks;
 using UnityEngine;
 #if META_XR_SDK_INSTALLED
 using Meta.XR.MRUtilityKit;
 #endif
 
-public class DollHouseVisualizer : MonoBehaviour {
-    public float scale = 0.01f; 
+public class DollHouseVisualizer : MonoBehaviour
+{
+    [Header("Dollhouse Settings")]
+    public float scale = 0.01f;
+    public float heightOffset = 0.2f;
+    public float distanceFromHand = 0.4f;
+
     public XRMenu uiLog;
+
     private GameObject root;
 
-    public bool Toggle() {
-        if (root != null) { 
-            Destroy(root); 
-            root = null; 
-            return false; 
+    public bool Toggle()
+    {
+        if (root != null)
+        {
+            Destroy(root);
+            root = null;
+            uiLog?.AddLog("Dollhouse skryt.");
+            return false;
         }
+
         Build();
         return true;
     }
 
-    private async void Build() {
-#if META_XR_SDK_INSTALLED
-        if (MRUK.Instance == null) return;
+    private async void Build()
+    {
+    #if META_XR_SDK_INSTALLED
+        if (MRUK.Instance == null)
+        {
+            uiLog?.AddLog("<color=red>MRUK.Instance je null</color>");
+            return;
+        }
+
         var rooms = MRUK.Instance.Rooms.ToList();
-        if (rooms.Count == 0) {
-            if (uiLog != null) uiLog.AddLog("Inicializace scény...");
-            await MRUK.Instance.LoadSceneFromDevice();
-            await System.Threading.Tasks.Task.Delay(1000);
+
+        if (rooms.Count == 0)
+        {
+            uiLog?.AddLog("Načítám scénu pro Dollhouse...");
+            try
+            {
+                // LoadSceneFromDevice returns a Task in some SDK versions, or void in others.
+                // Using Task.Delay to be safe.
+                var loadTask = MRUK.Instance.LoadSceneFromDevice();
+                await Task.Delay(1500);
+            }
+            catch
+            {
+                await Task.Delay(1500);
+            }
             rooms = MRUK.Instance.Rooms.ToList();
         }
 
+        if (rooms.Count == 0)
+        {
+            uiLog?.AddLog("<color=yellow>Žádné místnosti nenalezeny pro Dollhouse.</color>");
+            return;
+        }
+
         root = new GameObject("DollhouseRoot");
-        Transform hand = GameObject.Find("RightHandAnchor")?.transform ?? Camera.main.transform;
-        root.transform.SetParent(hand, false);
-        root.transform.localPosition = new Vector3(0, 0.2f, 0.4f);
-        root.transform.localRotation = Quaternion.Euler(0, 180, 0);
+        Transform handAnchor = GameObject.Find("RightHandAnchor")?.transform ?? Camera.main?.transform;
+
+        if (handAnchor != null)
+        {
+            root.transform.SetParent(handAnchor, false);
+            root.transform.localPosition = new Vector3(0, heightOffset, distanceFromHand);
+            root.transform.localRotation = Quaternion.Euler(0, 180, 0);
+        }
+
         root.transform.localScale = Vector3.one * scale;
 
-        Vector3 houseCenter = Vector3.zero; int structuralCount = 0;
-        float globalAngle = 0; float maxW = 0;
-        foreach(var r in rooms) {
-            foreach(var a in r.Anchors.Where(x => x.Label.ToString().Contains("WALL") && x.PlaneRect.HasValue)) {
-                houseCenter += a.transform.position; structuralCount++;
-                if (a.PlaneRect.Value.width > maxW) { 
-                    maxW = a.PlaneRect.Value.width; 
-                    // Snap the angle to nearest 90 degrees to keep it orthogonal
-                    float yRot = a.transform.eulerAngles.y;
-                    globalAngle = -Mathf.Round(yRot / 90f) * 90f;
-                }
+        // === NOVÉ A LEPŠÍ VÝPOČET ROTACE ===
+        Quaternion globalCorrection = Quaternion.identity;
+        Vector3 houseCenter = Vector3.zero;
+
+        // Najdeme podlahu první místnosti (nejspolehlivější reference)
+        MRUKAnchor referenceFloor = null;
+        foreach (var room in rooms)
+        {
+            var floorAnchor = room.Anchors.FirstOrDefault(a => a.Label == MRUKAnchor.SceneLabels.FLOOR);
+            if (floorAnchor != null)
+            {
+                referenceFloor = floorAnchor;
+                break;
             }
         }
-        if (structuralCount > 0) houseCenter /= structuralCount;
-        
-        // Final correction rotation
-        Quaternion globalCorrection = Quaternion.Euler(0, globalAngle, 0);
 
-        Shader unlit = Shader.Find("Universal Render Pipeline/Unlit") ?? Shader.Find("Unlit/Color");
-        Color wallCol = new Color(0.4f, 0.4f, 0.4f, 1f);
-        Color floorCol = new Color(0.7f, 0.7f, 0.7f, 1f);
-        Color doorCol = new Color(0.5f, 0.3f, 0.1f, 1f);
-        Color winCol = new Color(0.3f, 0.6f, 0.9f, 1f);
+        if (referenceFloor != null)
+        {
+            // Použijeme rotaci podlahy jako hlavní referenci
+            globalCorrection = Quaternion.Euler(0, -referenceFloor.transform.eulerAngles.y, 0);
+            houseCenter = referenceFloor.transform.position;
+            uiLog?.AddLog($"Dollhouse rotace podle podlahy: {referenceFloor.transform.eulerAngles.y:F1}°");
+        }
+        else
+        {
+            // Fallback na starou metodu (pokud není podlaha)
+            float maxW = 0f;
+            float bestAngle = 0f;
+            int count = 0;
+            foreach (var r in rooms)
+            {
+                foreach (var a in r.Anchors.Where(x => x.Label.ToString().ToUpperInvariant().Contains("WALL") && x.PlaneRect.HasValue))
+                {
+                    houseCenter += a.transform.position;
+                    count++;
+                    if (a.PlaneRect.Value.width > maxW)
+                    {
+                        maxW = a.PlaneRect.Value.width;
+                        bestAngle = a.transform.eulerAngles.y;
+                    }
+                }
+            }
+            if (count > 0) houseCenter /= count;
+            globalCorrection = Quaternion.Euler(0, -bestAngle, 0);
+        }
+
+        Shader unlitShader = Shader.Find("Universal Render Pipeline/Unlit") ?? Shader.Find("Unlit/Color");
+        Color wallColor  = new Color(0.42f, 0.42f, 0.45f, 1f);
+        Color floorColor = new Color(0.75f, 0.75f, 0.78f, 1f);
+        Color doorColor  = new Color(0.55f, 0.35f, 0.18f, 1f);
+        Color windowColor = new Color(0.25f, 0.60f, 0.92f, 1f);
 
         var allAnchors = rooms.SelectMany(r => r.Anchors).Where(a => a.PlaneRect.HasValue).ToList();
-        var openings = allAnchors.Where(a => { string l = a.Label.ToString().ToUpper(); return l.Contains("DOOR") || l.Contains("WINDOW") || l.Contains("OPENING"); }).ToList();
+        var openings = allAnchors.Where(a => 
+        {
+            string l = a.Label.ToString().ToUpperInvariant();
+            return l.Contains("DOOR") || l.Contains("WINDOW") || l.Contains("OPENING");
+        }).ToList();
 
-        int totalObjCount = 0;
-        foreach (var a in allAnchors) {
-            string lab = a.Label.ToString().ToUpper();
-            if (lab.Contains("CEILING") || lab.Contains("INVISIBLE")) continue;
-            bool isWall = lab.Contains("WALL"), isFloor = lab.Contains("FLOOR"), isOpening = lab.Contains("DOOR") || lab.Contains("WINDOW") || lab.Contains("OPENING");
-            if (!isWall && !isFloor && !isOpening) continue;
+        int totalObjects = 0;
 
-            if (isWall) {
-                float wW = a.PlaneRect.Value.width, wH = a.PlaneRect.Value.height;
-                var wallHoles = openings.Where(o => { Vector3 lp = a.transform.InverseTransformPoint(o.transform.position); return Mathf.Abs(lp.z) < 0.3f && Mathf.Abs(lp.x) < (wW/2f + 0.1f) && Mathf.Abs(lp.y) < (wH/2f + 0.1f); }).ToList();
-                if (wallHoles.Count > 0) {
-                    var xC = new List<float>{-wW/2f, wW/2f}; var yC = new List<float>{-wH/2f, wH/2f};
-                    foreach(var h in wallHoles) { Vector3 lp = a.transform.InverseTransformPoint(h.transform.position); float hw = h.PlaneRect.Value.width/2f, hh = h.PlaneRect.Value.height/2f; xC.Add(Mathf.Clamp(lp.x-hw, -wW/2f, wW/2f)); xC.Add(Mathf.Clamp(lp.x+hw, -wW/2f, wW/2f)); yC.Add(Mathf.Clamp(lp.y-hh, -wH/2f, wH/2f)); yC.Add(Mathf.Clamp(lp.y+hh, -wH/2f, wH/2f)); }
-                    var sX = xC.Distinct().OrderBy(x=>x).ToList(); var sY = yC.Distinct().OrderBy(y=>y).ToList();
-                    for (int i=0; i<sX.Count-1; i++) {
-                        for (int j=0; j<sY.Count-1; j++) {
-                            float x1=sX[i], x2=sX[i+1], y1=sY[j], y2=sY[j+1]; if (x2-x1 < 0.02f || y2-y1 < 0.02f) continue;
-                            Vector2 mid = new Vector2((x1+x2)/2f, (y1+y2)/2f); bool isH = false;
-                            foreach(var h in wallHoles) { Vector3 lp = a.transform.InverseTransformPoint(h.transform.position); float hw = h.PlaneRect.Value.width/2f, hh = h.PlaneRect.Value.height/2f; if (mid.x > lp.x-hw+0.01f && mid.x < lp.x+hw-0.01f && mid.y > lp.y-hh+0.01f && mid.y < lp.y+hh-0.01f) { isH=true; break; } }
-                            if (!isH) {
-                                totalObjCount++;
-                                CreateBox(root.transform, globalCorrection * (a.transform.TransformPoint(new Vector3(mid.x, mid.y, 0)) - houseCenter), globalCorrection * a.transform.rotation, new Vector3(x2-x1, y2-y1, 0.25f), wallCol, unlit);
-                            }
-                        }
-                    }
-                } else {
-                    totalObjCount++;
-                    CreateBox(root.transform, globalCorrection * (a.transform.position - houseCenter), globalCorrection * a.transform.rotation, new Vector3(wW, wH, 0.25f), wallCol, unlit);
+        foreach (var anchor in allAnchors)
+        {
+            if (anchor == null) continue;
+            try {
+                string labelUpper = anchor.Label.ToString().ToUpperInvariant();
+                if (labelUpper.Contains("CEILING") || labelUpper.Contains("INVISIBLE")) continue;
+
+                bool isWall = labelUpper.Contains("WALL");
+                bool isFloor = labelUpper.Contains("FLOOR");
+                bool isOpening = labelUpper.Contains("DOOR") || labelUpper.Contains("WINDOW") || labelUpper.Contains("OPENING");
+
+                if (!isWall && !isFloor && !isOpening) continue;
+
+                Quaternion localRot = globalCorrection * anchor.transform.rotation;
+
+                if (isWall)
+                {
+                    CreateWallWithHoles(root.transform, anchor, houseCenter, globalCorrection, localRot, wallColor, unlitShader, openings, ref totalObjects);
                 }
-            } else {
-                totalObjCount++;
-                float th = isFloor ? 0.1f : (lab.Contains("DOOR") ? 0.12f : 0.15f);
-                Color col = isFloor ? floorCol : (lab.Contains("DOOR") ? doorCol : winCol);
-                CreateBox(root.transform, globalCorrection * (a.transform.TransformPoint(isFloor ? new Vector3(0,0,-0.05f) : Vector3.zero) - houseCenter), globalCorrection * a.transform.rotation, new Vector3(a.PlaneRect.Value.width, a.PlaneRect.Value.height, th), col, unlit);
+                else if (isFloor || labelUpper.Contains("CEILING"))
+                {
+                    Color color = isFloor ? floorColor : new Color(0.8f, 0.8f, 0.8f, 1f);
+                    if (anchor.PlaneBoundary2D != null && anchor.PlaneBoundary2D.Count > 2)
+                    {
+                        CreatePolygon(root.transform, anchor, houseCenter, globalCorrection, color, unlitShader, isFloor ? -0.05f : 0.05f);
+                    }
+                    else
+                    {
+                        // Fallback to box
+                        float thickness = isFloor ? 0.1f : 0.15f;
+                        Vector3 offset = isFloor ? new Vector3(0, 0, -0.05f) : Vector3.zero;
+                        Vector3 pos = globalCorrection * (anchor.transform.TransformPoint(offset) - houseCenter);
+                        CreateBox(root.transform, pos, localRot, new Vector3(anchor.PlaneRect.Value.width, anchor.PlaneRect.Value.height, thickness), color, unlitShader);
+                    }
+                    totalObjects++;
+                }
+                else if (isOpening)
+                {
+                    Color color = labelUpper.Contains("DOOR") ? doorColor : windowColor;
+                    Vector3 pos = globalCorrection * (anchor.transform.position - houseCenter);
+                    CreateBox(root.transform, pos, localRot, new Vector3(anchor.PlaneRect.Value.width, anchor.PlaneRect.Value.height, 0.15f), color, unlitShader);
+                    totalObjects++;
+                }
+            } catch (Exception ex) {
+                Debug.LogWarning($"Dollhouse object creation failed for {anchor.name}: {ex.Message}");
             }
         }
-        if (uiLog != null) uiLog.AddLog($"Dollhouse spawned: {rooms.Count} rooms, {totalObjCount} objects.");
-#endif
+
+        uiLog?.AddLog($"Dollhouse vytvořen: {rooms.Count} místností, {totalObjects} objektů | Rotace: {globalCorrection.eulerAngles.y:F1}°");
+    #endif
     }
 
-    private void CreateBox(Transform parent, Vector3 localPos, Quaternion localRot, Vector3 size, Color col, Shader shader) {
-        GameObject b = GameObject.CreatePrimitive(PrimitiveType.Cube);
-        b.transform.SetParent(parent, false);
-        b.transform.localPosition = localPos;
-        b.transform.localRotation = localRot;
-        b.transform.localScale = size;
-        b.GetComponent<MeshRenderer>().material = new Material(shader) { color = col };
-        Destroy(b.GetComponent<BoxCollider>());
+    private void CreateWallWithHoles(Transform parent, MRUKAnchor wallAnchor, Vector3 houseCenter, Quaternion globalCorrection, Quaternion localRot,
+        Color color, Shader shader, List<MRUKAnchor> openings, ref int totalObjects)
+    {
+        float width = wallAnchor.PlaneRect.Value.width;
+        float height = wallAnchor.PlaneRect.Value.height;
+
+        var wallHoles = openings.Where(o =>
+        {
+            Vector3 lp = wallAnchor.transform.InverseTransformPoint(o.transform.position);
+            return Mathf.Abs(lp.z) < 0.3f && Mathf.Abs(lp.x) < (width / 2f + 0.15f) && Mathf.Abs(lp.y) < (height / 2f + 0.15f);
+        }).ToList();
+
+        if (wallHoles.Count > 0)
+        {
+            var xCuts = new List<float> { -width / 2f, width / 2f };
+            var yCuts = new List<float> { -height / 2f, height / 2f };
+
+            foreach (var hole in wallHoles)
+            {
+                Vector3 lp = wallAnchor.transform.InverseTransformPoint(hole.transform.position);
+                float hw = hole.PlaneRect.Value.width / 2f;
+                float hh = hole.PlaneRect.Value.height / 2f;
+                xCuts.Add(Mathf.Clamp(lp.x - hw, -width / 2f, width / 2f));
+                xCuts.Add(Mathf.Clamp(lp.x + hw, -width / 2f, width / 2f));
+                yCuts.Add(Mathf.Clamp(lp.y - hh, -height / 2f, height / 2f));
+                yCuts.Add(Mathf.Clamp(lp.y + hh, -height / 2f, height / 2f));
+            }
+
+            var sortedX = xCuts.Distinct().OrderBy(x => x).ToList();
+            var sortedY = yCuts.Distinct().OrderBy(y => y).ToList();
+
+            for (int i = 0; i < sortedX.Count - 1; i++)
+            {
+                for (int j = 0; j < sortedY.Count - 1; j++)
+                {
+                    float segmentW = sortedX[i + 1] - sortedX[i];
+                    float segmentH = sortedY[j + 1] - sortedY[j];
+                    if (segmentW < 0.03f || segmentH < 0.03f) continue;
+
+                    Vector2 mid = new Vector2((sortedX[i] + sortedX[i + 1]) / 2f, (sortedY[j] + sortedY[j + 1]) / 2f);
+                    bool isHole = wallHoles.Any(h =>
+                    {
+                        Vector3 lp = wallAnchor.transform.InverseTransformPoint(h.transform.position);
+                        float hw = h.PlaneRect.Value.width / 2f;
+                        float hh = h.PlaneRect.Value.height / 2f;
+                        return mid.x > lp.x - hw + 0.01f && mid.x < lp.x + hw - 0.01f && mid.y > lp.y - hh + 0.01f && mid.y < lp.y + hh - 0.01f;
+                    });
+
+                    if (!isHole)
+                    {
+                        Vector3 pieceWorld = wallAnchor.transform.TransformPoint(new Vector3(mid.x, mid.y, 0));
+                        Vector3 pieceLocal = globalCorrection * (pieceWorld - houseCenter);
+                        CreateBox(parent, pieceLocal, localRot, new Vector3(segmentW, segmentH, 0.25f), color, shader);
+                        totalObjects++;
+                    }
+                }
+            }
+        }
+        else
+        {
+            Vector3 pos = globalCorrection * (wallAnchor.transform.position - houseCenter);
+            CreateBox(parent, pos, localRot, new Vector3(width, height, 0.25f), color, shader);
+            totalObjects++;
+        }
     }
-}
+
+    private void CreateBox(Transform parent, Vector3 localPos, Quaternion localRot, Vector3 size, Color color, Shader shader)
+    {
+        GameObject box = GameObject.CreatePrimitive(PrimitiveType.Cube);
+        box.transform.SetParent(parent, false);
+        box.transform.localPosition = localPos;
+        box.transform.localRotation = localRot;
+        box.transform.localScale = size;
+        box.GetComponent<MeshRenderer>().material = new Material(shader) { color = color };
+        Destroy(box.GetComponent<BoxCollider>());
+    }
+
+    private void CreatePolygon(Transform parent, MRUKAnchor anchor, Vector3 houseCenter, Quaternion globalCorrection, Color color, Shader shader, float zOffset)
+    {
+        var boundary = anchor.PlaneBoundary2D;
+        int count = boundary.Count;
+
+        GameObject poly = new GameObject("Poly_" + anchor.Label);
+        poly.transform.SetParent(parent, false);
+
+        MeshFilter mf = poly.AddComponent<MeshFilter>();
+        MeshRenderer mr = poly.AddComponent<MeshRenderer>();
+        mr.material = new Material(shader) { color = color };
+
+        Mesh mesh = new Mesh();
+        Vector3[] verts = new Vector3[count];
+        int[] tris = new int[(count - 2) * 3];
+
+        for (int i = 0; i < count; i++)
+        {
+            Vector3 worldPos = anchor.transform.TransformPoint(new Vector3(boundary[i].x, boundary[i].y, 0));
+            // Apply zOffset in world space along anchor normal or just locally? 
+            // Locally is safer:
+            Vector3 localWithZ = new Vector3(boundary[i].x, boundary[i].y, zOffset);
+            Vector3 worldWithZ = anchor.transform.TransformPoint(localWithZ);
+            verts[i] = globalCorrection * (worldWithZ - houseCenter);
+        }
+
+        for (int i = 0; i < count - 2; i++)
+        {
+            tris[i * 3] = 0;
+            tris[i * 3 + 1] = i + 1;
+            tris[i * 3 + 2] = i + 2;
+        }
+
+        mesh.vertices = verts;
+        mesh.triangles = tris;
+        mesh.RecalculateNormals();
+        mf.mesh = mesh;
+    }
+    }

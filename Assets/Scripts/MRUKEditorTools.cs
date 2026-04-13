@@ -103,16 +103,21 @@ public static class MRUKEditorTools {
 
     public static string BuildInternal(BuildOptions o) {
         Debug.Log("<color=cyan>Spouštím Build APK...</color>");
+        
+        // Nastavení symbolů pro odstranění warningu o diagnostice (Unity 6 API)
         try {
-            var type = Type.GetType("UnityEditor.Android.UserBuildSettings+DebugSymbols, UnityEditor.Android.Extensions");
-            if (type != null) {
-                var prop = type.GetProperty("level", System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static);
-                if (prop != null) prop.SetValue(null, 1);
+            var assemblies = AppDomain.CurrentDomain.GetAssemblies();
+            var androidAssembly = assemblies.FirstOrDefault(a => a.GetName().Name == "UnityEditor.Android.Extensions");
+            if (androidAssembly != null) {
+                var userBuildSettingsType = androidAssembly.GetType("UnityEditor.Android.UserBuildSettings");
+                var debugSymbolsType = userBuildSettingsType?.GetNestedType("DebugSymbols");
+                var levelProp = debugSymbolsType?.GetProperty("level");
+                if (levelProp != null) levelProp.SetValue(null, 1); // 1 = Full
             }
         } catch {}
 
         File.WriteAllText("Assets/Scripts/VersionDisplay.cs", "using UnityEngine;\nusing TMPro;\npublic class VersionDisplay : MonoBehaviour {\n    public static string BuildTime = \"" + DateTime.Now.ToString("dd.MM. HH:mm") + "\";\n    public TextMeshProUGUI displayText;\n    void Start() { if (displayText != null) displayText.text = \"Verze: \" + BuildTime; }\n}");
-        AssetDatabase.Refresh();
+AssetDatabase.Refresh();
         string apk = "Builds/XRHouseExporter.apk"; Directory.CreateDirectory("Builds");
         var report = BuildPipeline.BuildPlayer(new[] { "Assets/Scenes/MRUKExportScene.unity" }, apk, BuildTarget.Android, o);
         if (report.summary.result == UnityEditor.Build.Reporting.BuildResult.Succeeded) {
