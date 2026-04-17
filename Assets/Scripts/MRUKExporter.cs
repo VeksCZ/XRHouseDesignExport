@@ -15,208 +15,114 @@ public class MRUKExporter : MonoBehaviour
     public XRMenu uiLog;
     private StringBuilder dLog = new StringBuilder();
     public static string LastReportPath = "";
+    public Vector3 LastHouseCenter { get; private set; } = Vector3.zero;
 
-    public async void OnExportButton()
-    {
-        await ExportAllRooms(uiLog);
-    }
+    public async void OnExportButton() { await ExportAllRooms(uiLog); }
 
     public async Task<bool> ExportAllRooms(XRMenu uiLog = null)
     {
-#if META_XR_SDK_INSTALLED
-        dLog.Clear();
-        dLog.AppendLine($"=== EXPORT START {DateTime.Now} ===");
-
-        string root = Application.isEditor 
-            ? "Exports/RoomData" 
-            : "/sdcard/Download/XRHouseExports";
-
-        if (uiLog != null) uiLog.AddLog("Žádám o oprávnění a načítám scénu...");
-
-        try
-        {
-            // Request permission (SDK 85 style usually has Request, IsPermissionGranted)
+    #if META_XR_SDK_INSTALLED
+        dLog.Clear(); dLog.AppendLine($"=== EXPORT START {DateTime.Now} ===");
+        string root = MRUKPathUtility.GetExportRoot();
+        if (uiLog != null) uiLog.AddLog("<color=cyan>[1/6] Permissions and Scene Loading...</color>");
+        try {
             OVRPermissionsRequester.Request(new[] { OVRPermissionsRequester.Permission.Scene });
-            bool hasPermission = OVRPermissionsRequester.IsPermissionGranted(OVRPermissionsRequester.Permission.Scene);
+            if (!OVRPermissionsRequester.IsPermissionGranted(OVRPermissionsRequester.Permission.Scene)) { uiLog?.AddLog("<color=red>No Scene permission!</color>"); return false; }
+            if (MRUK.Instance == null) { uiLog?.AddLog("<color=red>MRUK is null</color>"); return false; }
 
-            if (!hasPermission)
-            {
-                uiLog?.AddLog("<color=red>Chybí Scene permission!</color>");
-                return false;
-            }
-
-            if (MRUK.Instance == null)
-            {
-                uiLog?.AddLog("<color=red>MRUK.Instance je null</color>");
-                return false;
-            }
-
-            // Načtení scény
-            if (!Application.isEditor)
-            {
-                uiLog?.AddLog("Načítám scénu z headsetu...");
-                // Stick to the synchronous version as LoadSceneFromDeviceAsync seems missing in this SDK build
+            if (!Application.isEditor) {
+                uiLog?.AddLog("<color=cyan>[2/6] Syncing with headset...</color>");
                 await MRUK.Instance.LoadSceneFromDevice(true, true, MRUK.SceneModel.V2);
-                }
-
-            // Počkáme na načtení
+            }
             await Task.Delay(1500);
+            var rooms = MRUK.Instance.Rooms.Where(r => {
+                var floor = r.Anchors.FirstOrDefault(a => a.Label == MRUKAnchor.SceneLabels.FLOOR && a.PlaneRect.HasValue);
+                return floor != null && (floor.PlaneRect.Value.width * floor.PlaneRect.Value.height) > 1.0f;
+            }).ToList();
+            if (rooms.Count == 0) { uiLog?.AddLog("<color=red>No valid rooms.</color>"); return false; }
 
-            var rooms = MRUK.Instance.Rooms
-                .Where(r => {
-                    var floor = r.Anchors.FirstOrDefault(a => a.Label == MRUKAnchor.SceneLabels.FLOOR && a.PlaneRect.HasValue);
-                    if (floor == null) return false;
-                    float area = floor.PlaneRect.Value.width * floor.PlaneRect.Value.height;
-                    return area > 2.0f; // Ignorujeme místnosti menší než 2 m2 (skříně atd.)
-                })
-                .ToList();
+            if (uiLog != null) uiLog.AddLog("<color=cyan>[3/6] Aligning house data...</color>");
+            LastHouseCenter = CalculateHouseCenter(rooms);
+            float angle = CalculateGlobalAngle(rooms);
+            uiLog?.AddLog($"Aligned: {LastHouseCenter.ToString("F2")} @ {angle:F1}°");
 
-            if (uiLog != null) uiLog.AddLog($"Nalezeno {rooms.Count} relevantních místností.");
+            string session = MRUKPathUtility.CreateSessionFolder(root);
+            if (uiLog != null) uiLog.AddLog("<color=cyan>[4/6] Data generation...</color>");
+            File.WriteAllText(Path.Combine(session, MRUKPathUtility.DATA_DUMP), MRUKDataProcessor.GenerateSceneDump(rooms));
+            File.WriteAllText(Path.Combine(session, MRUKPathUtility.DATA_JSON), MRUKDataProcessor.GenerateJson(rooms));
+            File.WriteAllText(Path.Combine(session, MRUKPathUtility.DATA_REPORT), MRUKReportBuilder.GenerateFullReport(rooms, true, true, angle));
 
-            if (rooms.Count == 0)
-            {
-                uiLog?.AddLog("<color=red>Žádné místnosti nenalezeny. Spusť Space Setup v Questu.</color>");
-                return false;
+            if (uiLog != null) uiLog.AddLog("<color=cyan>[5/6] 3D Model Export (4 types)...</color>");
+            
+            // 1. Anchor Analytical (Clean walls)
+            string anchorObj = MRUKModelExporter.GenerateAnchorAnalytical(rooms, angle, LastHouseCenter);
+            if (!string.IsNullOrEmpty(anchorObj)) {
+                File.WriteAllText(Path.Combine(session, MRUKPathUtility.MODEL_CLEAN_OBJ), anchorObj);
+                byte[] glb = GLBExporter.ExportToGLB(anchorObj);
+                if (glb != null) File.WriteAllBytes(Path.Combine(session, MRUKPathUtility.MODEL_CLEAN_GLB), glb);
             }
 
-            // === NOVÉ A LEPŠÍ VÝPOČET ROTACE ===
-            float globalAngle = 0f;
-            MRUKAnchor referenceFloor = null;
+            // 2. Mesh Analytical (Furniture + Clean Mesh)
+            string meshAnalyticalObj = await MRUKModelExporter.GenerateCleanColoredAnalytical(angle, LastHouseCenter);
+            if (!string.IsNullOrEmpty(meshAnalyticalObj)) {
+                File.WriteAllText(Path.Combine(session, MRUKPathUtility.MODEL_MESH_ANALYTICAL_OBJ), meshAnalyticalObj);
+                byte[] glb = GLBExporter.ExportToGLB(meshAnalyticalObj);
+                if (glb != null) File.WriteAllBytes(Path.Combine(session, MRUKPathUtility.MODEL_MESH_ANALYTICAL_GLB), glb);
+            }
 
-            foreach (var room in rooms)
-            {
-                var floorAnchor = room.Anchors.FirstOrDefault(a => a.Label == MRUKAnchor.SceneLabels.FLOOR);
-                if (floorAnchor != null)
-                {
-                    referenceFloor = floorAnchor;
-                    break;
+            // 3. Polygonal Reconstruction
+            string reconstructionObj = MRUKModelExporter.GenerateOBJ(rooms, true, angle, LastHouseCenter);
+            if (!string.IsNullOrEmpty(reconstructionObj)) {
+                File.WriteAllText(Path.Combine(session, MRUKPathUtility.MODEL_MESH_OBJ), reconstructionObj);
+                byte[] glb = GLBExporter.ExportToGLB(reconstructionObj);
+                if (glb != null) File.WriteAllBytes(Path.Combine(session, MRUKPathUtility.MODEL_MESH_GLB), glb);
+            }
+
+            // 4. Raw Scan
+            string rawObj = await MRUKModelExporter.GenerateRawHighFidelityMesh(angle, LastHouseCenter);
+            if (!string.IsNullOrEmpty(rawObj)) File.WriteAllText(Path.Combine(session, MRUKPathUtility.MODEL_RAW_OBJ), rawObj);
+            
+            File.WriteAllText(Path.Combine(session, MRUKPathUtility.MODEL_MTL), MRUKModelExporter.GenerateMTL());
+
+            if (uiLog != null) uiLog.AddLog("<color=cyan>[6/6] Room breakdown...</color>");
+            foreach (var r in rooms) {
+                var obj = MRUKModelExporter.GenerateOBJ(new List<MRUKRoom>{r}, true, angle, LastHouseCenter);
+                if (!string.IsNullOrEmpty(obj)) {
+                    string rPath = Path.Combine(session, $"{MRUKDataProcessor.GetSafeName(MRUKDataProcessor.GetRoomLabel(r))}_-_{r.name}");
+                    Directory.CreateDirectory(rPath);
+                    File.WriteAllText(Path.Combine(rPath, "mesh.obj"), obj);
                 }
             }
-
-            if (referenceFloor != null)
-            {
-                // Použijeme rotaci podlahy jako hlavní referenci (invertujeme ji pro korekci)
-                globalAngle = -referenceFloor.transform.eulerAngles.y;
-                uiLog?.AddLog($"Export rotace podle podlahy: {referenceFloor.transform.eulerAngles.y:F1}°");
-            }
-            else
-            {
-                // Fallback na nejdelší zeď (zaokrouhleně), pokud není podlaha
-                float maxWidth = 0f;
-                foreach (var r in rooms)
-                {
-                    foreach (var a in r.Anchors.Where(x => x.Label.ToString().ToUpper().Contains("WALL") && x.PlaneRect.HasValue))
-                    {
-                        if (a.PlaneRect.Value.width > maxWidth)
-                        {
-                            maxWidth = a.PlaneRect.Value.width;
-                            globalAngle = -Mathf.Round(a.transform.eulerAngles.y / 90f) * 90f;
-                        }
-                    }
-                }
-            }
-
-            string ts = DateTime.Now.ToString("yyyyMMdd_HHmmss");
-            string session = Path.Combine(root, "Export_" + ts);
-            Directory.CreateDirectory(session);
-
-            // Dumpy a reporty
-            try {
-                File.WriteAllText(Path.Combine(session, "full_scene_dump.txt"), MRUKDataProcessor.GenerateSceneDump(rooms));
-            } catch (Exception ex) { uiLog?.AddLog("<color=yellow>Dump failed: " + ex.Message + "</color>"); }
-
-            try {
-                File.WriteAllText(Path.Combine(session, "house_data.json"), MRUKDataProcessor.GenerateJson(rooms));
-            } catch (Exception ex) { uiLog?.AddLog("<color=yellow>JSON failed: " + ex.Message + "</color>"); }
-
-            try {
-                File.WriteAllText(Path.Combine(session, "house_report_v2.html"), MRUKReportBuilder.GenerateFullReport(rooms, true, true, globalAngle));
-            } catch (Exception ex) { uiLog?.AddLog("<color=yellow>HTML Report failed: " + ex.Message + "</color>"); }
-
-            if (uiLog != null) uiLog.AddLog("Exportuji modely...");
-
-            // Analytical model (Barevný z raw meshe)
-            try {
-                string analyticalObj = await MRUKModelExporterV2.GenerateCleanColoredAnalytical(globalAngle);
-                if (!string.IsNullOrEmpty(analyticalObj)) {
-                    File.WriteAllText(Path.Combine(session, "house_analytical.obj"), analyticalObj);
-                    
-                    byte[] aGlb = MRUKModelExporterV2.GenerateGLB(rooms, false, globalAngle); 
-                    if (aGlb != null) File.WriteAllBytes(Path.Combine(session, "house_analytical.glb"), aGlb);
-                }
-            } catch (Exception ex) {
-                uiLog?.AddLog("<color=yellow>Analytical model failed: " + ex.Message + "</color>");
-            }
-
-            // Mesh model (Polygonal Reconstruction)
-            try {
-                string meshObj = MRUKModelExporterV2.GenerateOBJ(rooms, true, globalAngle);
-                if (!string.IsNullOrEmpty(meshObj)) {
-                    File.WriteAllText(Path.Combine(session, "house_mesh.obj"), meshObj);
-                    byte[] mGlb = MRUKModelExporterV2.GenerateGLB(rooms, true, globalAngle);
-                    if (mGlb != null) File.WriteAllBytes(Path.Combine(session, "house_mesh.glb"), mGlb);
-                }
-            } catch (Exception ex) {
-                uiLog?.AddLog("<color=yellow>Mesh model failed: " + ex.Message + "</color>");
-            }
-
-            // RAW High-Fidelity Mesh
-            try {
-                if (uiLog != null) uiLog.AddLog("Exportuji surový High-Fidelity mesh...");
-                string rawObj = await MRUKModelExporterV2.GenerateRawHighFidelityMesh(globalAngle);
-                
-                if (!string.IsNullOrEmpty(rawObj) && rawObj.Length > 1000) {
-                    File.WriteAllText(Path.Combine(session, "house_mesh_raw.obj"), rawObj);
-                    if (uiLog != null) uiLog.AddLog($"<color=green>Raw mesh exportován ({rawObj.Length / 1024} KB)</color>");
-                } else {
-                    if (uiLog != null) uiLog.AddLog("<color=yellow>Raw mesh nenalezen nebo je příliš malý.</color>");
-                }
-            } catch (Exception ex) {
-                uiLog?.AddLog("<color=yellow>Raw mesh failed: " + ex.Message + "</color>");
-            }
-
-            try {
-                File.WriteAllText(Path.Combine(session, "house_model.mtl"), MRUKModelExporterV2.GenerateMTL());
-            } catch (Exception ex) { uiLog?.AddLog("<color=yellow>MTL failed: " + ex.Message + "</color>"); }
-
-            // Per-room export
-            foreach (var r in rooms)
-            {
-                if (r == null) continue;
-                try {
-                    string rName = MRUKDataProcessor.GetRoomLabel(r);
-                    string safeName = MRUKDataProcessor.GetSafeName(rName);
-                    string roomPath = Path.Combine(session, $"{safeName}_-_{r.name}");
-                    Directory.CreateDirectory(roomPath);
-
-                    var singleRoom = new List<MRUKRoom> { r };
-                    string roomObj = MRUKModelExporterV2.GenerateOBJ(singleRoom, true, globalAngle);
-                    if (!string.IsNullOrEmpty(roomObj)) {
-                        File.WriteAllText(Path.Combine(roomPath, "mesh.obj"), roomObj);
-                    }
-                } catch (Exception ex) {
-                    Debug.LogWarning($"Room export failed for {r.name}: {ex.Message}");
-                }
-            }
-
-            LastReportPath = Path.Combine(session, "house_report_v2.html");
-            dLog.AppendLine("Export successful.");
-            File.WriteAllText(Path.Combine(session, "debug_log.txt"), dLog.ToString());
-
-            if (uiLog != null) uiLog.AddLog("<color=green>Export úspěšně dokončen!</color>");
+            LastReportPath = Path.Combine(session, MRUKPathUtility.DATA_REPORT);
+            uiLog?.AddLog("<color=green><b>EXPORT FINISHED!</b></color>");
             return true;
-        }
-        catch (Exception ex)
-        {
-            string errorMsg = $"CHYBA: {ex.Message}";
-            if (uiLog != null) uiLog.AddLog("<color=red>" + errorMsg + "</color>");
-            dLog.AppendLine("ERROR: " + ex);
-            Debug.LogError(ex);
-            return false;
-        }
-#else
-        await Task.Yield();
+        } catch (Exception ex) { uiLog?.AddLog("<color=red>ERROR: " + ex.Message + "</color>"); return false; }
+    #else
         return false;
-#endif
+    #endif
+    }
+
+    private Vector3 CalculateHouseCenter(List<MRUKRoom> rooms) {
+        if (rooms.Count == 0) return Vector3.zero;
+        Vector3 c = Vector3.zero; int n = 0;
+        foreach (var r in rooms) {
+            var f = r.Anchors.FirstOrDefault(a => a.Label == MRUKAnchor.SceneLabels.FLOOR);
+            if (f != null) { c += f.transform.position; n++; }
+        }
+        return n > 0 ? c / n : rooms[0].transform.position;
+    }
+
+    private float CalculateGlobalAngle(List<MRUKRoom> rooms) {
+        float angle = 0f;
+    #if META_XR_SDK_INSTALLED
+        var f = rooms.SelectMany(r => r.Anchors).FirstOrDefault(a => a.Label == MRUKAnchor.SceneLabels.FLOOR);
+        if (f != null) angle = -f.transform.eulerAngles.y;
+        else {
+            float maxW = 0f;
+            foreach (var r in rooms) foreach (var a in r.Anchors.Where(x => x.Label.ToString().Contains("WALL") && x.PlaneRect.HasValue))
+                if (a.PlaneRect.Value.width > maxW) { maxW = a.PlaneRect.Value.width; angle = -Mathf.Round(a.transform.eulerAngles.y / 90f) * 90f; }
+        }
+    #endif
+        return angle;
     }
 }

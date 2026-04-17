@@ -11,7 +11,7 @@
   "dependencies": {
     "com.meta.xr.mrutilitykit": "85.0.0",
     "com.meta.xr.sdk.interaction.ovr": "85.0.0",
-    "com.unity.ai.assistant": "2.5.0-pre.2",
+    "com.unity.ai.assistant": "2.6.0-pre.1",
     "com.unity.ai.inference": "2.6.1",
     "com.unity.inputsystem": "1.18.0",
     "com.unity.render-pipelines.universal": "17.3.0",

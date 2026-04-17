@@ -11,15 +11,12 @@ using Meta.XR;
 
 public static class MRUKDataProcessor
 {
-    /// <summary>
-    /// Vrátí nejlepší dostupný label místnosti (bez zbytečné reflexe)
-    /// </summary>
     public static string GetRoomLabel(MRUKRoom room)
     {
         if (room == null) return "Unknown";
 
     #if META_XR_SDK_INSTALLED
-        // 1. Nejlepší cesta: OVRSemanticLabels na Anchoru
+        // 1. Semantic Labels on Anchor
     #pragma warning disable 0618
         if (room.Anchor.TryGetComponent<OVRSemanticLabels>(out var semantic) && semantic.Labels != null)
         {
@@ -34,7 +31,7 @@ public static class MRUKDataProcessor
         }
     #pragma warning restore 0618
 
-        // 2. Fallback přes MRUKAnchor.Label
+        // 2. MRUKAnchor Label
         var mrukAnchor = room.GetComponent<MRUKAnchor>();
         if (mrukAnchor != null)
         {
@@ -45,13 +42,11 @@ public static class MRUKDataProcessor
             }
         }
 
-        // 3. Fallback: Prohledat nábytek uvnitř místnosti pro lepší název
-        var furnitureLabels = new[] { "KITCHEN", "BEDROOM", "BATHROOM", "LIVING_ROOM", "OFFICE", "DINING", "GARAGE" };
-        var anchors = room.Anchors.ToList(); // Safely iterate
+        // 3. Furniture-based heuristics
+        var anchors = room.Anchors.ToList();
         foreach (var a in anchors)
         {
             string l = a.Label.ToString().ToUpperInvariant();
-            // Pokud najdeme postel, je to bedroom, atd.
             if (l.Contains("BED")) return "BEDROOM";
             if (l.Contains("KITCHEN") || l.Contains("OVEN") || l.Contains("STOVE")) return "KITCHEN";
             if (l.Contains("SINK") || l.Contains("TOILET") || l.Contains("SHOWER")) return "BATHROOM";
@@ -59,14 +54,13 @@ public static class MRUKDataProcessor
         }
     #endif
 
-        // Absolutní fallback
-        return "Pokoj_" + (string.IsNullOrEmpty(room.name) ? "Unknown" : room.name);
+        return "Room_" + (string.IsNullOrEmpty(room.name) ? "Unknown" : room.name);
     }
 
     public static string GenerateSceneDump(List<MRUKRoom> rooms)
     {
         var sb = new StringBuilder();
-        sb.AppendLine("=== SUPER DUMP V28 - CLEAN SEMANTIC SCAN ===");
+        sb.AppendLine("=== SCENE DUMP - CLEAN SEMANTIC SCAN ===");
         sb.AppendLine($"Generated: {DateTime.Now:yyyy-MM-dd HH:mm:ss}");
         sb.AppendLine($"Total rooms: {rooms.Count}\n");
 
@@ -134,7 +128,6 @@ public static class MRUKDataProcessor
         if (string.IsNullOrEmpty(name)) 
             return "Room";
 
-        // Odstranění neplatných znaků pro souborový systém
         var invalid = Path.GetInvalidFileNameChars();
         return string.Join("_", name.Split(invalid))
                      .Replace(" ", "_")

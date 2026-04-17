@@ -10,181 +10,119 @@ using Meta.XR;
 public class DollHouseVisualizer : MonoBehaviour
 {
     [Header("Dollhouse Settings")]
-    public float scale = 0.012f;
-    public float heightOffset = 0.25f;
-    public float distanceFromHand = 0.45f;
-
+    public float scale = 0.05f;
+    public float spawnDistance = 1.0f;
+    public float rotationSpeed = 120f;
+    public float zoomSpeed = 0.5f;
     public XRMenu uiLog;
 
     private GameObject currentDollhouse;
     private DollhouseMode currentMode = DollhouseMode.Off;
+    private bool isGrabbed = false;
+    public bool IsDragging => isGrabbed;
+    private Vector3 grabOffset;
+    private Quaternion grabRotationOffset;
+    private float originalNearClip = 0.1f;
 
-    private enum DollhouseMode
-    {
-        Off,
-        Analytical,
-        RawMesh
-    }
+    private enum DollhouseMode { Off, AnchorAnalytical, MeshAnalytical, RawMesh }
 
-    public bool Toggle()
-    {
-        // Cyklus: Analytical → RawMesh → Off
-        currentMode = currentMode switch
-        {
-            DollhouseMode.Off => DollhouseMode.Analytical,
-            DollhouseMode.Analytical => DollhouseMode.RawMesh,
-            DollhouseMode.RawMesh => DollhouseMode.Off,
-            _ => DollhouseMode.Off
-        };
-
+    public bool Toggle() {
+        currentMode = (DollhouseMode)(((int)currentMode + 1) % 4);
         RefreshDollhouse();
         return currentMode != DollhouseMode.Off;
     }
 
-    private async void RefreshDollhouse()
-    {
-        // Nejdřív smažeme starý dollhouse
-        if (currentDollhouse != null)
-        {
-            Destroy(currentDollhouse);
-            currentDollhouse = null;
-        }
+    private async void RefreshDollhouse() {
+        if (currentDollhouse != null) { Destroy(currentDollhouse); currentDollhouse = null; }
+        if (originalNearClip > 0) Camera.main.nearClipPlane = originalNearClip;
 
-        if (currentMode == DollhouseMode.Off)
-        {
-            uiLog?.AddLog("Dollhouse vypnut.");
-            return;
-        }
+        if (currentMode == DollhouseMode.Off) { uiLog?.AddLog("Dollhouse OFF."); return; }
+        uiLog?.AddLog("Mode: " + currentMode);
+        
+        originalNearClip = Camera.main.nearClipPlane;
+        Camera.main.nearClipPlane = 0.01f;
 
-        uiLog?.AddLog($"Vytvářím Dollhouse: {currentMode}");
+        currentDollhouse = new GameObject("Dollhouse_" + currentMode);
+        Transform cam = Camera.main.transform;
+        currentDollhouse.transform.position = cam.position + cam.forward * spawnDistance;
+        currentDollhouse.transform.rotation = Quaternion.Euler(0, cam.eulerAngles.y + 180, 0);
+        currentDollhouse.transform.localScale = Vector3.one * scale;
 
-        currentDollhouse = new GameObject($"Dollhouse_{currentMode}");
-        Transform hand = GameObject.Find("RightHandAnchor")?.transform ?? Camera.main?.transform;
+        Vector3 center = FindAnyObjectByType<MRUKExporter>()?.LastHouseCenter ?? Vector3.zero;
+        if (currentMode == DollhouseMode.AnchorAnalytical) await BuildAnchorAnalytical(center);
+        else if (currentMode == DollhouseMode.MeshAnalytical) await BuildMeshAnalytical(center);
+        else if (currentMode == DollhouseMode.RawMesh) await BuildRawMesh(center);
 
-        if (hand != null)
-        {
-            currentDollhouse.transform.SetParent(hand, false);
-            currentDollhouse.transform.localPosition = new Vector3(0, heightOffset, distanceFromHand);
-            currentDollhouse.transform.localRotation = Quaternion.Euler(0, 180, 0);
-            currentDollhouse.transform.localScale = Vector3.one * scale;
-        }
-
-        if (currentMode == DollhouseMode.Analytical)
-            await BuildAnalyticalDollhouse();
-        else if (currentMode == DollhouseMode.RawMesh)
-            await BuildRawMeshDollhouse();
+        AddInteractionCollider();
+        UpdateRayVisuals();
     }
 
-    private async Task BuildAnalyticalDollhouse()
-    {
-        // Zde použijeme tvůj stávající clean analytical model (nebo boxový)
-        string objData = await MRUKModelExporterV2.GenerateCleanColoredAnalytical(0f); // globální rotace 0 pro dollhouse
-        if (string.IsNullOrEmpty(objData)) return;
-
-        // Jednoduchý OBJ loader do scény (inline verze)
-        var go = LoadOBJFromString(objData);
-        if (go != null)
-        {
-            go.transform.SetParent(currentDollhouse.transform, false);
-            uiLog?.AddLog("Analytical Dollhouse vytvořen.");
-        }
+    private async Task BuildAnchorAnalytical(Vector3 c) {
+        await Task.Yield();
+        string obj = MRUKModelExporter.GenerateAnchorAnalytical(MRUK.Instance.Rooms.ToList(), 0f, c);
+        if (!string.IsNullOrEmpty(obj)) Load(obj);
+    }
+private async Task BuildMeshAnalytical(Vector3 c) {
+        string obj = await MRUKModelExporter.GenerateCleanColoredAnalytical(0f, c);
+        if (!string.IsNullOrEmpty(obj)) Load(obj);
+    }
+    private async Task BuildRawMesh(Vector3 c) {
+        string obj = await MRUKModelExporter.GenerateRawHighFidelityMesh(0f, c);
+        if (!string.IsNullOrEmpty(obj)) Load(obj);
     }
 
-    private async Task BuildRawMeshDollhouse()
-    {
-        string rawObj = await MRUKModelExporterV2.GenerateRawHighFidelityMesh(0f);
-        if (string.IsNullOrEmpty(rawObj)) return;
+    private void Load(string data) {
+        var go = OBJLoader.LoadFromString(data);
+        if (go != null) go.transform.SetParent(currentDollhouse.transform, false);
+    }
 
-        var go = LoadOBJFromString(rawObj);
-        if (go != null)
-        {
-            go.transform.SetParent(currentDollhouse.transform, false);
-            uiLog?.AddLog("Raw Mesh Dollhouse vytvořen (high-fidelity).");
+    private void AddInteractionCollider() {
+        if (currentDollhouse == null) return;
+        Bounds b = new Bounds(currentDollhouse.transform.position, Vector3.zero);
+        var renders = currentDollhouse.GetComponentsInChildren<Renderer>();
+        foreach (var r in renders) b.Encapsulate(r.bounds);
+        if (renders.Length > 0) {
+            var col = currentDollhouse.AddComponent<BoxCollider>();
+            col.center = currentDollhouse.transform.InverseTransformPoint(b.center);
+            col.size = b.size / currentDollhouse.transform.lossyScale.x;
         }
     }
 
-    private GameObject LoadOBJFromString(string objData)
-    {
-        if (string.IsNullOrEmpty(objData)) return null;
+    private void UpdateRayVisuals() {
+        var line = FindObjectsByType<LineRenderer>(FindObjectsSortMode.None).FirstOrDefault(l => l.name.Contains("Ray"));
+        if (line != null) { line.startWidth = 0.004f; line.endWidth = 0.001f; }
+    }
 
-        var vertices = new List<Vector3>();
-        var submeshes = new Dictionary<string, List<int>>();
-        string currentMaterial = "Default";
-        submeshes[currentMaterial] = new List<int>();
+    void Update() {
+        if (currentDollhouse == null || currentMode == DollhouseMode.Off) return;
+        Transform hand = GameObject.Find("RightHandAnchor")?.transform;
+        if (hand == null) return;
 
-        using (var reader = new System.IO.StringReader(objData))
-        {
-            string line;
-            while ((line = reader.ReadLine()) != null)
-            {
-                line = line.Trim();
-                if (line.StartsWith("v "))
-                {
-                    var p = line.Split(new[] { ' ' }, System.StringSplitOptions.RemoveEmptyEntries);
-                    if (p.Length >= 4 && 
-                        float.TryParse(p[1], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out float x) &&
-                        float.TryParse(p[2], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out float y) &&
-                        float.TryParse(p[3], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out float z))
-                    {
-                        vertices.Add(new Vector3(x, y, z));
-                    }
-                }
-                else if (line.StartsWith("usemtl "))
-                {
-                    currentMaterial = line.Substring(7).Trim();
-                    if (!submeshes.ContainsKey(currentMaterial)) submeshes[currentMaterial] = new List<int>();
-                }
-                else if (line.StartsWith("f "))
-                {
-                    var p = line.Split(new[] { ' ' }, System.StringSplitOptions.RemoveEmptyEntries);
-                    if (p.Length >= 4)
-                    {
-                        try {
-                            submeshes[currentMaterial].Add(int.Parse(p[1].Split('/')[0]) - 1);
-                            submeshes[currentMaterial].Add(int.Parse(p[2].Split('/')[0]) - 1);
-                            submeshes[currentMaterial].Add(int.Parse(p[3].Split('/')[0]) - 1);
-                        } catch {}
-                    }
+        bool grip = OVRInput.Get(OVRInput.Button.PrimaryHandTrigger, OVRInput.Controller.RTouch);
+        Vector2 stick = OVRInput.Get(OVRInput.Axis2D.PrimaryThumbstick, OVRInput.Controller.RTouch);
+
+        if (!isGrabbed) {
+            if (grip && Physics.Raycast(hand.position, hand.forward, out RaycastHit hit)) {
+                if (hit.collider.gameObject == currentDollhouse) {
+                    isGrabbed = true;
+                    grabOffset = hand.InverseTransformPoint(currentDollhouse.transform.position);
+                    grabRotationOffset = Quaternion.Inverse(hand.rotation) * currentDollhouse.transform.rotation;
+                    uiLog?.AddLog("Grabbed.");
                 }
             }
+        } else {
+            if (!grip) { isGrabbed = false; uiLog?.AddLog("Released."); return; }
+            currentDollhouse.transform.position = hand.TransformPoint(grabOffset);
+            currentDollhouse.transform.rotation = hand.rotation * grabRotationOffset;
+
+            if (Mathf.Abs(stick.x) > 0.1f) {
+                currentDollhouse.transform.Rotate(Vector3.up, -stick.x * rotationSpeed * Time.deltaTime, Space.World);
+                grabRotationOffset = Quaternion.Inverse(hand.rotation) * currentDollhouse.transform.rotation;
+            }
+            if (Mathf.Abs(stick.y) > 0.1f) {
+                scale = Mathf.Clamp(scale + stick.y * zoomSpeed * Time.deltaTime, 0.005f, 1.0f);
+                currentDollhouse.transform.localScale = Vector3.one * scale;
+            }
         }
-
-        if (vertices.Count == 0) return null;
-
-        var go = new GameObject("OBJModel");
-        var mf = go.AddComponent<MeshFilter>();
-        var mr = go.AddComponent<MeshRenderer>();
-        var mesh = new Mesh { vertices = vertices.ToArray() };
-        
-        var matNames = submeshes.Keys.ToList();
-        mesh.subMeshCount = matNames.Count;
-        var materials = new Material[matNames.Count];
-
-        for (int i = 0; i < matNames.Count; i++)
-        {
-            mesh.SetTriangles(submeshes[matNames[i]], i);
-            materials[i] = GetOBJMaterial(matNames[i]);
-        }
-
-        mesh.RecalculateNormals();
-        mesh.RecalculateBounds();
-        mf.mesh = mesh;
-        mr.materials = materials;
-        return go;
-    }
-
-    private Material GetOBJMaterial(string name)
-    {
-        var shader = Shader.Find("Universal Render Pipeline/Unlit") ?? Shader.Find("Unlit/Color");
-        var mat = new Material(shader);
-        switch (name.ToLower())
-        {
-            case "wall": mat.color = new Color(0.42f, 0.42f, 0.45f, 1f); break;
-            case "floor": mat.color = new Color(0.75f, 0.75f, 0.78f, 1f); break;
-            case "door": mat.color = new Color(0.55f, 0.35f, 0.18f, 1f); break;
-            case "window": mat.color = new Color(0.25f, 0.60f, 0.92f, 1f); break;
-            default: mat.color = Color.white; break;
-        }
-        return mat;
     }
 }
