@@ -1,6 +1,7 @@
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
+using System;
 using UnityEngine;
 #if META_XR_SDK_INSTALLED
 using Meta.XR.MRUtilityKit;
@@ -9,120 +10,116 @@ using Meta.XR;
 
 public class DollHouseVisualizer : MonoBehaviour
 {
-    [Header("Dollhouse Settings")]
-    public float scale = 0.05f;
-    public float spawnDistance = 1.0f;
-    public float rotationSpeed = 120f;
-    public float zoomSpeed = 0.5f;
+    public float scale = 0.05f, spawnDistance = 1.0f;
     public XRMenu uiLog;
-
-    private GameObject currentDollhouse;
-    private DollhouseMode currentMode = DollhouseMode.Off;
-    private bool isGrabbed = false;
-    public bool IsDragging => isGrabbed;
-    private Vector3 grabOffset;
-    private Quaternion grabRotationOffset;
-    private float originalNearClip = 0.1f;
-
+    private GameObject root;
+    private DollhouseMode mode = DollhouseMode.Off;
+    private bool grabbed = false;
+    private Vector3 off;
+    private Quaternion rotOff;
     private enum DollhouseMode { Off, AnchorAnalytical, MeshAnalytical, RawMesh }
 
-    public bool Toggle() {
-        currentMode = (DollhouseMode)(((int)currentMode + 1) % 4);
-        RefreshDollhouse();
-        return currentMode != DollhouseMode.Off;
-    }
+    public bool Toggle() { mode = (DollhouseMode)(((int)mode+1)%4); Refresh(); return mode != DollhouseMode.Off; }
+    public bool IsDragging => grabbed;
 
-    private async void RefreshDollhouse() {
-        if (currentDollhouse != null) { Destroy(currentDollhouse); currentDollhouse = null; }
-        if (originalNearClip > 0) Camera.main.nearClipPlane = originalNearClip;
-
-        if (currentMode == DollhouseMode.Off) { uiLog?.AddLog("Dollhouse OFF."); return; }
-        uiLog?.AddLog("Mode: " + currentMode);
+    private async void Refresh() {
+        Cleanup();
+        if (mode == DollhouseMode.Off) return;
         
-        originalNearClip = Camera.main.nearClipPlane;
-        Camera.main.nearClipPlane = 0.01f;
+        uiLog?.AddLog($"Dollhouse Refresh: {mode}");
+        Camera.main.nearClipPlane = 0.001f;
+        root = new GameObject("DollhouseRoot");
+        var cam = Camera.main.transform;
+        root.transform.position = cam.position + cam.forward * spawnDistance;
+        root.transform.rotation = Quaternion.Euler(0, cam.eulerAngles.y + 180, 0);
+        root.transform.localScale = Vector3.one * scale;
 
-        currentDollhouse = new GameObject("Dollhouse_" + currentMode);
-        Transform cam = Camera.main.transform;
-        currentDollhouse.transform.position = cam.position + cam.forward * spawnDistance;
-        currentDollhouse.transform.rotation = Quaternion.Euler(0, cam.eulerAngles.y + 180, 0);
-        currentDollhouse.transform.localScale = Vector3.one * scale;
+        // Force center calculation
+        Vector3 c = CalculateCenter();
+        XRHouseModel m = null;
+        
+        // Use same filtering as exporter
+        var rooms = MRUK.Instance.Rooms.Where(r => {
+            var floor = r.Anchors.FirstOrDefault(a => a.Label == MRUKAnchor.SceneLabels.FLOOR);
+            if (floor == null || !floor.PlaneRect.HasValue) return false;
+            return (floor.PlaneRect.Value.width * floor.PlaneRect.Value.height) > 1.8f;
+        }).ToList();
 
-        Vector3 center = FindAnyObjectByType<MRUKExporter>()?.LastHouseCenter ?? Vector3.zero;
-        if (currentMode == DollhouseMode.AnchorAnalytical) await BuildAnchorAnalytical(center);
-        else if (currentMode == DollhouseMode.MeshAnalytical) await BuildMeshAnalytical(center);
-        else if (currentMode == DollhouseMode.RawMesh) await BuildRawMesh(center);
+        if (rooms.Count == 0) {
+            uiLog?.AddLog("<color=red>Dollhouse: No valid rooms found (>1.8m2)</color>");
+            Cleanup();
+            return;
+        }
 
-        AddInteractionCollider();
-        UpdateRayVisuals();
-    }
+        uiLog?.AddLog($"Dollhouse: Processing {rooms.Count} rooms...");
+        
+        try {
+            if (mode == DollhouseMode.AnchorAnalytical) m = XRModelFactory.CreateAnchorAnalytical(rooms, 0, c);
+            else if (mode == DollhouseMode.MeshAnalytical) m = await XRModelFactory.CreateMeshAnalytical(rooms, 0, c);
+            else if (mode == DollhouseMode.RawMesh) m = await XRModelFactory.CreateRawScan(rooms, 0, c);
 
-    private async Task BuildAnchorAnalytical(Vector3 c) {
-        await Task.Yield();
-        string obj = MRUKModelExporter.GenerateAnchorAnalytical(MRUK.Instance.Rooms.ToList(), 0f, c);
-        if (!string.IsNullOrEmpty(obj)) Load(obj);
-    }
-private async Task BuildMeshAnalytical(Vector3 c) {
-        string obj = await MRUKModelExporter.GenerateCleanColoredAnalytical(0f, c);
-        if (!string.IsNullOrEmpty(obj)) Load(obj);
-    }
-    private async Task BuildRawMesh(Vector3 c) {
-        string obj = await MRUKModelExporter.GenerateRawHighFidelityMesh(0f, c);
-        if (!string.IsNullOrEmpty(obj)) Load(obj);
-    }
-
-    private void Load(string data) {
-        var go = OBJLoader.LoadFromString(data);
-        if (go != null) go.transform.SetParent(currentDollhouse.transform, false);
-    }
-
-    private void AddInteractionCollider() {
-        if (currentDollhouse == null) return;
-        Bounds b = new Bounds(currentDollhouse.transform.position, Vector3.zero);
-        var renders = currentDollhouse.GetComponentsInChildren<Renderer>();
-        foreach (var r in renders) b.Encapsulate(r.bounds);
-        if (renders.Length > 0) {
-            var col = currentDollhouse.AddComponent<BoxCollider>();
-            col.center = currentDollhouse.transform.InverseTransformPoint(b.center);
-            col.size = b.size / currentDollhouse.transform.lossyScale.x;
+            if (m != null) {
+                var visual = UnityModelLoader.LoadToScene(m);
+                if (visual != null) { 
+                    visual.transform.SetParent(root.transform, false); 
+                    AddCol(visual); 
+                    uiLog?.AddLog("<color=green>Dollhouse: Model Loaded</color>");
+                }
+            }
+        } catch (Exception ex) {
+            uiLog?.AddLog($"<color=red>Dollhouse Error: {ex.Message}</color>");
+            Debug.LogException(ex);
         }
     }
 
-    private void UpdateRayVisuals() {
-        var line = FindObjectsByType<LineRenderer>(FindObjectsSortMode.None).FirstOrDefault(l => l.name.Contains("Ray"));
-        if (line != null) { line.startWidth = 0.004f; line.endWidth = 0.001f; }
+    private Vector3 CalculateCenter() {
+        Vector3 c = Vector3.zero; int n = 0;
+        foreach (var r in MRUK.Instance.Rooms) {
+            var f = r.Anchors.FirstOrDefault(a => a.Label == MRUKAnchor.SceneLabels.FLOOR);
+            if (f != null) { c += f.transform.position; n++; }
+        }
+        return n > 0 ? c / n : (MRUK.Instance.Rooms.Count > 0 ? MRUK.Instance.Rooms[0].transform.position : Vector3.zero);
+    }
+
+    private void Cleanup() {
+        if (root) {
+            foreach(var mf in root.GetComponentsInChildren<MeshFilter>()) if(mf.sharedMesh) Destroy(mf.sharedMesh);
+            foreach(var mr in root.GetComponentsInChildren<MeshRenderer>()) if(mr.sharedMaterial) Destroy(mr.sharedMaterial);
+            Destroy(root);
+        }
+        Camera.main.nearClipPlane = 0.1f;
+    }
+
+    private void AddCol(GameObject go) {
+        Bounds b = new Bounds(go.transform.position, Vector3.zero);
+        var rs = go.GetComponentsInChildren<Renderer>();
+        foreach (var r in rs) b.Encapsulate(r.bounds);
+        if (rs.Length > 0) {
+            var col = root.AddComponent<BoxCollider>();
+            col.center = root.transform.InverseTransformPoint(b.center);
+            col.size = b.size / root.transform.lossyScale.x;
+        }
     }
 
     void Update() {
-        if (currentDollhouse == null || currentMode == DollhouseMode.Off) return;
-        Transform hand = GameObject.Find("RightHandAnchor")?.transform;
-        if (hand == null) return;
-
+        if (!root || mode == DollhouseMode.Off) return;
+        var hand = GameObject.Find("RightHandAnchor")?.transform; if (!hand) return;
         bool grip = OVRInput.Get(OVRInput.Button.PrimaryHandTrigger, OVRInput.Controller.RTouch);
-        Vector2 stick = OVRInput.Get(OVRInput.Axis2D.PrimaryThumbstick, OVRInput.Controller.RTouch);
-
-        if (!isGrabbed) {
-            if (grip && Physics.Raycast(hand.position, hand.forward, out RaycastHit hit)) {
-                if (hit.collider.gameObject == currentDollhouse) {
-                    isGrabbed = true;
-                    grabOffset = hand.InverseTransformPoint(currentDollhouse.transform.position);
-                    grabRotationOffset = Quaternion.Inverse(hand.rotation) * currentDollhouse.transform.rotation;
-                    uiLog?.AddLog("Grabbed.");
-                }
+        Vector2 s = OVRInput.Get(OVRInput.Axis2D.PrimaryThumbstick, OVRInput.Controller.RTouch);
+        if (!grabbed) {
+            if (grip && Physics.Raycast(hand.position, hand.forward, out RaycastHit hit) && hit.collider.gameObject == root) {
+                grabbed = true;
+                OVRInput.SetControllerVibration(0.1f, 0.1f, OVRInput.Controller.RTouch); Invoke("StopVib", 0.05f);
+                off = hand.InverseTransformPoint(root.transform.position);
+                rotOff = Quaternion.Inverse(hand.rotation) * root.transform.rotation;
             }
         } else {
-            if (!grip) { isGrabbed = false; uiLog?.AddLog("Released."); return; }
-            currentDollhouse.transform.position = hand.TransformPoint(grabOffset);
-            currentDollhouse.transform.rotation = hand.rotation * grabRotationOffset;
-
-            if (Mathf.Abs(stick.x) > 0.1f) {
-                currentDollhouse.transform.Rotate(Vector3.up, -stick.x * rotationSpeed * Time.deltaTime, Space.World);
-                grabRotationOffset = Quaternion.Inverse(hand.rotation) * currentDollhouse.transform.rotation;
-            }
-            if (Mathf.Abs(stick.y) > 0.1f) {
-                scale = Mathf.Clamp(scale + stick.y * zoomSpeed * Time.deltaTime, 0.005f, 1.0f);
-                currentDollhouse.transform.localScale = Vector3.one * scale;
-            }
+            if (!grip) { grabbed = false; return; }
+            root.transform.position = hand.TransformPoint(off);
+            root.transform.rotation = hand.rotation * rotOff;
+            if (Mathf.Abs(s.x) > 0.1f) { root.transform.Rotate(Vector3.up, -s.x * 120f * Time.deltaTime, Space.World); rotOff = Quaternion.Inverse(hand.rotation) * root.transform.rotation; }
+            if (Mathf.Abs(s.y) > 0.1f) { scale = Mathf.Clamp(scale + s.y * 0.5f * Time.deltaTime, 0.005f, 1.0f); root.transform.localScale = Vector3.one * scale; }
         }
     }
+    private void StopVib() => OVRInput.SetControllerVibration(0, 0, OVRInput.Controller.RTouch);
 }

@@ -16,27 +16,46 @@ public static class MRUKDataProcessor
         if (room == null) return "Unknown";
 
     #if META_XR_SDK_INSTALLED
-        // 1. Semantic Labels on Anchor
-    #pragma warning disable 0618
-        if (room.Anchor.TryGetComponent<OVRSemanticLabels>(out var semantic) && semantic.Labels != null)
+        // 1. Try to find an anchor that represents the room itself
+        var roomAnchor = room.Anchors.FirstOrDefault(a => a.Label.ToString().ToUpper() == "ROOM");
+        if (roomAnchor != null && roomAnchor.Anchor.TryGetComponent<OVRSemanticLabels>(out var roomSemantic))
         {
-            foreach (var label in semantic.Labels)
+        #pragma warning disable 0618
+            if (!string.IsNullOrEmpty(roomSemantic.Labels))
             {
-                string l = label.ToString().ToUpperInvariant();
-                if (l != "ROOM" && l != "OTHER" && l != "SPACE" && l != "STORAGE")
+                foreach (var label in roomSemantic.Labels.Split(','))
                 {
-                    return l.Replace(" ", "_");
+                    string l = label.Trim().ToUpperInvariant();
+                    if (l != "ROOM" && l != "OTHER") return l.Replace(" ", "_");
                 }
             }
+        #pragma warning restore 0618
         }
+
+        // 2. Fallback to existing semantic labels on any anchor
+        if (room.Anchor.TryGetComponent<OVRSemanticLabels>(out var semantic))
+        {
+    #pragma warning disable 0618
+            if (!string.IsNullOrEmpty(semantic.Labels))
+            {
+                foreach (var label in semantic.Labels.Split(','))
+                {
+                    string l = label.Trim().ToUpperInvariant();
+                    if (l != "ROOM" && l != "OTHER" && l != "SPACE" && l != "STORAGE" && l != "INNER_WALL_FACE" && l != "CEILING" && l != "FLOOR")
+                    {
+                        return l.Replace(" ", "_");
+                    }
+                }
+            }
     #pragma warning restore 0618
+        }
 
         // 2. MRUKAnchor Label
-        var mrukAnchor = room.GetComponent<MRUKAnchor>();
+var mrukAnchor = room.GetComponent<MRUKAnchor>();
         if (mrukAnchor != null)
         {
             string label = mrukAnchor.Label.ToString().ToUpperInvariant();
-            if (label != "NONE" && label != "OTHER" && label != "ROOM" && label != "STORAGE")
+            if (label != "NONE" && label != "OTHER" && label != "ROOM" && label != "STORAGE" && label != "INNER_WALL_FACE" && label != "CEILING" && label != "FLOOR")
             {
                 return label;
             }
@@ -54,7 +73,11 @@ public static class MRUKDataProcessor
         }
     #endif
 
-        return "Room_" + (string.IsNullOrEmpty(room.name) ? "Unknown" : room.name);
+        string cleanName = room.name;
+        if (cleanName.StartsWith("Room - ")) cleanName = cleanName.Replace("Room - ", "");
+        else if (cleanName.StartsWith("Room_")) cleanName = cleanName.Replace("Room_", "");
+        
+        return "Room_" + (string.IsNullOrEmpty(cleanName) ? "Unknown" : cleanName);
     }
 
     public static string GenerateSceneDump(List<MRUKRoom> rooms)
@@ -98,14 +121,26 @@ public static class MRUKDataProcessor
     {
         var data = new UltraHouseData
         {
-            exportDate = DateTime.Now.ToString("O"),
-            rooms = rooms.Select(r => new UltraRoom
+            exportDate = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"),
+            rooms = new List<UltraRoom>()
+        };
+
+        foreach (var r in rooms)
+        {
+            var ur = new UltraRoom
             {
                 name = GetRoomLabel(r),
-                guid = r.name,
+                guid = r.Anchor.Uuid.ToString(),
                 pos = new Vector3Data(r.transform.position),
                 rot = new Vector4Data(r.transform.rotation),
-                anchors = r.Anchors.Where(a => a != null).Select(a => new UltraAnchor
+                anchors = new List<UltraAnchor>()
+            };
+
+            foreach (var a in r.Anchors)
+            {
+                if (a == null) continue;
+
+                var ua = new UltraAnchor
                 {
                     label = a.Label.ToString(),
                     pos = new Vector3Data(a.transform.position),
@@ -115,10 +150,33 @@ public static class MRUKDataProcessor
                         : null,
                     volume = a.VolumeBounds.HasValue 
                         ? new Vector3Data(a.VolumeBounds.Value.size) 
-                        : null
-                }).ToList()
-            }).ToList()
-        };
+                        : null,
+                    points = a.PlaneBoundary2D != null 
+                        ? a.PlaneBoundary2D.Select(p => new Vector2Data(p)).ToList()
+                        : new List<Vector2Data>()
+                };
+
+                // Semantic labels handling
+                List<string> labelList = new List<string>();
+    #if META_XR_SDK_INSTALLED
+                if (a.Anchor.TryGetComponent<OVRSemanticLabels>(out var s))
+                {
+    #pragma warning disable 0618
+                    if (!string.IsNullOrEmpty(s.Labels))
+                    {
+                        foreach (var l in s.Labels.Split(new[] { ',' }, StringSplitOptions.RemoveEmptyEntries))
+                        {
+                            labelList.Add(l.Trim());
+                        }
+                    }
+    #pragma warning restore 0618
+                }
+    #endif
+                ua.allLabels = labelList;
+                ur.anchors.Add(ua);
+            }
+            data.rooms.Add(ur);
+        }
 
         return JsonUtility.ToJson(data, true);
     }

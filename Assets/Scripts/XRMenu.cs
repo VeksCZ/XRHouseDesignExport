@@ -9,28 +9,34 @@ using System.IO;
 public class XRMenu : MonoBehaviour
 {
     public Button exportAllButton, viewHouseButton, openReportButton;
+    public Slider progressBar;
     public MRUKExporter exporter;
-    public DollHouseVisualizer dollhouse;
+public DollHouseVisualizer dollhouse;
     public Text statusText, logText;
     public ScrollRect logScrollView;
     private StringBuilder logHistory = new StringBuilder();
 
     async void Start() {
-        AddLog("<color=yellow>Build: " + VersionDisplay.BuildTime + "</color>");
+        string version = "Unknown";
+        try { version = VersionDisplay.BuildTime; } catch {}
+        AddLog("<color=yellow>Build: " + version + "</color>");
+        if (statusText != null) statusText.text = "Ready (" + version + ")";
+        
         exportAllButton?.onClick.AddListener(OnExportAll);
         viewHouseButton?.onClick.AddListener(OnToggleHouseView);
         openReportButton?.onClick.AddListener(OpenReportInApp);
         exporter ??= FindAnyObjectByType<MRUKExporter>();
         dollhouse ??= FindAnyObjectByType<DollHouseVisualizer>() ?? gameObject.AddComponent<DollHouseVisualizer>();
         dollhouse.uiLog = this;
-        if (statusText != null) statusText.text = "Ready";
         await Task.Delay(500); AddLog("XR Ready.");
         FixLayout();
     }
 
     private void FixLayout() {
         var layout = GetComponentInChildren<VerticalLayoutGroup>();
-        if (layout != null && openReportButton != null) openReportButton.transform.SetSiblingIndex(2);
+        if (layout != null && openReportButton != null) {
+            openReportButton.transform.SetAsFirstSibling(); // Moved to the very TOP
+        }
     }
 
     public void AddLog(string msg) {

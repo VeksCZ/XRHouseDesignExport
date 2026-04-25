@@ -31,16 +31,20 @@ public static class MRUKEditorTools {
     public static void InstallOnly() { 
         string apk = "Builds/XRHouseExporter.apk";
         if (File.Exists(apk)) {
+            var info = new FileInfo(apk);
+            Debug.Log($"<color=cyan>Installing APK built on: {info.LastWriteTime:dd.MM. HH:mm:ss} (Size: {info.Length/1024/1024:F1} MB)</color>");
             InstallAPK(apk);
         } else {
-            Debug.LogError("APK file not found at Builds/XRHouseExporter.apk");
+            string msg = "APK file not found at Builds/XRHouseExporter.apk. Please run Build first.";
+            Debug.LogError(msg);
+            EditorUtility.DisplayDialog("Error", msg, "OK");
         }
     }
 
     [MenuItem("MRUK/4. Uninstall App", false, 13)]
     public static void UninstallAPK() { 
         Debug.Log("<color=orange>Uninstalling application...</color>");
-        RunAdb("uninstall com.UnityTechnologies.com.unity.template.urpblank"); 
+        RunAdb("uninstall com.veks.XRHouseDesignExport"); 
         Debug.Log("<color=green>UNINSTALL COMPLETE.</color>");
     }
 
@@ -104,20 +108,31 @@ public static class MRUKEditorTools {
     public static string BuildInternal(BuildOptions o) {
         Debug.Log("<color=cyan>Starting APK Build...</color>");
         
+        // Fix for obsolete warning: Use reflection to set Debug Symbols level
         try {
-            var assemblies = AppDomain.CurrentDomain.GetAssemblies();
-            var androidAssembly = assemblies.FirstOrDefault(a => a.GetName().Name == "UnityEditor.Android.Extensions");
-            if (androidAssembly != null) {
-                var userBuildSettingsType = androidAssembly.GetType("UnityEditor.Android.UserBuildSettings");
-                var debugSymbolsType = userBuildSettingsType?.GetNestedType("DebugSymbols");
+            var assembly = AppDomain.CurrentDomain.GetAssemblies().FirstOrDefault(a => a.GetName().Name == "UnityEditor.Android.Extensions");
+            if (assembly != null) {
+                var type = assembly.GetType("UnityEditor.Android.UserBuildSettings");
+                var debugSymbolsType = type?.GetNestedType("DebugSymbols");
                 var levelProp = debugSymbolsType?.GetProperty("level");
-                if (levelProp != null) levelProp.SetValue(null, 1); // 1 = Full
+                var levelEnumType = assembly.GetType("UnityEditor.Android.DebugSymbols+Level");
+                if (levelProp != null && levelEnumType != null) {
+                    var fullValue = Enum.Parse(levelEnumType, "Full");
+                    levelProp.SetValue(null, fullValue);
+                    Debug.Log("<color=green>Android Debug Symbols level set to Full.</color>");
+                }
             }
-        } catch {}
+        } catch { /* fallback to old way if reflection fails */ 
+    #pragma warning disable 0618
+            EditorUserBuildSettings.androidCreateSymbols = AndroidCreateSymbols.Debugging;
+    #pragma warning restore 0618
+        }
+        
+        PlayerSettings.Android.targetArchitectures = AndroidArchitecture.ARM64; 
 
-        File.WriteAllText("Assets/Scripts/VersionDisplay.cs", "using UnityEngine;\nusing TMPro;\npublic class VersionDisplay : MonoBehaviour {\n    public static string BuildTime = \"" + DateTime.Now.ToString("dd.MM. HH:mm") + "\";\n    public TextMeshProUGUI displayText;\n    void Start() { if (displayText != null) displayText.text = \"Version: \" + BuildTime; }\n}");
-        AssetDatabase.Refresh();
-        string apk = "Builds/XRHouseExporter.apk"; Directory.CreateDirectory("Builds");
+        File.WriteAllText("Assets/Scripts/VersionDisplay.cs", "using UnityEngine;\nusing TMPro;\npublic class VersionDisplay : MonoBehaviour {\n    public static string BuildTime = \"" + DateTime.Now.ToString("dd.MM. HH:mm:ss") + "\";\n    public TextMeshProUGUI displayText;\n    void Start() { if (displayText != null) displayText.text = \"Version: \" + BuildTime; }\n}");
+AssetDatabase.Refresh();
+string apk = "Builds/XRHouseExporter.apk"; Directory.CreateDirectory("Builds");
         var report = BuildPipeline.BuildPlayer(new[] { "Assets/Scenes/MRUKExportScene.unity" }, apk, BuildTarget.Android, o);
         if (report.summary.result == UnityEditor.Build.Reporting.BuildResult.Succeeded) {
             Debug.Log("<color=green>BUILD COMPLETED SUCCESSFULLY.</color>");
@@ -137,9 +152,28 @@ public static class MRUKEditorTools {
         string sdk = EditorPrefs.GetString("AndroidSdkRoot");
         if(string.IsNullOrEmpty(sdk)) sdk = Path.Combine(EditorApplication.applicationContentsPath, "PlaybackEngines/AndroidPlayer/SDK");
         string adb = Path.Combine(sdk, "platform-tools", "adb" + (Application.platform == RuntimePlatform.WindowsEditor ? ".exe" : ""));
+        
         if (File.Exists(adb)) {
-            var process = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(adb, args) { UseShellExecute = false, CreateNoWindow = true });
+            var info = new System.Diagnostics.ProcessStartInfo(adb, args) { 
+                UseShellExecute = false, 
+                CreateNoWindow = true,
+                RedirectStandardError = true,
+                RedirectStandardOutput = true
+            };
+            var process = System.Diagnostics.Process.Start(info);
+            string output = process.StandardOutput.ReadToEnd();
+            string error = process.StandardError.ReadToEnd();
             process.WaitForExit();
+            
+            if (process.ExitCode != 0) {
+                Debug.LogError($"ADB Error ({process.ExitCode}): {error}");
+                EditorUtility.DisplayDialog("ADB Error", $"Command failed: {args}\n\nError: {error}", "OK");
+            } else {
+                Debug.Log($"ADB Success: {output}");
+            }
+        } else {
+            Debug.LogError("ADB executable not found. Please check Android SDK path in Preferences.");
+            EditorUtility.DisplayDialog("ADB Not Found", "Could not find adb.exe. Please check Android SDK path.", "OK");
         }
     }
 }

@@ -11,7 +11,7 @@ public static class MRUKPathUtility
     public const string MODEL_MESH_OBJ = "03_Model_Reconstruction.obj";
     public const string MODEL_MESH_GLB = "03_Model_Reconstruction.glb";
     public const string MODEL_RAW_OBJ = "04_Model_Raw_Scan.obj";
-    public const string MODEL_MTL = "house_materials.mtl";
+    public const string MODEL_MTL = "01_Materials.mtl";
     
     public const string DATA_JSON = "90_Data_Rooms.json";
     public const string DATA_DUMP = "91_Data_Scene_Dump.txt";
@@ -27,7 +27,9 @@ public static class MRUKPathUtility
     public static string CreateSessionFolder(string root)
     {
         string ts = DateTime.Now.ToString("yyyyMMdd_HHmmss");
-        string session = Path.Combine(root, "Export_" + ts);
+        string ver = "v";
+        try { ver = "v" + VersionDisplay.BuildTime.Replace(" ", "_").Replace(".", "").Replace(":", ""); } catch {}
+        string session = Path.Combine(root, "Export_" + ts + "_" + ver);
         if (!Directory.Exists(session)) Directory.CreateDirectory(session);
         return session;
     }

@@ -27,8 +27,19 @@ public static class MRUKReportSVGHelper
         var walls = allAnchors.Where(a => a.Label.ToString().Contains("WALL") && a.PlaneRect.HasValue).ToList();
         var wallSegments = new List<(Vector2 p1, Vector2 p2, float w)>();
         var openingItems = new List<(string l, Vector2 p1, Vector2 p2, float w, Vector2 inv)>();
-
+        
+        // Deduplicate walls that represent the same physical segment between rooms
+        var uniqueWalls = new List<MRUKAnchor>();
         foreach (var w in walls) {
+            if (!uniqueWalls.Any(existing => 
+                Vector3.Distance(w.transform.position, existing.transform.position) < 0.2f && 
+                Mathf.Abs(Vector3.Dot(w.transform.right, existing.transform.right)) > 0.95f)) 
+            {
+                uniqueWalls.Add(w);
+            }
+        }
+
+        foreach (var w in uniqueWalls) {
             float wW = w.PlaneRect.Value.width;
             Vector3 wallPos = rot * w.transform.position;
             Vector3 worldRight = w.transform.right;

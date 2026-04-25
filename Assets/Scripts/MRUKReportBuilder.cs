@@ -67,8 +67,9 @@ public static class MRUKReportBuilder
                     perimeter = 2 * (fAnchor.PlaneRect.Value.width + fAnchor.PlaneRect.Value.height);
                 }
 #endif
-                html.Append("<div class='container'><h3>Room: " + r.name + "</h3>");
-                html.Append($"<div class='badge-container'><div class='badge'>AREA: {area:F2} m²</div><div class='badge'>PERIMETER: {perimeter:F2} m</div></div>");
+                string label = MRUKDataProcessor.GetRoomLabel(r);
+                html.Append("<div class='container'><h3>Room: " + label + "</h3>");
+                html.Append($"<div class='badge-container'><div class='badge'>AREA: {area:F2} m²</div><div class='badge'>PERIMETER: {perimeter:F2} m</div><div class='badge'>GUID: {r.Anchor.Uuid.ToString().Substring(0, 8)}</div></div>");
                 MRUKReportSVGHelper.DrawSvg(html, new List<MRUKRoom> { r }, correctionAngle);
 
                 if (includeTables)
