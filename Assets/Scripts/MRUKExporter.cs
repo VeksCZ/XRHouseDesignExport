@@ -32,43 +32,82 @@ public class MRUKExporter : MonoBehaviour
 
         uiLog?.AddLog("<color=cyan>[1/6] Scene Sync...</color>");
         try {
-            if (!Application.isEditor) {
-                OVRPermissionsRequester.Request(new[] { OVRPermissionsRequester.Permission.Scene });
-                await Task.Delay(500); 
-                await MRUK.Instance.LoadSceneFromDevice(true, true, MRUK.SceneModel.V2);
-                
-                int timeout = 0;
-                while (!MRUK.Instance.IsInitialized && timeout < 50) {
-                    await Task.Delay(100); timeout++;
-                }
-            }
-            SetProgress(15, uiLog);
-            await Task.Delay(500);
-            
-            // 2026 Best Practice: Filter rooms by floor area (> 2.0m2) and exclude storage/wardrobes
-            var rooms = MRUK.Instance.Rooms.Where(r => {
-                var floor = r.Anchors.FirstOrDefault(a => a.Label == MRUKAnchor.SceneLabels.FLOOR);
-                if (floor == null || !floor.PlaneRect.HasValue) return false;
-                float area = floor.PlaneRect.Value.width * floor.PlaneRect.Value.height;
-                if (area < 2.0f) return false;
-                
-                // Exclude rooms that are likely just storage/closets based on anchors
-                if (r.Anchors.Any(a => {
-                    string l = a.Label.ToString().ToUpper();
-                    return l.Contains("STORAGE") || l.Contains("WARDROBE");
-                }) && area < 3.0f) return false;
-
-                return true;
-            }).ToList();
-
-            if (rooms.Count == 0) {
-                uiLog?.AddLog("<color=red>No valid rooms found (Area > 2.0m2)</color>");
+            if (MRUK.Instance == null) {
+                uiLog?.AddLog("<color=red>ERROR: MRUK Instance not found in scene!</color>");
                 return false;
             }
 
+            if (!Application.isEditor) {
+                uiLog?.AddLog("Checking Scene permissions...");
+                if (!OVRPermissionsRequester.IsPermissionGranted(OVRPermissionsRequester.Permission.Scene)) {
+                    uiLog?.AddLog("Requesting Scene permission - please respond to the system dialog...");
+                    bool granted = false;
+                    void OnGranted(string id) { if (id == OVRPermissionsRequester.ScenePermission) granted = true; }
+                    OVRPermissionsRequester.PermissionGranted += OnGranted;
+                    OVRPermissionsRequester.Request(new[] { OVRPermissionsRequester.Permission.Scene });
+
+                    int waitTicks = 0;
+                    while (!granted && !OVRPermissionsRequester.IsPermissionGranted(OVRPermissionsRequester.Permission.Scene) && waitTicks < 300) {
+                        await Task.Delay(100); waitTicks++;
+                    }
+                    OVRPermissionsRequester.PermissionGranted -= OnGranted;
+
+                    if (!OVRPermissionsRequester.IsPermissionGranted(OVRPermissionsRequester.Permission.Scene)) {
+                        uiLog?.AddLog("<color=red>ERROR: Scene permission was not granted.</color>");
+                        return false;
+                    }
+                    uiLog?.AddLog("Scene permission granted.");
+                } else {
+                    uiLog?.AddLog("Scene permission already granted.");
+                }
+
+                uiLog?.AddLog("Calling LoadSceneFromDevice...");
+                var loadTask = MRUK.Instance.LoadSceneFromDevice(true, true, MRUK.SceneModel.V2);
+                
+                // Monitor the load task with a strict timeout
+                int loadTimeout = 0;
+                while (!loadTask.IsCompleted && loadTimeout < 80) { // 8 seconds timeout
+                    await Task.Delay(100);
+                    loadTimeout++;
+                    if (loadTimeout % 20 == 0) uiLog?.AddLog("Still waiting for device sync...");
+                }
+                
+                if (!loadTask.IsCompleted) {
+                    uiLog?.AddLog("<color=red>FATAL ERROR: LoadSceneFromDevice timed out!</color>");
+                    uiLog?.AddLog("Check if 'Room Setup' is done in Quest settings.");
+                    return false;
+                }
+                
+                await loadTask;
+                uiLog?.AddLog("LoadSceneFromDevice finished.");
+
+                int initTimeout = 0;
+                while (!MRUK.Instance.IsInitialized && initTimeout < 50) {
+                    await Task.Delay(100); initTimeout++;
+                }
+                uiLog?.AddLog(MRUK.Instance.IsInitialized ? "MRUK Initialized." : "<color=orange>MRUK Init timeout - continuing anyway.</color>");
+                } else {
+                uiLog?.AddLog("Running in Editor - skipping device sync.");
+                }
+            
+                SetProgress(15, uiLog);
+                uiLog?.AddLog("<color=cyan>[2/6] Processing rooms...</color>");
+                await Task.Delay(200);
+            
+            var rooms = MRUKDataProcessor.GetValidRooms(MRUK.Instance);
+
+            uiLog?.AddLog($"Found {rooms.Count} valid rooms.");
+            
+            if (rooms.Count == 0) {
+                uiLog?.AddLog("<color=red>No valid rooms found! Make sure you have completed 'Room Setup' in Quest settings.</color>");
+                return false;
+            }
+
+            uiLog?.AddLog("<color=cyan>[3/6] Calculating house layout...</color>");
             LastHouseCenter = CalculateHouseCenter(rooms);
             float angle = CalculateGlobalAngle(rooms);
             string session = MRUKPathUtility.CreateSessionFolder(root);
+            uiLog?.AddLog($"Session created: {Path.GetFileName(session)}");
             SetProgress(30, uiLog);
 
             uiLog?.AddLog("<color=cyan>[4/6] Data generation...</color>");
@@ -123,5 +162,11 @@ public class MRUKExporter : MonoBehaviour
         if (glb != null) { byte[] b = GLBExporter.ExportToGLB(m); if (b != null) File.WriteAllBytes(Path.Combine(f, glb), b); }
     }
     private Vector3 CalculateHouseCenter(List<MRUKRoom> rs) { Vector3 c = Vector3.zero; int n = 0; foreach (var r in rs) { var f = r.Anchors.FirstOrDefault(a => a.Label == MRUKAnchor.SceneLabels.FLOOR); if (f != null) { c += f.transform.position; n++; } } return n > 0 ? c / n : rs[0].transform.position; }
-    private float CalculateGlobalAngle(List<MRUKRoom> rs) { var f = rs.SelectMany(r => r.Anchors).FirstOrDefault(a => a.Label == MRUKAnchor.SceneLabels.FLOOR); return f != null ? -f.transform.eulerAngles.y : 0f; }
+    private float CalculateGlobalAngle(List<MRUKRoom> rs) { var f = rs.SelectMany(r => r.Anchors).FirstOrDefault(a => a.Label == MRUKAnchor.SceneLabels.FLOOR); if (f == null) return 0f;
+    // Use the floor's transform to find the 'house North'
+    // Most reliable for Quest: The floor anchor's Forward is the room's North
+    Vector3 forward = f.transform.forward;
+    forward.y = 0;
+    float angle = Mathf.Atan2(forward.x, forward.z) * Mathf.Rad2Deg;
+    return angle; }
 }

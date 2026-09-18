@@ -43,7 +43,7 @@ public static class MRUKReportBuilder
         html.Append("<div class='header'><h1>Property Documentation</h1><p>Automated Export from Quest XR</p></div>");
         html.Append("<div class='content'>");
 
-        var floors = rooms.GroupBy(r => Math.Round(r.transform.position.y / 2.5)).OrderBy(g => g.Key);
+        var floors = GroupRoomsByFloor(rooms);
         int fIdx = 0;
 
         foreach (var floor in floors)
@@ -83,6 +83,40 @@ public static class MRUKReportBuilder
 
         html.Append("</div><script>document.querySelectorAll('.svg-container').forEach(c=>{const s=c.querySelector('svg');let sc=1,x=0,y=0,d=false,sx,sy;c.onwheel=e=>{e.preventDefault();sc=Math.min(Math.max(0.1,sc*(e.deltaY>0?0.9:1.1)),10);u()};c.onmousedown=e=>{if(e.target.tagName=='BUTTON')return;d=true;sx=e.clientX-x;sy=e.clientY-y};window.onmousemove=e=>{if(d){x=e.clientX-sx;y=e.clientY-sy;u()}};window.onmouseup=()=>d=false;function u(){s.style.transform=`translate(${x}px,${y}px) scale(${sc})`};c.querySelector('.btn-in').onclick=()=>{sc*=1.2;u()};c.querySelector('.btn-out').onclick=()=>{sc/=1.2;u()};c.querySelector('.btn-reset').onclick=()=>{sc=1;x=0;y=0;u()}})</script></body></html>");
         return html.ToString();
+    }
+
+    /// <summary>
+    /// Groups rooms into building stories by clustering the height of their lowest floor anchor.
+    /// Replaces the old fixed "2.5m per story" assumption, which mis-grouped multi-floor buildings
+    /// whenever the real story height differed from 2.5m (e.g. rooms with sloped/vaulted ceilings).
+    /// A room with multiple floor anchors (split-level room) is kept as a single unit, anchored to
+    /// its lowest floor.
+    /// </summary>
+    private static List<List<MRUKRoom>> GroupRoomsByFloor(List<MRUKRoom> rooms)
+    {
+        var withY = rooms.Select(r => {
+            float y = r.FloorAnchors != null && r.FloorAnchors.Count > 0
+                ? r.FloorAnchors.Min(f => f.transform.position.y)
+                : r.transform.position.y;
+            return (room: r, y: y);
+        }).OrderBy(x => x.y).ToList();
+
+        const float storyGap = 1.5f; // minimum vertical gap between rooms to treat them as different stories
+        var floors = new List<List<MRUKRoom>>();
+        List<MRUKRoom> current = null;
+        float lastY = float.NaN;
+
+        foreach (var entry in withY)
+        {
+            if (current == null || entry.y - lastY > storyGap)
+            {
+                current = new List<MRUKRoom>();
+                floors.Add(current);
+            }
+            current.Add(entry.room);
+            lastY = entry.y;
+        }
+        return floors;
     }
 
     private static void AppendRoomTable(StringBuilder html, MRUKRoom r)

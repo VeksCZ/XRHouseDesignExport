@@ -130,10 +130,25 @@ public static class GLBExporter
         sb.Append("\"accessors\":[");
         int off = 0;
         bool first = true;
+        var ic = System.Globalization.CultureInfo.InvariantCulture;
         foreach (var p in model.GetAllParts())
         {
             if (!first) sb.Append(",");
-            sb.Append("{\"bufferView\":0,\"byteOffset\":" + off + ",\"componentType\":5126,\"count\":" + p.vertices.Count + ",\"type\":\"VEC3\"},");
+
+            // glTF 2.0 spec requires min/max on any accessor used as a POSITION attribute.
+            Vector3 min = new Vector3(float.MaxValue, float.MaxValue, float.MaxValue);
+            Vector3 max = new Vector3(float.MinValue, float.MinValue, float.MinValue);
+            foreach (var v in p.vertices)
+            {
+                float mz = -v.z; // matches the Z-mirrored coordinates actually written to the BIN chunk
+                min.x = Mathf.Min(min.x, v.x); min.y = Mathf.Min(min.y, v.y); min.z = Mathf.Min(min.z, mz);
+                max.x = Mathf.Max(max.x, v.x); max.y = Mathf.Max(max.y, v.y); max.z = Mathf.Max(max.z, mz);
+            }
+            if (p.vertices.Count == 0) { min = Vector3.zero; max = Vector3.zero; }
+
+            sb.Append("{\"bufferView\":0,\"byteOffset\":" + off + ",\"componentType\":5126,\"count\":" + p.vertices.Count + ",\"type\":\"VEC3\"," +
+                "\"min\":[" + min.x.ToString("F6", ic) + "," + min.y.ToString("F6", ic) + "," + min.z.ToString("F6", ic) + "]," +
+                "\"max\":[" + max.x.ToString("F6", ic) + "," + max.y.ToString("F6", ic) + "," + max.z.ToString("F6", ic) + "]},");
             off += p.vertices.Count * 12;
             sb.Append("{\"bufferView\":0,\"byteOffset\":" + off + ",\"componentType\":5125,\"count\":" + p.triangles.Count + ",\"type\":\"SCALAR\"}");
             off += p.triangles.Count * 4;

@@ -6,19 +6,26 @@ using System.Threading.Tasks;
 using System;
 using System.IO;
 
+using UnityEngine.InputSystem;
+
 public class XRMenu : MonoBehaviour
 {
     public Button exportAllButton, viewHouseButton, openReportButton;
     public Slider progressBar;
     public MRUKExporter exporter;
-public DollHouseVisualizer dollhouse;
+    public DollHouseVisualizer dollhouse;
     public Text statusText, logText;
     public ScrollRect logScrollView;
     private StringBuilder logHistory = new StringBuilder();
 
     async void Start() {
+        if (logText != null) logText.fontSize = 32;
+        FixButtonUI(exportAllButton);
+        FixButtonUI(viewHouseButton);
+        FixButtonUI(openReportButton);
+
         string version = "Unknown";
-        try { version = VersionDisplay.BuildTime; } catch {}
+try { version = VersionDisplay.BuildTime; } catch {}
         AddLog("<color=yellow>Build: " + version + "</color>");
         if (statusText != null) statusText.text = "Ready (" + version + ")";
         
@@ -29,14 +36,6 @@ public DollHouseVisualizer dollhouse;
         dollhouse ??= FindAnyObjectByType<DollHouseVisualizer>() ?? gameObject.AddComponent<DollHouseVisualizer>();
         dollhouse.uiLog = this;
         await Task.Delay(500); AddLog("XR Ready.");
-        FixLayout();
-    }
-
-    private void FixLayout() {
-        var layout = GetComponentInChildren<VerticalLayoutGroup>();
-        if (layout != null && openReportButton != null) {
-            openReportButton.transform.SetAsFirstSibling(); // Moved to the very TOP
-        }
     }
 
     public void AddLog(string msg) {
@@ -47,19 +46,47 @@ public DollHouseVisualizer dollhouse;
         Debug.Log("VR: " + msg);
     }
 
-    void Update() {
+        void Update() {
         if (OVRInput.GetDown(OVRInput.Button.Two, OVRInput.Controller.RTouch)) OnExportAll();
         if (OVRInput.GetDown(OVRInput.Button.One, OVRInput.Controller.RTouch)) OnToggleHouseView();
-        if (OVRInput.GetDown(OVRInput.Button.PrimaryThumbstick, OVRInput.Controller.RTouch)) OpenReportInApp();
+        
+        bool stickClick = OVRInput.GetDown(OVRInput.Button.PrimaryThumbstick, OVRInput.Controller.RTouch) || 
+                         OVRInput.GetDown(OVRInput.Button.PrimaryThumbstick, OVRInput.Controller.Active);
+        
+        if (!stickClick && Gamepad.current != null && Gamepad.current.rightStickButton.wasPressedThisFrame) stickClick = true;
+
+        if (stickClick) 
+        {
+            AddLog("<color=green>STICK CLICK (R3) DETECTED!</color>");
+            OpenReportInApp();
+        }
+
         if (OVRInput.GetDown(OVRInput.Button.Two, OVRInput.Controller.LTouch)) SaveLogToFile();
 
-        if (logScrollView != null && (dollhouse == null || !dollhouse.IsDragging)) {
+        if (logScrollView != null) {
             Vector2 s = OVRInput.Get(OVRInput.Axis2D.PrimaryThumbstick, OVRInput.Controller.RTouch);
             if (Mathf.Abs(s.y) > 0.1f) logScrollView.verticalNormalizedPosition = Mathf.Clamp01(logScrollView.verticalNormalizedPosition + s.y * Time.deltaTime * 3f);
         }
     }
 
+    private void FixButtonUI(Button btn) {
+        if (btn == null) return;
+        RectTransform rt = btn.GetComponent<RectTransform>();
+        if (rt != null) rt.sizeDelta = new Vector2(600, 110);
+        var tmp = btn.GetComponentInChildren<TMPro.TMP_Text>();
+        if (tmp != null) {
+            tmp.fontSizeMin = 20;
+            tmp.fontSizeMax = 44;
+            tmp.enableAutoSizing = true;
+        }
+    }
+
     public async void OnExportAll() {
+        if (exporter == null) {
+            AddLog("<color=red>ERROR: MRUKExporter reference not set on XRMenu.</color>");
+            if (statusText != null) statusText.text = "ERROR";
+            return;
+        }
         AddLog("<color=cyan>Exporting...</color>");
         if (statusText != null) statusText.text = "Working";
         bool ok = await exporter.ExportAllRooms(this);
@@ -79,9 +106,22 @@ public DollHouseVisualizer dollhouse;
     }
 
     public void OpenReportInApp() {
-        if (string.IsNullOrEmpty(MRUKExporter.LastReportPath)) { AddLog("No report."); return; }
+        AddLog("Attempting to open report...");
+        AddLog("Path: " + (string.IsNullOrEmpty(MRUKExporter.LastReportPath) ? "EMPTY" : MRUKExporter.LastReportPath));
+        
+        if (string.IsNullOrEmpty(MRUKExporter.LastReportPath)) { 
+            AddLog("<color=red>No report path found. Run Export first!</color>"); 
+            return; 
+        }
+
+        if (!File.Exists(MRUKExporter.LastReportPath)) {
+            AddLog("<color=red>File not found: </color>" + Path.GetFileName(MRUKExporter.LastReportPath));
+            return;
+        }
+
         string url = "file://" + MRUKExporter.LastReportPath;
-        if (Application.platform == RuntimePlatform.Android) {
+        AddLog("Opening: " + Path.GetFileName(url));
+if (Application.platform == RuntimePlatform.Android) {
             try {
                 using (AndroidJavaClass iC = new AndroidJavaClass("android.content.Intent"))
                 using (AndroidJavaObject iO = new AndroidJavaObject("android.content.Intent")) {

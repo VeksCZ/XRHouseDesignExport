@@ -73,12 +73,16 @@ var mrukAnchor = room.GetComponent<MRUKAnchor>();
         }
     #endif
 
-        string cleanName = room.name;
+        string cleanName = room.name; if (cleanName.Length > 8) cleanName = cleanName.Substring(0, 5);
         if (cleanName.StartsWith("Room - ")) cleanName = cleanName.Replace("Room - ", "");
         else if (cleanName.StartsWith("Room_")) cleanName = cleanName.Replace("Room_", "");
         
+        // If it's a GUID, return first 4 chars
+        if (cleanName.Length > 12 && cleanName.Contains("-")) cleanName = cleanName.Substring(0, 4);
+
+        if (cleanName.Length > 12 && cleanName.Contains("-")) cleanName = cleanName.Substring(0, 4);
         return "Room_" + (string.IsNullOrEmpty(cleanName) ? "Unknown" : cleanName);
-    }
+        }
 
     public static string GenerateSceneDump(List<MRUKRoom> rooms)
     {
@@ -179,6 +183,51 @@ var mrukAnchor = room.GetComponent<MRUKAnchor>();
         }
 
         return JsonUtility.ToJson(data, true);
+    }
+
+    /// <summary>
+    /// Single source of truth for which rooms are considered real, exportable rooms.
+    /// Used by MRUKExporter and DollHouseVisualizer so the export and the in-headset
+    /// preview always agree on the same room set (dedup by anchor UUID + area filtering).
+    /// </summary>
+    public static List<MRUKRoom> GetValidRooms(MRUK mruk)
+    {
+        if (mruk == null) return new List<MRUKRoom>();
+
+        return mruk.Rooms
+            .GroupBy(r => r.Anchor.Uuid)
+            .Select(g => g.First())
+            .Where(r => {
+                if (r.Anchor.TryGetComponent<OVRSemanticLabels>(out var labels)) {
+                #pragma warning disable 0618
+                    if (labels.Labels.ToUpperInvariant().Contains("ROOM")) return true;
+                #pragma warning restore 0618
+                }
+                return r.Anchors.Any(a => a.Label == MRUKAnchor.SceneLabels.FLOOR);
+            })
+            .Where(IsRoomAreaValid)
+            .ToList();
+    }
+
+    private static bool IsRoomAreaValid(MRUKRoom room)
+    {
+        var floor = room.Anchors.FirstOrDefault(a => a.Label == MRUKAnchor.SceneLabels.FLOOR && a.PlaneRect.HasValue);
+        if (floor == null) return false;
+
+        float area = floor.PlaneRect.Value.width * floor.PlaneRect.Value.height;
+        if (area < 0.8f) return false;
+
+        if (area < 3.5f)
+        {
+            bool isSignificant = room.Anchors.Any(a => {
+                string l = a.Label.ToString().ToUpperInvariant();
+                return l.Contains("DOOR") || l.Contains("WINDOW") ||
+                       (!l.Contains("WALL") && !l.Contains("FLOOR") && !l.Contains("CEILING") &&
+                        !l.Contains("OTHER") && !l.Contains("STORAGE") && !l.Contains("INNER_WALL_FACE"));
+            });
+            if (!isSignificant) return false;
+        }
+        return true;
     }
 
     public static string GetSafeName(string name)

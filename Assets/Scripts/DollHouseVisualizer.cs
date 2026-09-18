@@ -38,15 +38,11 @@ public class DollHouseVisualizer : MonoBehaviour
         Vector3 c = CalculateCenter();
         XRHouseModel m = null;
         
-        // Use same filtering as exporter
-        var rooms = MRUK.Instance.Rooms.Where(r => {
-            var floor = r.Anchors.FirstOrDefault(a => a.Label == MRUKAnchor.SceneLabels.FLOOR);
-            if (floor == null || !floor.PlaneRect.HasValue) return false;
-            return (floor.PlaneRect.Value.width * floor.PlaneRect.Value.height) > 1.8f;
-        }).ToList();
+        // Same filtering/dedup as the exporter, so the preview always matches what gets exported
+        var rooms = MRUKDataProcessor.GetValidRooms(MRUK.Instance);
 
         if (rooms.Count == 0) {
-            uiLog?.AddLog("<color=red>Dollhouse: No valid rooms found (>1.8m2)</color>");
+            uiLog?.AddLog("<color=red>Dollhouse: No valid rooms found</color>");
             Cleanup();
             return;
         }
