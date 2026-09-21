@@ -1,70 +1,17 @@
 using UnityEngine;
 
 /// <summary>
-/// A character controller script for the player that avoids the naming conflict 
-/// with the built-in UnityEngine.CharacterController.
+/// Leftover from an early prototype and still attached to the OVRCameraRig in the scene. It applied gravity
+/// to a CharacterController on the rig, but MRUK's world lock owns the tracking space, so the rig fell without
+/// end (hundreds of metres) while MRUK logged a warning every frame - the frame rate collapsed to ~1 fps.
+/// Nothing in this app needs walking physics, so it removes the CharacterController and switches itself off;
+/// the component only stays so the existing scene keeps loading without a missing-script warning.
 /// </summary>
 public class PlayerController : MonoBehaviour
 {
-    [Header("Movement Settings")]
-    public float moveSpeed = 2.0f;
-    public float gravity = 9.81f;
-
-    private UnityEngine.CharacterController m_Controller; 
-    private Transform mainCameraTransform;
-    private Vector3 velocity;
-
-    void Start()
+    void Awake()
     {
-        m_Controller = GetComponent<UnityEngine.CharacterController>();
-        if (Camera.main != null)
-        {
-            mainCameraTransform = Camera.main.transform;
-        }
-
-        if (m_Controller == null)
-        {
-            Debug.Log("No CharacterController component found on this GameObject. Adding one...");
-            m_Controller = gameObject.AddComponent<UnityEngine.CharacterController>();
-        }
-    }
-
-    void Update()
-    {
-        if (m_Controller == null) return;
-
-        // Sync character controller height and center with the VR headset height if camera is found
-        if (mainCameraTransform != null)
-        {
-            UpdateCharacterControllerHeight();
-        }
-
-        // Basic movement logic can go here (e.g., following hand controllers)
-        ApplyGravity();
-    }
-
-    private void UpdateCharacterControllerHeight()
-    {
-        // Adjust the height of the CharacterController to match the headset's height (y position relative to rig)
-        // Clamp between 1m and 2.2m
-        float height = Mathf.Clamp(mainCameraTransform.localPosition.y, 1.0f, 2.2f);
-        m_Controller.height = height;
-        
-        // Center should be half of the height
-        m_Controller.center = new Vector3(0, height / 2.0f + m_Controller.skinWidth, 0);
-    }
-
-    private void ApplyGravity()
-    {
-        if (m_Controller.isGrounded)
-        {
-            velocity.y = -0.1f;
-        }
-        else
-        {
-            velocity.y -= gravity * Time.deltaTime;
-        }
-
-        m_Controller.Move(velocity * Time.deltaTime);
+        if (TryGetComponent<CharacterController>(out var controller)) Destroy(controller);
+        enabled = false;
     }
 }

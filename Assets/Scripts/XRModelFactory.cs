@@ -22,8 +22,11 @@ public static class XRModelFactory
             foreach (var f in anchors.Where(a => a.Label == MRUKAnchor.SceneLabels.FLOOR))
                 rm.parts.Add(CreateBoxPart("FLOOR", f.transform.position, f.transform.rotation, new Vector3(f.PlaneRect.Value.width, f.PlaneRect.Value.height, 0.05f), "FLOOR", center, rotation, new Vector3(0,0,-0.025f)));
 
-            foreach (var w in anchors.Where(a => a.Label.ToString().ToUpper().Contains("WALL"))) {
+            foreach (var w in anchors.Where(MRUKDataProcessor.IsStructuralWall)) {
                 float wW = w.PlaneRect.Value.width, wH = w.PlaneRect.Value.height;
+                // w.transform.forward points into this room, so the opposite room (if scanned) is
+                // on the -forward side - see EstimateWallThickness.
+                float wallThickness = EstimateWallThickness(room, rooms, w.transform.position, -w.transform.forward, wW, w.transform.right, 0.25f);
                 var wallHoles = openings.Where(o => {
                     Vector3 lp = w.transform.InverseTransformPoint(o.transform.position);
                     return Mathf.Abs(lp.z) < 0.25f && Mathf.Abs(lp.x) < (wW / 2f + 0.1f) && Mathf.Abs(lp.y) < (wH / 2f + 0.1f);
@@ -50,13 +53,13 @@ public static class XRModelFactory
                                 float hw = h.PlaneRect.Value.width/2f, hh = h.PlaneRect.Value.height/2f;
                                 return midX > lp.x-hw+0.01f && midX < lp.x+hw-0.01f && midY > lp.y-hh+0.01f && midY < lp.y+hh-0.01f;
                             });
-                            if (!isHole) rm.parts.Add(CreateBoxPart("WallSeg", w.transform.TransformPoint(new Vector3(midX, midY, 0)), w.transform.rotation, new Vector3(x2-x1, y2-y1, 0.25f), "WALL", center, rotation));
+                            if (!isHole) rm.parts.Add(CreateBoxPart("WallSeg", w.transform.TransformPoint(new Vector3(midX, midY, 0)), w.transform.rotation, new Vector3(x2-x1, y2-y1, wallThickness), "WALL", center, rotation));
                         }
                     }
-                } else rm.parts.Add(CreateBoxPart("WALL", w.transform.position, w.transform.rotation, new Vector3(wW, wH, 0.25f), "WALL", center, rotation));
+                } else rm.parts.Add(CreateBoxPart("WALL", w.transform.position, w.transform.rotation, new Vector3(wW, wH, wallThickness), "WALL", center, rotation));
             }
             foreach (var o in openings) {
-                bool isD = o.Label.ToString().Contains("DOOR");
+                bool isD = MRUKDataProcessor.IsDoor(o);
                 rm.parts.Add(CreateBoxPart(o.Label.ToString(), o.transform.position, o.transform.rotation, new Vector3(o.PlaneRect.Value.width, o.PlaneRect.Value.height, isD ? 0.10f : 0.12f), isD ? "DOOR" : "WINDOW", center, rotation));
             }
             model.rooms.Add(rm);
@@ -71,10 +74,12 @@ public static class XRModelFactory
             var rm = new XRRoomModel { roomName = MRUKDataProcessor.GetRoomLabel(room) };
             if (room.GlobalMeshAnchor != null && room.GlobalMeshAnchor.Anchor.TryGetComponent<OVRTriangleMesh>(out var mesh))
                 rm.parts.Add(await CreateMeshPart("GlobalMesh", mesh, room.GlobalMeshAnchor.Anchor, "WALL", center, rotation));
-            else foreach (var a in room.Anchors.Where(x => x.Label.ToString().ToUpper().Contains("WALL") || x.Label == MRUKAnchor.SceneLabels.FLOOR))
+            else if (TryCreateUnityMeshPart("GlobalMesh", room.GlobalMeshAnchor, "WALL", center, rotation, out var cachedMesh))
+                rm.parts.Add(cachedMesh);
+            else foreach (var a in room.Anchors.Where(x => MRUKDataProcessor.IsStructuralWall(x) || x.Label == MRUKAnchor.SceneLabels.FLOOR))
                 if (a.Anchor.TryGetComponent<OVRTriangleMesh>(out var tm)) rm.parts.Add(await CreateMeshPart(a.Label.ToString(), tm, a.Anchor, a.Label == MRUKAnchor.SceneLabels.FLOOR ? "FLOOR" : "WALL", center, rotation));
             foreach (var o in room.Anchors.Where(a => a.PlaneRect.HasValue && (a.Label.ToString().Contains("DOOR") || a.Label.ToString().Contains("WINDOW"))))
-                rm.parts.Add(CreateBoxPart(o.Label.ToString(), o.transform.position, o.transform.rotation, new Vector3(o.PlaneRect.Value.width, o.PlaneRect.Value.height, 0.08f), o.Label.ToString().Contains("DOOR") ? "DOOR" : "WINDOW", center, rotation));
+                rm.parts.Add(CreateBoxPart(o.Label.ToString(), o.transform.position, o.transform.rotation, new Vector3(o.PlaneRect.Value.width, o.PlaneRect.Value.height, 0.08f), MRUKDataProcessor.IsDoor(o) ? "DOOR" : "WINDOW", center, rotation));
             model.rooms.Add(rm);
         }
         return model;
@@ -153,6 +158,7 @@ public static class XRModelFactory
                     Vector3 segDir = (wP2 - wP1).normalized;
                     Quaternion segRot = Quaternion.LookRotation(Vector3.Cross(segDir, Vector3.up), Vector3.up);
                     Vector3 segMid = (wP1 + wP2) / 2f + Vector3.up * (hMin/2f);
+                    float wallThickness = EstimateWallThickness(room, rooms, segMid, segRot * Vector3.forward, segLen, segDir, 0.25f);
 
                     var holes = uniqueOpenings.Where(o => {
                         Vector3 lp = Quaternion.Inverse(segRot) * (o.transform.position - segMid);
@@ -180,18 +186,18 @@ public static class XRModelFactory
                                     float hw = ho.PlaneRect.Value.width/2f, hh = ho.PlaneRect.Value.height/2f;
                                     return midX > lp.x-hw+0.005f && midX < lp.x+hw-0.005f && midY > lp.y-hh+0.005f && midY < lp.y+hh-0.005f;
                                 });
-                                if (!isHole) rm.parts.Add(CreateBoxPart("WallSeg", segMid + segRot * new Vector3(midX, midY, 0), segRot, new Vector3(x2-x1, y2-y1, 0.15f), "WALL", center, rotation));
+                                if (!isHole) rm.parts.Add(CreateBoxPart("WallSeg", segMid + segRot * new Vector3(midX, midY, 0), segRot, new Vector3(x2-x1, y2-y1, wallThickness), "WALL", center, rotation));
                             }
                         }
                     } else if (hMin > 0.02f) {
-                        rm.parts.Add(CreateBoxPart("WALL", segMid, segRot, new Vector3(segLen, hMin, 0.15f), "WALL", center, rotation));
+                        rm.parts.Add(CreateBoxPart("WALL", segMid, segRot, new Vector3(segLen, hMin, wallThickness), "WALL", center, rotation));
                     }
 
                     // Sloped/vaulted ceiling cap: solid wall material from hMin up to the real
                     // ceiling line at each end of the segment. Zero-height at the low end, so it
                     // degrades to nothing for a flat ceiling (hMax == hMin).
                     if (hMax - hMin > 0.03f) {
-                        rm.parts.Add(CreateSlopedCapPart(wP1, wP2, hMin, h1, h2, 0.15f, "WALL", center, rotation));
+                        rm.parts.Add(CreateSlopedCapPart(wP1, wP2, hMin, h1, h2, wallThickness, "WALL", center, rotation));
                     }
                 }
             }
@@ -201,7 +207,7 @@ public static class XRModelFactory
                 if (addedOpenings.Contains(o.Anchor.Uuid)) continue;
                 // Only add if it belongs to this room (exists in room anchors)
                 if (room.Anchors.Any(ra => ra.Anchor.Uuid == o.Anchor.Uuid)) {
-                    bool isD = o.Label.ToString().Contains("DOOR");
+                    bool isD = MRUKDataProcessor.IsDoor(o);
                     rm.parts.Add(CreateBoxPart(o.Label.ToString(), o.transform.position, o.transform.rotation, new Vector3(o.PlaneRect.Value.width, o.PlaneRect.Value.height, isD ? 0.12f : 0.14f), isD ? "DOOR" : "WINDOW", center, rotation));
                     addedOpenings.Add(o.Anchor.Uuid);
                 }
@@ -242,6 +248,39 @@ return model;
             if (d < bestDist) { bestDist = d; fallbackY = y; haveFallback = true; }
         }
         return haveFallback ? fallbackY : fallback;
+    }
+
+    /// <summary>
+    /// Estimates a wall's real thickness by finding the WALL_FACE anchor of a different, already
+    /// scanned room that represents the opposite face of the same physical wall - i.e. one whose
+    /// plane roughly faces back the way we came from (MRUK anchor local +Z always points into its
+    /// own room, so two anchors on either side of one wall point roughly the same way in world
+    /// space) and sits a plausible wall-thickness away, overlapping this segment's span. Measuring
+    /// the gap between the two planes gives the true thickness; when no matching anchor exists
+    /// (typically an exterior wall, or the other side wasn't scanned) this falls back to a typical
+    /// interior wall thickness instead of guessing.
+    /// </summary>
+    private static float EstimateWallThickness(MRUKRoom room, List<MRUKRoom> allRooms, Vector3 wallWorldPos, Vector3 outwardNormal, float extentAlongWall, Vector3 wallDir, float fallback)
+    {
+        const float minThickness = 0.03f, maxThickness = 0.6f;
+        foreach (var other in allRooms) {
+            if (other == room) continue;
+            foreach (var a in other.Anchors) {
+                if (a == null || a.PlaneRect == null || !MRUKDataProcessor.IsStructuralWall(a)) continue;
+                if (Vector3.Dot(a.transform.forward, outwardNormal) < 0.7f) continue; // not roughly facing back at us
+
+                Vector3 delta = a.transform.position - wallWorldPos;
+                float gap = Vector3.Dot(delta, outwardNormal);
+                if (gap < minThickness || gap > maxThickness) continue;
+
+                float along = Vector3.Dot(delta, wallDir);
+                float halfOtherWidth = a.PlaneRect.Value.width / 2f;
+                if (Mathf.Abs(along) > extentAlongWall / 2f + halfOtherWidth) continue; // doesn't overlap this segment
+
+                return gap;
+            }
+        }
+        return fallback;
     }
 
     private static bool IsPointInPolygon(Vector2 pt, IReadOnlyList<Vector2> poly)
@@ -297,6 +336,8 @@ return model;
             var rm = new XRRoomModel { roomName = MRUKDataProcessor.GetRoomLabel(room) };
             if (room.GlobalMeshAnchor != null && room.GlobalMeshAnchor.Anchor.TryGetComponent<OVRTriangleMesh>(out var mesh))
                 rm.parts.Add(await CreateMeshPart("Raw", mesh, room.GlobalMeshAnchor.Anchor, "WALL", center, rotation));
+            else if (TryCreateUnityMeshPart("Raw", room.GlobalMeshAnchor, "WALL", center, rotation, out var cachedMesh))
+                rm.parts.Add(cachedMesh);
             else foreach (var a in room.Anchors) if (a != null && a.Anchor.TryGetComponent<OVRTriangleMesh>(out var tm))
                 rm.parts.Add(await CreateMeshPart(a.Label.ToString(), tm, a.Anchor, "WALL", center, rotation));
             model.rooms.Add(rm);
@@ -323,6 +364,25 @@ return model;
         };
         foreach (var p in v) part.vertices.Add(gRot * (pos + rot * (Vector3.Scale(p, size) + localOff) - center));
         part.triangles.AddRange(t); return part;
+    }
+
+    /// <summary>
+    /// A scan loaded from the cache (JSON) has no live OVR spatial entity behind its anchors, so OVRTriangleMesh can't
+    /// be read - but MRUK keeps the global mesh of such a scan as an ordinary Unity Mesh, in the anchor's local space.
+    /// </summary>
+    private static bool TryCreateUnityMeshPart(string name, MRUKAnchor anchor, string mat, Vector3 center, float globalRot, out XRMeshPart part)
+    {
+        part = null;
+        var mesh = anchor != null ? anchor.GlobalMesh : null;
+        if (mesh == null || mesh.vertexCount == 0) return false;
+
+        var verts = mesh.vertices;
+        Quaternion gRot = Quaternion.Euler(0, globalRot, 0);
+        part = new XRMeshPart { name = name, materialName = mat, color = GetColorForMaterial(mat) };
+        part.vertices.Capacity = verts.Length;
+        foreach (var v in verts) part.vertices.Add(gRot * (anchor.transform.TransformPoint(v) - center));
+        part.triangles.AddRange(mesh.triangles);
+        return true;
     }
 
     private static async Task<XRMeshPart> CreateMeshPart(string name, OVRTriangleMesh triMesh, OVRAnchor anchor, string mat, Vector3 center, float globalRot)

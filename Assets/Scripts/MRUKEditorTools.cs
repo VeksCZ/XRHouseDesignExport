@@ -11,8 +11,11 @@ public static class MRUKEditorTools {
     public static void BuildAndInstallFull() { 
         string apk = BuildInternal(BuildOptions.None); 
         if(apk != null) {
-            InstallAPK(apk);
-            Debug.Log("<color=green>ALL DONE: Build and Installation successful.</color>");
+            if (InstallAPK(apk)) {
+                Debug.Log("<color=green>ALL DONE: Build and Installation successful.</color>");
+            } else {
+                Debug.LogWarning("<color=orange>PARTIAL SUCCESS: Build successful, but Installation failed (is Quest connected?).</color>");
+            }
         } else {
             Debug.LogError("<color=red>ERROR: Build failed, installation cancelled.</color>");
         }
@@ -20,10 +23,13 @@ public static class MRUKEditorTools {
 
     [MenuItem("MRUK/2. Fast Build and Install APK", false, 11)]
     public static void BuildAPKFast() { 
-        string apk = BuildInternal(BuildOptions.Development); 
+        string apk = BuildInternal(BuildOptions.Development, fast: true); 
         if(apk != null) {
-            InstallAPK(apk);
-            Debug.Log("<color=green>FAST BUILD DONE.</color>");
+            if (InstallAPK(apk)) {
+                Debug.Log("<color=green>FAST BUILD AND INSTALL DONE.</color>");
+            } else {
+                Debug.LogWarning("<color=orange>FAST BUILD DONE, but Installation failed.</color>");
+            }
         }
     }
 
@@ -33,7 +39,9 @@ public static class MRUKEditorTools {
         if (File.Exists(apk)) {
             var info = new FileInfo(apk);
             Debug.Log($"<color=cyan>Installing APK built on: {info.LastWriteTime:dd.MM. HH:mm:ss} (Size: {info.Length/1024/1024:F1} MB)</color>");
-            InstallAPK(apk);
+            if (InstallAPK(apk)) {
+                Debug.Log("<color=green>INSTALLATION SUCCESSFUL.</color>");
+            }
         } else {
             string msg = "APK file not found at Builds/XRHouseExporter.apk. Please run Build first.";
             Debug.LogError(msg);
@@ -44,8 +52,11 @@ public static class MRUKEditorTools {
     [MenuItem("MRUK/4. Uninstall App", false, 13)]
     public static void UninstallAPK() { 
         Debug.Log("<color=orange>Uninstalling application...</color>");
-        RunAdb("uninstall com.veks.XRHouseDesignExport"); 
-        Debug.Log("<color=green>UNINSTALL COMPLETE.</color>");
+        if (RunAdb("uninstall com.veks.XRHouseDesignExport")) {
+            Debug.Log("<color=green>UNINSTALL COMPLETE.</color>");
+        } else {
+            Debug.LogError("<color=red>UNINSTALL FAILED.</color>");
+        }
     }
 
     [MenuItem("MRUK/5. Pull data from Quest", false, 30)]
@@ -54,15 +65,23 @@ public static class MRUKEditorTools {
         string local = Path.GetFullPath("Exports/RoomData");
         Directory.CreateDirectory(local);
         Debug.Log($"<color=cyan>Pulling data from Quest to {local}...</color>");
-        RunAdb($"pull \"{remote}\" \"{local}\"");
-        var dirs = Directory.GetDirectories(local, "Export_*");
-        if (dirs.Length > 0) {
-            var latest = dirs.OrderByDescending(d => Directory.GetCreationTime(d)).First();
-            Debug.Log($"<color=green>DOWNLOADED: Opening {Path.GetFileName(latest)}</color>");
-            EditorUtility.RevealInFinder(latest);
+
+        // Saved scans live in the app's own storage, not in Downloads.
+        string scanLocal = Path.GetFullPath("Exports/ScanCache");
+        Directory.CreateDirectory(scanLocal);
+        RunAdb($"pull \"/sdcard/Android/data/com.veks.XRHouseDesignExport/files/ScanCache/.\" \"{scanLocal}\"");
+        if (RunAdb($"pull \"{remote}\" \"{local}\"")) {
+            var dirs = Directory.GetDirectories(local, "Export_*");
+            if (dirs.Length > 0) {
+                var latest = dirs.OrderByDescending(d => Directory.GetCreationTime(d)).First();
+                Debug.Log($"<color=green>DOWNLOADED: Opening {Path.GetFileName(latest)}</color>");
+                EditorUtility.RevealInFinder(latest);
+            } else {
+                Debug.LogWarning("No exports were found in the downloaded folder.");
+                EditorUtility.RevealInFinder(local);
+            }
         } else {
-            Debug.LogWarning("No exports were downloaded.");
-            EditorUtility.RevealInFinder(local);
+            Debug.LogError("<color=red>PULL FAILED: Could not download data from Quest.</color>");
         }
         Application.OpenURL("file://" + local);
     }
@@ -105,50 +124,59 @@ public static class MRUKEditorTools {
         }
     }
 
-    public static string BuildInternal(BuildOptions o) {
-        Debug.Log("<color=cyan>Starting APK Build...</color>");
-        
-        // Fix for obsolete warning: Use reflection to set Debug Symbols level
-        try {
-            var assembly = AppDomain.CurrentDomain.GetAssemblies().FirstOrDefault(a => a.GetName().Name == "UnityEditor.Android.Extensions");
-            if (assembly != null) {
-                var type = assembly.GetType("UnityEditor.Android.UserBuildSettings");
-                var debugSymbolsType = type?.GetNestedType("DebugSymbols");
-                var levelProp = debugSymbolsType?.GetProperty("level");
-                var levelEnumType = assembly.GetType("UnityEditor.Android.DebugSymbols+Level");
-                if (levelProp != null && levelEnumType != null) {
-                    var fullValue = Enum.Parse(levelEnumType, "Full");
-                    levelProp.SetValue(null, fullValue);
-                    Debug.Log("<color=green>Android Debug Symbols level set to Full.</color>");
-                }
-            }
-        } catch { /* fallback to old way if reflection fails */ 
-    #pragma warning disable 0618
-            EditorUserBuildSettings.androidCreateSymbols = AndroidCreateSymbols.Debugging;
-    #pragma warning restore 0618
-        }
-        
-        PlayerSettings.Android.targetArchitectures = AndroidArchitecture.ARM64; 
+    /// <param name="fast">
+    /// Iteration build: same optimised IL2CPP settings as the full build (an unoptimised "Debug" IL2CPP
+    /// build runs the app several times slower on the headset, and switching configurations throws the
+    /// whole incremental C++ cache away) - it only packages a symbol table instead of full debug symbols
+    /// (Diagnostics Data needs at least a symbol table, so turning symbols off completely would warn on every build).
+    /// </param>
+    public static string BuildInternal(BuildOptions o, bool fast = false) {
+        Debug.Log($"<color=cyan>Starting APK Build ({(fast ? "fast" : "full")})...</color>");
 
-        File.WriteAllText("Assets/Scripts/VersionDisplay.cs", "using UnityEngine;\nusing TMPro;\npublic class VersionDisplay : MonoBehaviour {\n    public static string BuildTime = \"" + DateTime.Now.ToString("dd.MM. HH:mm:ss") + "\";\n    public TextMeshProUGUI displayText;\n    void Start() { if (displayText != null) displayText.text = \"Version: \" + BuildTime; }\n}");
-AssetDatabase.Refresh();
-string apk = "Builds/XRHouseExporter.apk"; Directory.CreateDirectory("Builds");
+        SetDebugSymbols(fast ? "SymbolTable" : "Full");
+        PlayerSettings.Android.targetArchitectures = AndroidArchitecture.ARM64;
+
+        // Build timestamp for VersionDisplay.BuildTime - a data file, so no script recompile is triggered.
+        Directory.CreateDirectory("Assets/Resources");
+        File.WriteAllText("Assets/Resources/BuildInfo.txt", DateTime.Now.ToString("dd.MM. HH:mm:ss"));
+        AssetDatabase.Refresh();
+
+        string apk = "Builds/XRHouseExporter.apk"; Directory.CreateDirectory("Builds");
         var report = BuildPipeline.BuildPlayer(new[] { "Assets/Scenes/MRUKExportScene.unity" }, apk, BuildTarget.Android, o);
         if (report.summary.result == UnityEditor.Build.Reporting.BuildResult.Succeeded) {
-            Debug.Log("<color=green>BUILD COMPLETED SUCCESSFULLY.</color>");
+            Debug.Log($"<color=green>BUILD COMPLETED SUCCESSFULLY</color> in {report.summary.totalTime.TotalSeconds:0} s.");
             return apk;
         }
         Debug.LogError("<color=red>BUILD FAILED!</color> Check Console for details.");
         return null;
     }
 
-    public static void InstallAPK(string apk) { 
-        Debug.Log("<color=cyan>Installing APK to Quest...</color>");
-        RunAdb("install -r \"" + Path.GetFullPath(apk) + "\""); 
-        Debug.Log("<color=green>INSTALLATION DONE.</color>");
+    // Android debug symbol level lives in UnityEditor.Android.UserBuildSettings.DebugSymbols, a type that only exists
+    // with the Android module installed - reflection keeps the editor tools compiling without it. The enum type is taken
+    // from the property itself so the exact enum name does not matter.
+    static void SetDebugSymbols(string level) {
+        try {
+            var userBuildSettings = AppDomain.CurrentDomain.GetAssemblies()
+                .Select(a => a.GetType("UnityEditor.Android.UserBuildSettings", false))
+                .FirstOrDefault(t => t != null);
+            var levelProp = userBuildSettings?.GetNestedType("DebugSymbols")?.GetProperty("level");
+            if (levelProp == null) throw new MissingMemberException("UserBuildSettings.DebugSymbols.level");
+            levelProp.SetValue(null, Enum.Parse(levelProp.PropertyType, level));
+            Debug.Log($"<color=green>Android Debug Symbols level set to {levelProp.GetValue(null)}.</color>");
+        } catch (Exception ex) {
+            Debug.LogWarning($"Could not set the Android debug symbol level via UserBuildSettings ({ex.Message}); using the legacy setting.");
+    #pragma warning disable 0618
+            EditorUserBuildSettings.androidCreateSymbols = level == "Full" ? AndroidCreateSymbols.Debugging : AndroidCreateSymbols.Public;
+    #pragma warning restore 0618
+        }
     }
 
-    public static void RunAdb(string args) {
+    public static bool InstallAPK(string apk) { 
+        Debug.Log("<color=cyan>Installing APK to Quest...</color>");
+        return RunAdb("install -r \"" + Path.GetFullPath(apk) + "\""); 
+    }
+
+    public static bool RunAdb(string args) {
         string sdk = EditorPrefs.GetString("AndroidSdkRoot");
         if(string.IsNullOrEmpty(sdk)) sdk = Path.Combine(EditorApplication.applicationContentsPath, "PlaybackEngines/AndroidPlayer/SDK");
         string adb = Path.Combine(sdk, "platform-tools", "adb" + (Application.platform == RuntimePlatform.WindowsEditor ? ".exe" : ""));
@@ -167,13 +195,15 @@ string apk = "Builds/XRHouseExporter.apk"; Directory.CreateDirectory("Builds");
             
             if (process.ExitCode != 0) {
                 Debug.LogError($"ADB Error ({process.ExitCode}): {error}");
-                EditorUtility.DisplayDialog("ADB Error", $"Command failed: {args}\n\nError: {error}", "OK");
+                return false;
             } else {
                 Debug.Log($"ADB Success: {output}");
+                return true;
             }
         } else {
             Debug.LogError("ADB executable not found. Please check Android SDK path in Preferences.");
             EditorUtility.DisplayDialog("ADB Not Found", "Could not find adb.exe. Please check Android SDK path.", "OK");
+            return false;
         }
     }
 }

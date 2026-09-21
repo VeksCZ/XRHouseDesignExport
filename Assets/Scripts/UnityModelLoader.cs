@@ -19,7 +19,7 @@ public static class UnityModelLoader
                 var filter = partGo.AddComponent<MeshFilter>();
                 var renderer = partGo.AddComponent<MeshRenderer>();
                 
-                var mesh = new Mesh { name = part.name };
+                var mesh = new Mesh { name = part.name, indexFormat = part.vertices.Count > 65535 ? UnityEngine.Rendering.IndexFormat.UInt32 : UnityEngine.Rendering.IndexFormat.UInt16 };
                 mesh.SetVertices(part.vertices);
                 mesh.SetTriangles(part.triangles, 0);
                 mesh.RecalculateNormals();

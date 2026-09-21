@@ -33,3 +33,21 @@ and exports 3D models, floor plans and reports from the scan.
 - `OBJWriter`/`GLBExporter` write the mesh formats; GLB output must stay valid glTF 2.0
   (e.g. POSITION accessors need `min`/`max`) since strict viewers (Windows 3D Viewer,
   validators) reject non-compliant files even if lenient tools tolerate them.
+
+## Workflow notes
+
+- **Floor plans**: `FloorPlanBuilder` (pure geometry, no MRUK) feeds both the HTML report and the in-headset
+  `FloorPlanPanel`; `MRUKPlanExtractor` is the only MRUK-facing part. Room names come from `RoomNames` (user-picked
+  presets stored per room UUID) because MRUK exposes no room name.
+- **Scan cache**: `MRUKSceneCache` (JSON incl. global mesh) lives in `persistentDataPath/ScanCache` on the headset
+  (scoped storage: adb-pushed files elsewhere are invisible to the app); Editor menu "Pull" copies it to `Exports/`.
+- **Build + install to a USB Quest**: call `MRUKExporter.EditorFastBuildAndInstall()` (e.g. via the Unity MCP
+  `InvokeComponentMethod`; the call times out because the main thread is busy, the build continues). Read
+  `%LOCALAPPDATA%\Unity\Editor\Editor.log` for "BUILD COMPLETED SUCCESSFULLY" / "FAST BUILD AND INSTALL DONE" /
+  "BUILD FAILED". No Play Mode, no project edits while building. Mono has no ARM64 player here, so IL2CPP only.
+- **Offline compile check**: compile `Assets/Scripts/**/*.cs` with dotnet against `Library/ScriptAssemblies/*.dll`
+  (defines `UNITY_EDITOR;UNITY_ANDROID;META_XR_SDK_INSTALLED`) for a fast error check without a Unity reload.
+- **Do not add packages that spawn helper processes** (`com.unity.ai.assistant`'s `relay_win.exe` inherited the MCP
+  bridge's listening socket on Windows and made the bridge unable to rebind after a domain reload).
+- Tests: `Assets/Tests/EditMode` (plan geometry, room names) and `Assets/Tests/PlayMode` (whole export pipeline on
+  MRUK sample scenes, results in `Exports/Test/`).

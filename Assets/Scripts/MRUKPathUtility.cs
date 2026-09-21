@@ -24,13 +24,11 @@ public static class MRUKPathUtility
             : "/sdcard/Download/XRHouseExports";
     }
 
-    public static string CreateSessionFolder(string root)
+    /// <summary>Export_{date_time}_{scan name}, so exports of different scans/houses sort and read clearly.</summary>
+    public static string CreateSessionFolder(string root, string sourceName)
     {
-        string ts = DateTime.Now.ToString("yyyyMMdd_HHmmss");
-        string ver = "v";
-        try { ver = "v" + VersionDisplay.BuildTime.Replace(" ", "_").Replace(".", "").Replace(":", ""); } catch {}
-        string session = Path.Combine(root, "Export_" + ts + "_" + ver);
-        if (!Directory.Exists(session)) Directory.CreateDirectory(session);
+        string session = Path.Combine(root, $"Export_{DateTime.Now:yyyyMMdd_HHmmss}_{MRUKDataProcessor.GetSafeName(sourceName)}");
+        Directory.CreateDirectory(session);
         return session;
     }
 

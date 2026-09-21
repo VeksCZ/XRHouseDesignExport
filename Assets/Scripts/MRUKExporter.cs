@@ -9,164 +9,291 @@ using Meta.XR.MRUtilityKit;
 using Meta.XR;
 #endif
 
+/// <summary>
+/// Scan source management and the export pipeline. A "source" is either the live device scan (only
+/// available while inside the scanned space) or a scan previously saved to the local cache; whichever
+/// is selected is what export, the dollhouse and the plan viewer all work from.
+/// </summary>
 public class MRUKExporter : MonoBehaviour
 {
+    public const string LiveSource = "Live scan";
+
     public XRMenu uiLog;
     public static string LastReportPath = "";
     public Vector3 LastHouseCenter { get; private set; } = Vector3.zero;
 
+    /// <summary>The source the user picked in the menu.</summary>
+    public string SelectedSource { get; private set; } = LiveSource;
+    /// <summary>The source whose data MRUK currently holds (null until something was loaded).</summary>
+    public string ActiveSource { get; private set; }
+
+    /// <summary>Live scan first, then cached scans, most recently saved first.</summary>
+    public List<string> Sources => new[] { LiveSource }.Concat(MRUKSceneCache.ListCachedScans()).ToList();
+
     public async void OnExportButton() { await ExportAllRooms(uiLog); }
 
-    public async Task<bool> ExportAllRooms(XRMenu uiLog = null)
+    /// <summary>Moves the selection by +1/-1 through the available sources and returns the new one.</summary>
+    public string CycleSource(int direction, XRMenu ui = null)
+    {
+        var sources = Sources;
+        int i = Mathf.Max(0, sources.IndexOf(SelectedSource));
+        SelectedSource = sources[((i + direction) % sources.Count + sources.Count) % sources.Count];
+        ui?.AddLog($"Scan source: <b>{SelectedSource}</b> ({sources.IndexOf(SelectedSource) + 1}/{sources.Count})");
+        return SelectedSource;
+    }
+
+    /// <summary>Exports whichever source is selected.</summary>
+    public async Task<bool> ExportAllRooms(XRMenu ui = null)
     {
     #if META_XR_SDK_INSTALLED
-        SetProgress(0, uiLog);
-        string root = MRUKPathUtility.GetExportRoot();
-        
-        // Android 13+ storage protection fallback
-        try { if (!Directory.Exists(root)) Directory.CreateDirectory(root); }
-        catch { 
-            root = Application.persistentDataPath; 
-            uiLog?.AddLog("<color=orange>Using persistentDataPath fallback</color>");
-        }
+        SetProgress(0, ui);
+        try {
+            ui?.AddLog($"<color=cyan>[1/6] Loading '{SelectedSource}'...</color>");
+            if (!await EnsureSelectedSourceLoaded(ui, forceReload: true)) return false;
 
-        uiLog?.AddLog("<color=cyan>[1/6] Scene Sync...</color>");
+            SetProgress(15, ui);
+            ui?.AddLog("<color=cyan>[2/6] Processing rooms...</color>");
+            var rooms = MRUKDataProcessor.GetValidRooms(MRUK.Instance);
+            ui?.AddLog($"Found {rooms.Count} valid rooms.");
+            if (rooms.Count == 0) {
+                ui?.AddLog("<color=red>No valid rooms found! Make sure you have completed 'Room Setup' in Quest settings.</color>");
+                return false;
+            }
+            return await RunExportPipeline(rooms, ui);
+        } catch (Exception ex) {
+            Debug.LogException(ex);
+            ui?.AddLog("<color=red>ERROR: " + ex.Message + "</color>");
+            return false;
+        }
+    #else
+        await Task.CompletedTask;
+        return false;
+    #endif
+    }
+
+    /// <summary>
+    /// Makes MRUK hold the selected source: the live device scene (needs you to be inside the space) or
+    /// a cached scan, which loads without any live tracking so it works from anywhere.
+    /// </summary>
+    public async Task<bool> EnsureSelectedSourceLoaded(XRMenu ui, bool forceReload = false)
+    {
+    #if META_XR_SDK_INSTALLED
+        if (MRUK.Instance == null) {
+            ui?.AddLog("<color=red>ERROR: MRUK Instance not found in scene!</color>");
+            return false;
+        }
+        if (!forceReload && ActiveSource == SelectedSource) return true;
+
+        if (SelectedSource == LiveSource) {
+            if (!await EnsureLiveSceneLoaded(ui)) return false;
+        } else {
+            ui?.AddLog($"Loading cached scan '{SelectedSource}'...");
+            if (!await MRUKSceneCache.LoadCachedScene(MRUK.Instance, SelectedSource)) {
+                ui?.AddLog("<color=red>Failed to load cached scan.</color>");
+                return false;
+            }
+        }
+        ActiveSource = SelectedSource;
+        return true;
+    #else
+        await Task.CompletedTask;
+        return false;
+    #endif
+    }
+
+    /// <summary>
+    /// Snapshots the live device scan to local storage so it can be exported/viewed later from
+    /// anywhere. Always reads the live scene, whatever source is selected.
+    /// </summary>
+    public async Task<string> SaveScanToCache(XRMenu ui = null, string name = null)
+    {
+    #if META_XR_SDK_INSTALLED
         try {
             if (MRUK.Instance == null) {
-                uiLog?.AddLog("<color=red>ERROR: MRUK Instance not found in scene!</color>");
-                return false;
+                ui?.AddLog("<color=red>ERROR: MRUK Instance not found in scene!</color>");
+                return null;
             }
 
-            if (!Application.isEditor) {
-                uiLog?.AddLog("Checking Scene permissions...");
-                if (!OVRPermissionsRequester.IsPermissionGranted(OVRPermissionsRequester.Permission.Scene)) {
-                    uiLog?.AddLog("Requesting Scene permission - please respond to the system dialog...");
-                    bool granted = false;
-                    void OnGranted(string id) { if (id == OVRPermissionsRequester.ScenePermission) granted = true; }
-                    OVRPermissionsRequester.PermissionGranted += OnGranted;
-                    OVRPermissionsRequester.Request(new[] { OVRPermissionsRequester.Permission.Scene });
+            ui?.AddLog("<color=cyan>Saving current scan to cache...</color>");
+            if (!await EnsureLiveSceneLoaded(ui)) return null;
+            ActiveSource = LiveSource;
 
-                    int waitTicks = 0;
-                    while (!granted && !OVRPermissionsRequester.IsPermissionGranted(OVRPermissionsRequester.Permission.Scene) && waitTicks < 300) {
-                        await Task.Delay(100); waitTicks++;
-                    }
-                    OVRPermissionsRequester.PermissionGranted -= OnGranted;
-
-                    if (!OVRPermissionsRequester.IsPermissionGranted(OVRPermissionsRequester.Permission.Scene)) {
-                        uiLog?.AddLog("<color=red>ERROR: Scene permission was not granted.</color>");
-                        return false;
-                    }
-                    uiLog?.AddLog("Scene permission granted.");
-                } else {
-                    uiLog?.AddLog("Scene permission already granted.");
-                }
-
-                uiLog?.AddLog("Calling LoadSceneFromDevice...");
-                var loadTask = MRUK.Instance.LoadSceneFromDevice(true, true, MRUK.SceneModel.V2);
-                
-                // Monitor the load task with a strict timeout
-                int loadTimeout = 0;
-                while (!loadTask.IsCompleted && loadTimeout < 80) { // 8 seconds timeout
-                    await Task.Delay(100);
-                    loadTimeout++;
-                    if (loadTimeout % 20 == 0) uiLog?.AddLog("Still waiting for device sync...");
-                }
-                
-                if (!loadTask.IsCompleted) {
-                    uiLog?.AddLog("<color=red>FATAL ERROR: LoadSceneFromDevice timed out!</color>");
-                    uiLog?.AddLog("Check if 'Room Setup' is done in Quest settings.");
-                    return false;
-                }
-                
-                await loadTask;
-                uiLog?.AddLog("LoadSceneFromDevice finished.");
-
-                int initTimeout = 0;
-                while (!MRUK.Instance.IsInitialized && initTimeout < 50) {
-                    await Task.Delay(100); initTimeout++;
-                }
-                uiLog?.AddLog(MRUK.Instance.IsInitialized ? "MRUK Initialized." : "<color=orange>MRUK Init timeout - continuing anyway.</color>");
-                } else {
-                uiLog?.AddLog("Running in Editor - skipping device sync.");
-                }
-            
-                SetProgress(15, uiLog);
-                uiLog?.AddLog("<color=cyan>[2/6] Processing rooms...</color>");
-                await Task.Delay(200);
-            
             var rooms = MRUKDataProcessor.GetValidRooms(MRUK.Instance);
-
-            uiLog?.AddLog($"Found {rooms.Count} valid rooms.");
-            
             if (rooms.Count == 0) {
-                uiLog?.AddLog("<color=red>No valid rooms found! Make sure you have completed 'Room Setup' in Quest settings.</color>");
-                return false;
+                ui?.AddLog("<color=red>No valid rooms found - nothing to cache.</color>");
+                return null;
             }
 
-            uiLog?.AddLog("<color=cyan>[3/6] Calculating house layout...</color>");
-            LastHouseCenter = CalculateHouseCenter(rooms);
-            float angle = CalculateGlobalAngle(rooms);
-            string session = MRUKPathUtility.CreateSessionFolder(root);
-            uiLog?.AddLog($"Session created: {Path.GetFileName(session)}");
-            SetProgress(30, uiLog);
+            name = string.IsNullOrEmpty(name) ? $"{DateTime.Now:yyyyMMdd_HHmm}_{rooms.Count}rooms" : name;
+            string saved = MRUKSceneCache.SaveCurrentScene(MRUK.Instance, name);
+            if (saved != null)
+                ui?.AddLog($"<color=green>Scan cached as '{saved}' ({rooms.Count} room(s)). You can export it later from anywhere.</color>");
+            else
+                ui?.AddLog("<color=red>Failed to save scan to cache.</color>");
+            return saved;
+        } catch (Exception ex) {
+            Debug.LogException(ex);
+            ui?.AddLog("<color=red>ERROR: " + ex.Message + "</color>");
+            return null;
+        }
+    #else
+        await Task.CompletedTask;
+        return null;
+    #endif
+    }
 
-            uiLog?.AddLog("<color=cyan>[4/6] Data generation...</color>");
-            File.WriteAllText(Path.Combine(session, MRUKPathUtility.DATA_JSON), MRUKDataProcessor.GenerateJson(rooms));
-            File.WriteAllText(Path.Combine(session, MRUKPathUtility.DATA_DUMP), MRUKDataProcessor.GenerateSceneDump(rooms));
-            File.WriteAllText(Path.Combine(session, MRUKPathUtility.DATA_REPORT), MRUKReportBuilder.GenerateFullReport(rooms, true, true, angle));
-            SetProgress(45, uiLog);
-
-            uiLog?.AddLog($"<color=cyan>[5/6] Exporting models...</color>");
-            uiLog?.AddLog($"Using MTL: {MRUKPathUtility.MODEL_MTL}");
-            Save(XRModelFactory.CreateAnchorAnalytical(rooms, angle, LastHouseCenter), session, MRUKPathUtility.MODEL_CLEAN_OBJ, MRUKPathUtility.MODEL_CLEAN_GLB); SetProgress(60, uiLog);
-            Save(await XRModelFactory.CreateMeshAnalytical(rooms, angle, LastHouseCenter), session, MRUKPathUtility.MODEL_MESH_ANALYTICAL_OBJ, MRUKPathUtility.MODEL_MESH_ANALYTICAL_GLB); SetProgress(75, uiLog);
-            Save(XRModelFactory.CreateReconstruction(rooms, angle, LastHouseCenter), session, MRUKPathUtility.MODEL_MESH_OBJ, MRUKPathUtility.MODEL_MESH_GLB); SetProgress(85, uiLog);
-            Save(await XRModelFactory.CreateRawScan(rooms, angle, LastHouseCenter), session, MRUKPathUtility.MODEL_RAW_OBJ, null); SetProgress(95, uiLog);
-            
-            File.WriteAllText(Path.Combine(session, MRUKPathUtility.MODEL_MTL), OBJWriter.GenerateMTL());
-
-            // --- Room breakdown ---
-            uiLog?.AddLog("<color=cyan>[6/6] Room breakdown...</color>");
-            foreach (var r in rooms) {
-                var single = new List<MRUKRoom> { r };
-                var model = XRModelFactory.CreateReconstruction(single, angle, LastHouseCenter);
-                string roomLabel = MRUKDataProcessor.GetRoomLabel(r);
-                string roomGuid = r.Anchor.Uuid.ToString().Substring(0, 8);
-                string rDirName = $"{MRUKDataProcessor.GetSafeName(roomLabel)}_{roomGuid}";
-                string rPath = Path.Combine(session, rDirName);
-                Directory.CreateDirectory(rPath);
-                // FIXED: Relative MTL path for subfolders
-                File.WriteAllText(Path.Combine(rPath, "mesh.obj"), OBJWriter.WriteToString(model, "../" + MRUKPathUtility.MODEL_MTL));
-            }
-
-            uiLog?.AddLog("<color=green><b>EXPORT FINISHED!</b></color>");
-            SetProgress(100, uiLog);
-            LastReportPath = Path.Combine(session, MRUKPathUtility.DATA_REPORT);
-            #if UNITY_EDITOR
-            UnityEditor.EditorUtility.RevealInFinder(session);
-            #endif
-            return true;
-            } catch (Exception ex) { 
-            Debug.LogException(ex); 
-            uiLog?.AddLog("<color=red>ERROR: " + ex.Message + "</color>"); 
-            return false; 
-            }
+    /// <summary>True if whatever MRUK currently holds contains at least one exportable room.</summary>
+    public bool HasValidRooms()
+    {
+    #if META_XR_SDK_INSTALLED
+        return MRUK.Instance != null && MRUKDataProcessor.GetValidRooms(MRUK.Instance).Count > 0;
     #else
         return false;
     #endif
     }
 
-    private void SetProgress(float v, XRMenu m) { if (m != null && m.progressBar != null) m.progressBar.value = v; }
+    /// <summary>All plan sheets of whatever MRUK currently holds: per story an overview, then its rooms.</summary>
+    public List<FloorPlanPage> BuildPlanPages()
+    {
+    #if META_XR_SDK_INSTALLED
+        var outlines = MRUKPlanExtractor.Extract(MRUKDataProcessor.GetValidRooms(MRUK.Instance));
+        float yaw = FloorPlanBuilder.CorrectionYaw(outlines);
+        return FloorPlanBuilder.Flatten(FloorPlanBuilder.BuildLevels(FloorPlanBuilder.Aligned(outlines, yaw)));
+    #else
+        return new List<FloorPlanPage>();
+    #endif
+    }
+
+#if META_XR_SDK_INSTALLED
+    /// <summary>
+    /// Requests Scene permission if needed and calls LoadSceneFromDevice, waiting (with a timeout)
+    /// for MRUK to finish syncing. No-op in the Editor, where scene data is loaded by other means.
+    /// </summary>
+    private async Task<bool> EnsureLiveSceneLoaded(XRMenu ui)
+    {
+        if (Application.isEditor) {
+            ui?.AddLog("Running in Editor - skipping device sync.");
+            return true;
+        }
+
+        ui?.AddLog("Checking Scene permissions...");
+        if (!OVRPermissionsRequester.IsPermissionGranted(OVRPermissionsRequester.Permission.Scene)) {
+            ui?.AddLog("Requesting Scene permission - please respond to the system dialog...");
+            bool granted = false;
+            void OnGranted(string id) { if (id == OVRPermissionsRequester.ScenePermission) granted = true; }
+            OVRPermissionsRequester.PermissionGranted += OnGranted;
+            OVRPermissionsRequester.Request(new[] { OVRPermissionsRequester.Permission.Scene });
+
+            int waitTicks = 0;
+            while (!granted && !OVRPermissionsRequester.IsPermissionGranted(OVRPermissionsRequester.Permission.Scene) && waitTicks < 300) {
+                await Task.Delay(100); waitTicks++;
+            }
+            OVRPermissionsRequester.PermissionGranted -= OnGranted;
+
+            if (!OVRPermissionsRequester.IsPermissionGranted(OVRPermissionsRequester.Permission.Scene)) {
+                ui?.AddLog("<color=red>ERROR: Scene permission was not granted.</color>");
+                return false;
+            }
+            ui?.AddLog("Scene permission granted.");
+        }
+
+        ui?.AddLog("Calling LoadSceneFromDevice...");
+        // V2FallbackV1: use the High Fidelity scene (multi-floor/ceiling, sloped ceilings) when the
+        // device has it, but don't fail on rooms captured before HiFi scans existed.
+        var loadTask = MRUK.Instance.LoadSceneFromDevice(true, true, MRUK.SceneModel.V2FallbackV1);
+
+        int loadTimeout = 0;
+        while (!loadTask.IsCompleted && loadTimeout < 80) { // 8 seconds
+            await Task.Delay(100);
+            loadTimeout++;
+            if (loadTimeout % 20 == 0) ui?.AddLog("Still waiting for device sync...");
+        }
+        if (!loadTask.IsCompleted) {
+            ui?.AddLog("<color=red>FATAL ERROR: LoadSceneFromDevice timed out!</color>");
+            ui?.AddLog("Check if 'Room Setup' is done in Quest settings, or pick a cached scan instead.");
+            return false;
+        }
+        await loadTask;
+
+        int initTimeout = 0;
+        while (!MRUK.Instance.IsInitialized && initTimeout < 50) {
+            await Task.Delay(100); initTimeout++;
+        }
+        ui?.AddLog(MRUK.Instance.IsInitialized ? "Live scan loaded." : "<color=orange>MRUK init timeout - continuing anyway.</color>");
+        return true;
+    }
+
+    /// <summary>Steps 3-6: layout, data dumps, report and all model tiers for an already resolved room list.</summary>
+    private async Task<bool> RunExportPipeline(List<MRUKRoom> rooms, XRMenu ui)
+    {
+        string root = MRUKPathUtility.GetExportRoot();
+        // Android 13+ storage protection fallback
+        try { if (!Directory.Exists(root)) Directory.CreateDirectory(root); }
+        catch {
+            root = Application.persistentDataPath;
+            ui?.AddLog("<color=orange>Using persistentDataPath fallback</color>");
+        }
+
+        ui?.AddLog("<color=cyan>[3/6] Calculating house layout...</color>");
+        var outlines = MRUKPlanExtractor.Extract(rooms);
+        LastHouseCenter = CalculateHouseCenter(rooms);
+        float angle = FloorPlanBuilder.CorrectionYaw(outlines);
+        string session = MRUKPathUtility.CreateSessionFolder(root, SelectedSource);
+        ui?.AddLog($"Session created: {Path.GetFileName(session)} (wall alignment {angle:0.#} deg)");
+        SetProgress(30, ui);
+
+        ui?.AddLog("<color=cyan>[4/6] Data generation...</color>");
+        File.WriteAllText(Path.Combine(session, MRUKPathUtility.DATA_JSON), MRUKDataProcessor.GenerateJson(rooms));
+        File.WriteAllText(Path.Combine(session, MRUKPathUtility.DATA_DUMP), MRUKDataProcessor.GenerateSceneDump(rooms));
+        File.WriteAllText(Path.Combine(session, MRUKPathUtility.DATA_REPORT), MRUKReportBuilder.GenerateFullReport(outlines, angle, SelectedSource));
+        SetProgress(45, ui);
+
+        ui?.AddLog("<color=cyan>[5/6] Exporting models...</color>");
+        Save(XRModelFactory.CreateAnchorAnalytical(rooms, angle, LastHouseCenter), session, MRUKPathUtility.MODEL_CLEAN_OBJ, MRUKPathUtility.MODEL_CLEAN_GLB); SetProgress(60, ui);
+        Save(await XRModelFactory.CreateMeshAnalytical(rooms, angle, LastHouseCenter), session, MRUKPathUtility.MODEL_MESH_ANALYTICAL_OBJ, MRUKPathUtility.MODEL_MESH_ANALYTICAL_GLB); SetProgress(75, ui);
+        Save(XRModelFactory.CreateReconstruction(rooms, angle, LastHouseCenter), session, MRUKPathUtility.MODEL_MESH_OBJ, MRUKPathUtility.MODEL_MESH_GLB); SetProgress(85, ui);
+        Save(await XRModelFactory.CreateRawScan(rooms, angle, LastHouseCenter), session, MRUKPathUtility.MODEL_RAW_OBJ, null); SetProgress(95, ui);
+
+        File.WriteAllText(Path.Combine(session, MRUKPathUtility.MODEL_MTL), OBJWriter.GenerateMTL());
+
+        ui?.AddLog("<color=cyan>[6/6] Room breakdown...</color>");
+        foreach (var r in rooms) {
+            var model = XRModelFactory.CreateReconstruction(new List<MRUKRoom> { r }, angle, LastHouseCenter);
+            string rDirName = $"{MRUKDataProcessor.GetSafeName(MRUKDataProcessor.GetRoomLabel(r))}_{r.Anchor.Uuid.ToString().Substring(0, 8)}";
+            string rPath = Path.Combine(session, rDirName);
+            Directory.CreateDirectory(rPath);
+            // Relative MTL path for subfolders
+            File.WriteAllText(Path.Combine(rPath, "mesh.obj"), OBJWriter.WriteToString(model, "../" + MRUKPathUtility.MODEL_MTL));
+        }
+
+        ui?.AddLog("<color=green><b>EXPORT FINISHED!</b></color>");
+        SetProgress(100, ui);
+        LastReportPath = Path.Combine(session, MRUKPathUtility.DATA_REPORT);
+        #if UNITY_EDITOR
+        UnityEditor.EditorUtility.RevealInFinder(session);
+        #endif
+        return true;
+    }
+
+    private Vector3 CalculateHouseCenter(List<MRUKRoom> rs)
+    {
+        Vector3 c = Vector3.zero; int n = 0;
+        foreach (var r in rs) {
+            var f = r.FloorAnchors.FirstOrDefault(a => a != null);
+            if (f != null) { c += f.transform.position; n++; }
+        }
+        return n > 0 ? c / n : rs[0].transform.position;
+    }
+#endif
+
+#if UNITY_EDITOR
+    /// <summary>Editor-only entry point, so tooling like the Unity MCP bridge can start the fast device build without a menu click.</summary>
+    public void EditorFastBuildAndInstall() => MRUKEditorTools.BuildAPKFast();
+#endif
+
+    private void SetProgress(float v, XRMenu m) { if (m != null) m.SetProgress(v); }
     private void Save(XRHouseModel m, string f, string obj, string glb) {
         if (obj != null) File.WriteAllText(Path.Combine(f, obj), OBJWriter.WriteToString(m));
         if (glb != null) { byte[] b = GLBExporter.ExportToGLB(m); if (b != null) File.WriteAllBytes(Path.Combine(f, glb), b); }
     }
-    private Vector3 CalculateHouseCenter(List<MRUKRoom> rs) { Vector3 c = Vector3.zero; int n = 0; foreach (var r in rs) { var f = r.Anchors.FirstOrDefault(a => a.Label == MRUKAnchor.SceneLabels.FLOOR); if (f != null) { c += f.transform.position; n++; } } return n > 0 ? c / n : rs[0].transform.position; }
-    private float CalculateGlobalAngle(List<MRUKRoom> rs) { var f = rs.SelectMany(r => r.Anchors).FirstOrDefault(a => a.Label == MRUKAnchor.SceneLabels.FLOOR); if (f == null) return 0f;
-    // Use the floor's transform to find the 'house North'
-    // Most reliable for Quest: The floor anchor's Forward is the room's North
-    Vector3 forward = f.transform.forward;
-    forward.y = 0;
-    float angle = Mathf.Atan2(forward.x, forward.z) * Mathf.Rad2Deg;
-    return angle; }
 }

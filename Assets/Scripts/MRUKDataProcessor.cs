@@ -16,38 +16,40 @@ public static class MRUKDataProcessor
         if (room == null) return "Unknown";
 
     #if META_XR_SDK_INSTALLED
+        if (RoomNames.TryGet(room.Anchor.Uuid.ToString(), out var customName)) return customName;
+
+        // Note: as of the currently installed SDK, OVRSemanticLabels.Classification has no room-type
+        // values (no Bedroom/Kitchen/LivingRoom/...) - only object/surface labels (Table, Bed, Couch,
+        // WallFace, ...). Quest's Space Setup doesn't expose a free-text or picked room name to apps
+        // either. So these two tiers can only ever surface an object classification that happens to be
+        // attached to the room's own anchors, not an actual room name; tier 3 below (furniture-based
+        // heuristics) is what actually determines BEDROOM/KITCHEN/etc. today.
+        var classifications = new List<OVRSemanticLabels.Classification>();
+
         // 1. Try to find an anchor that represents the room itself
         var roomAnchor = room.Anchors.FirstOrDefault(a => a.Label.ToString().ToUpper() == "ROOM");
         if (roomAnchor != null && roomAnchor.Anchor.TryGetComponent<OVRSemanticLabels>(out var roomSemantic))
         {
-        #pragma warning disable 0618
-            if (!string.IsNullOrEmpty(roomSemantic.Labels))
+            roomSemantic.GetClassifications(classifications);
+            foreach (var c in classifications)
             {
-                foreach (var label in roomSemantic.Labels.Split(','))
-                {
-                    string l = label.Trim().ToUpperInvariant();
-                    if (l != "ROOM" && l != "OTHER") return l.Replace(" ", "_");
-                }
+                string l = c.ToString().ToUpperInvariant();
+                if (l != "OTHER") return l;
             }
-        #pragma warning restore 0618
         }
 
         // 2. Fallback to existing semantic labels on any anchor
         if (room.Anchor.TryGetComponent<OVRSemanticLabels>(out var semantic))
         {
-    #pragma warning disable 0618
-            if (!string.IsNullOrEmpty(semantic.Labels))
+            semantic.GetClassifications(classifications);
+            foreach (var c in classifications)
             {
-                foreach (var label in semantic.Labels.Split(','))
+                string l = c.ToString().ToUpperInvariant();
+                if (l != "OTHER" && l != "STORAGE" && l != "CEILING" && l != "FLOOR" && !l.Contains("WALL"))
                 {
-                    string l = label.Trim().ToUpperInvariant();
-                    if (l != "ROOM" && l != "OTHER" && l != "SPACE" && l != "STORAGE" && l != "INNER_WALL_FACE" && l != "CEILING" && l != "FLOOR")
-                    {
-                        return l.Replace(" ", "_");
-                    }
+                    return l;
                 }
             }
-    #pragma warning restore 0618
         }
 
         // 2. MRUKAnchor Label
@@ -165,15 +167,9 @@ var mrukAnchor = room.GetComponent<MRUKAnchor>();
     #if META_XR_SDK_INSTALLED
                 if (a.Anchor.TryGetComponent<OVRSemanticLabels>(out var s))
                 {
-    #pragma warning disable 0618
-                    if (!string.IsNullOrEmpty(s.Labels))
-                    {
-                        foreach (var l in s.Labels.Split(new[] { ',' }, StringSplitOptions.RemoveEmptyEntries))
-                        {
-                            labelList.Add(l.Trim());
-                        }
-                    }
-    #pragma warning restore 0618
+                    var anchorClassifications = new List<OVRSemanticLabels.Classification>();
+                    s.GetClassifications(anchorClassifications);
+                    foreach (var c in anchorClassifications) labelList.Add(c.ToString());
                 }
     #endif
                 ua.allLabels = labelList;
@@ -194,10 +190,13 @@ var mrukAnchor = room.GetComponent<MRUKAnchor>();
     {
         if (mruk == null) return new List<MRUKRoom>();
 
-        return mruk.Rooms
+        var valid = mruk.Rooms
             .GroupBy(r => r.Anchor.Uuid)
             .Select(g => g.First())
             .Where(r => {
+                // "ROOM" isn't a value in the enum-based Classification type (only object/surface
+                // labels are), so unlike the other .Labels usages in this file this one can't be
+                // swapped for GetClassifications() without losing the check entirely.
                 if (r.Anchor.TryGetComponent<OVRSemanticLabels>(out var labels)) {
                 #pragma warning disable 0618
                     if (labels.Labels.ToUpperInvariant().Contains("ROOM")) return true;
@@ -207,6 +206,25 @@ var mrukAnchor = room.GetComponent<MRUKAnchor>();
             })
             .Where(IsRoomAreaValid)
             .ToList();
+        return DropDuplicateScans(valid);
+    }
+
+    /// <summary>
+    /// MRUK keeps every Space Setup scan, so one physical room can appear as several rooms lying on
+    /// top of each other. Keep the most detailed scan of each, preserving the original order.
+    /// </summary>
+    static List<MRUKRoom> DropDuplicateScans(List<MRUKRoom> rooms)
+    {
+        var keptRooms = new List<MRUKRoom>();
+        var keptOutlines = new List<RoomOutline>();
+        foreach (var room in rooms.OrderByDescending(r => r.Anchors.Count))
+        {
+            var outlines = MRUKPlanExtractor.Extract(new List<MRUKRoom> { room });
+            if (outlines.Count > 0 && outlines.Any(o => keptOutlines.Any(k => FloorPlanBuilder.IsSameRoom(k, o)))) continue;
+            keptRooms.Add(room);
+            keptOutlines.AddRange(outlines);
+        }
+        return rooms.Where(keptRooms.Contains).ToList();
     }
 
     private static bool IsRoomAreaValid(MRUKRoom room)
@@ -223,11 +241,50 @@ var mrukAnchor = room.GetComponent<MRUKAnchor>();
                 string l = a.Label.ToString().ToUpperInvariant();
                 return l.Contains("DOOR") || l.Contains("WINDOW") ||
                        (!l.Contains("WALL") && !l.Contains("FLOOR") && !l.Contains("CEILING") &&
-                        !l.Contains("OTHER") && !l.Contains("STORAGE") && !l.Contains("INNER_WALL_FACE"));
+                        !l.Contains("OTHER") && !l.Contains("STORAGE"));
             });
             if (!isSignificant) return false;
         }
         return true;
+    }
+
+    /// <summary>
+    /// True for anchors that represent an actual physical wall surface that should be built as solid
+    /// geometry: WALL_FACE, or INNER_WALL_FACE (e.g. a pillar, represented as several wall-face
+    /// segments per MRUK's High Fidelity scene model). INVISIBLE_WALL_FACE anchors mark a conceptual
+    /// boundary between open-plan spaces (e.g. living room/kitchen) with no real wall there, and must
+    /// be excluded even though the label also contains "WALL".
+    /// </summary>
+    public static bool IsStructuralWall(MRUKAnchor a)
+    {
+        if (a == null) return false;
+        // Label is a flags value: an "invisible" wall is stored as WALL_FACE | INVISIBLE_WALL_FACE, so compare
+        // flags, not the text of the enum.
+        var l = a.Label;
+        bool wall = (l & (MRUKAnchor.SceneLabels.WALL_FACE | MRUKAnchor.SceneLabels.INNER_WALL_FACE)) != 0;
+        return wall && (l & MRUKAnchor.SceneLabels.INVISIBLE_WALL_FACE) == 0;
+    }
+
+    /// <summary>
+    /// True for anything you can walk through: a DOOR_FRAME, or a WINDOW_FRAME whose bottom edge sits
+    /// at floor level (e.g. a balcony/patio door, which MRUK has no dedicated label for and reports
+    /// as a window). A window next to it that doesn't reach the floor stays a window.
+    /// </summary>
+    public static bool IsDoor(MRUKAnchor a)
+    {
+        if (a == null) return false;
+        string l = a.Label.ToString().ToUpperInvariant();
+        if (l.Contains("DOOR")) return true;
+        if (!l.Contains("WINDOW") || !a.PlaneRect.HasValue || a.Room == null || a.Room.FloorAnchors.Count == 0) return false;
+
+        float floorY = a.Room.FloorAnchors.Min(f => f.transform.position.y);
+        float bottomY = a.transform.position.y - a.PlaneRect.Value.height / 2f;
+        return bottomY - floorY < 0.15f;
+    }
+
+    public static bool IsWindow(MRUKAnchor a)
+    {
+        return a != null && a.Label.ToString().ToUpperInvariant().Contains("WINDOW") && !IsDoor(a);
     }
 
     public static string GetSafeName(string name)

@@ -13,6 +13,7 @@ public class DollHouseVisualizer : MonoBehaviour
     public float scale = 0.05f, spawnDistance = 1.0f;
     public XRMenu uiLog;
     private GameObject root;
+    private Transform rightHand;
     private DollhouseMode mode = DollhouseMode.Off;
     private bool grabbed = false;
     private Vector3 off;
@@ -25,19 +26,18 @@ public class DollHouseVisualizer : MonoBehaviour
     private async void Refresh() {
         Cleanup();
         if (mode == DollhouseMode.Off) return;
-        
+
+        var camera = Camera.main;
+        if (camera == null) { uiLog?.AddLog("<color=red>Dollhouse: no main camera</color>"); return; }
+
         uiLog?.AddLog($"Dollhouse Refresh: {mode}");
-        Camera.main.nearClipPlane = 0.001f;
+        camera.nearClipPlane = 0.001f;
         root = new GameObject("DollhouseRoot");
-        var cam = Camera.main.transform;
+        var cam = camera.transform;
         root.transform.position = cam.position + cam.forward * spawnDistance;
         root.transform.rotation = Quaternion.Euler(0, cam.eulerAngles.y + 180, 0);
         root.transform.localScale = Vector3.one * scale;
 
-        // Force center calculation
-        Vector3 c = CalculateCenter();
-        XRHouseModel m = null;
-        
         // Same filtering/dedup as the exporter, so the preview always matches what gets exported
         var rooms = MRUKDataProcessor.GetValidRooms(MRUK.Instance);
 
@@ -48,11 +48,16 @@ public class DollHouseVisualizer : MonoBehaviour
         }
 
         uiLog?.AddLog($"Dollhouse: Processing {rooms.Count} rooms...");
-        
+
+        Vector3 c = CalculateCenter(rooms);
+        // Same wall alignment as the export, so the preview is oriented like the exported model.
+        float yaw = FloorPlanBuilder.CorrectionYaw(MRUKPlanExtractor.Extract(rooms));
+        XRHouseModel m = null;
+
         try {
-            if (mode == DollhouseMode.AnchorAnalytical) m = XRModelFactory.CreateAnchorAnalytical(rooms, 0, c);
-            else if (mode == DollhouseMode.MeshAnalytical) m = await XRModelFactory.CreateMeshAnalytical(rooms, 0, c);
-            else if (mode == DollhouseMode.RawMesh) m = await XRModelFactory.CreateRawScan(rooms, 0, c);
+            if (mode == DollhouseMode.AnchorAnalytical) m = XRModelFactory.CreateAnchorAnalytical(rooms, yaw, c);
+            else if (mode == DollhouseMode.MeshAnalytical) m = await XRModelFactory.CreateMeshAnalytical(rooms, yaw, c);
+            else if (mode == DollhouseMode.RawMesh) m = await XRModelFactory.CreateRawScan(rooms, yaw, c);
 
             if (m != null) {
                 var visual = UnityModelLoader.LoadToScene(m);
@@ -68,13 +73,13 @@ public class DollHouseVisualizer : MonoBehaviour
         }
     }
 
-    private Vector3 CalculateCenter() {
+    private Vector3 CalculateCenter(List<MRUKRoom> rooms) {
         Vector3 c = Vector3.zero; int n = 0;
-        foreach (var r in MRUK.Instance.Rooms) {
-            var f = r.Anchors.FirstOrDefault(a => a.Label == MRUKAnchor.SceneLabels.FLOOR);
+        foreach (var r in rooms) {
+            var f = r.FloorAnchors.FirstOrDefault(a => a != null);
             if (f != null) { c += f.transform.position; n++; }
         }
-        return n > 0 ? c / n : (MRUK.Instance.Rooms.Count > 0 ? MRUK.Instance.Rooms[0].transform.position : Vector3.zero);
+        return n > 0 ? c / n : rooms[0].transform.position;
     }
 
     private void Cleanup() {
@@ -83,7 +88,8 @@ public class DollHouseVisualizer : MonoBehaviour
             foreach(var mr in root.GetComponentsInChildren<MeshRenderer>()) if(mr.sharedMaterial) Destroy(mr.sharedMaterial);
             Destroy(root);
         }
-        Camera.main.nearClipPlane = 0.1f;
+        var camera = Camera.main;
+        if (camera != null) camera.nearClipPlane = 0.1f;
     }
 
     private void AddCol(GameObject go) {
@@ -99,13 +105,18 @@ public class DollHouseVisualizer : MonoBehaviour
 
     void Update() {
         if (!root || mode == DollhouseMode.Off) return;
-        var hand = GameObject.Find("RightHandAnchor")?.transform; if (!hand) return;
+        if (!rightHand) {
+            var rig = FindFirstObjectByType<OVRCameraRig>();
+            rightHand = rig ? rig.rightHandAnchor : null;
+            if (!rightHand) return;
+        }
+        var hand = rightHand;
         bool grip = OVRInput.Get(OVRInput.Button.PrimaryHandTrigger, OVRInput.Controller.RTouch);
         Vector2 s = OVRInput.Get(OVRInput.Axis2D.PrimaryThumbstick, OVRInput.Controller.RTouch);
         if (!grabbed) {
             if (grip && Physics.Raycast(hand.position, hand.forward, out RaycastHit hit) && hit.collider.gameObject == root) {
                 grabbed = true;
-                OVRInput.SetControllerVibration(0.1f, 0.1f, OVRInput.Controller.RTouch); Invoke("StopVib", 0.05f);
+                OVRInput.SetControllerVibration(0.1f, 0.1f, OVRInput.Controller.RTouch); Invoke(nameof(StopVib), 0.05f);
                 off = hand.InverseTransformPoint(root.transform.position);
                 rotOff = Quaternion.Inverse(hand.rotation) * root.transform.rotation;
             }

@@ -28,5 +28,5 @@ public static class OBJWriter
         return sb.ToString();
     }
 
-    public static string GenerateMTL() => "newmtl Wall\nKd 0.42 0.42 0.45\nnewmtl Floor\nKd 0.75 0.75 0.78\nnewmtl Door\nKd 0.55 0.35 0.18\nnewmtl Window\nKd 0.25 0.60 0.92";
+    public static string GenerateMTL() => "newmtl WALL\nKd 0.42 0.42 0.45\nnewmtl FLOOR\nKd 0.75 0.75 0.78\nnewmtl DOOR\nKd 0.55 0.35 0.18\nnewmtl WINDOW\nKd 0.25 0.60 0.92";
 }
