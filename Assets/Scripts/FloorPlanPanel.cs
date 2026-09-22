@@ -47,6 +47,9 @@ public class PlanGraphic : MaskableGraphic
             case PlanStyle.Window: return (0.14f, 4f, new Color32(90, 190, 255, 255));
             case PlanStyle.Tick: return (0.03f, 2f, new Color32(255, 110, 110, 255));
             case PlanStyle.Extension: return (0.01f, 1f, new Color32(255, 110, 110, 160));
+            case PlanStyle.OuterTick: return (0.03f, 2f, new Color32(90, 215, 140, 255));
+            case PlanStyle.OuterExtension: return (0.01f, 1f, new Color32(90, 215, 140, 160));
+            case PlanStyle.OuterDimension: return (0.015f, 1.5f, new Color32(90, 215, 140, 255));
             default: return (0.015f, 1.5f, new Color32(255, 110, 110, 255));
         }
     }
@@ -179,7 +182,7 @@ public class FloorPlanPanel : MonoBehaviour
             tmp.text = t.text;
             tmp.fontSize = Mathf.Max(16f, t.size * graphic.Scale);
             tmp.fontStyle = t.bold ? FontStyles.Bold : FontStyles.Normal;
-            tmp.color = t.style == PlanStyle.Label ? Color.white : new Color(1f, 0.55f, 0.55f);
+            tmp.color = t.style == PlanStyle.Label ? Color.white : t.style == PlanStyle.OuterDimension ? new Color(0.45f, 0.9f, 0.6f) : new Color(1f, 0.55f, 0.55f);
             tmp.rectTransform.anchoredPosition = graphic.ToLocal(t.pos);
             tmp.rectTransform.localRotation = Quaternion.Euler(0, 0, t.angleDeg);
         }
@@ -219,8 +222,9 @@ public class FloorPlanPanel : MonoBehaviour
         XRUi.CreateButton(root, "<", 360, Height - 110, 200, 90, () => Step(-1), 44);
         pageText = XRUi.CreateText(root, "Page", "", 40, TextAlignmentOptions.Center, 580, Height - 110, 240, 90, XRUi.TextColor, FontStyles.Bold);
         XRUi.CreateButton(root, ">", 840, Height - 110, 200, 90, () => Step(1), 44);
+        // Bottom row, opposite Close, so it never overlaps the page-nav row above it.
+        nameButton = XRUi.CreateButton(root, "Rename room", 30, 20, 440, 80, RenameCurrent, 34);
         XRUi.CreateButton(root, "Close", Width - 250, 20, 220, 80, Hide, 34);
-        nameButton = XRUi.CreateButton(root, "Rename room", Width - 470, Height - 110, 440, 90, RenameCurrent, 34);
 
         canvas.gameObject.SetActive(false);
     }

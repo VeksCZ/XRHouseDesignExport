@@ -7,19 +7,22 @@
 - **3D export** (OBJ + GLB, valid glTF 2.0) in four flavours: clean anchor reconstruction (the Blender-ready one: real wall thickness, blue windows, brown doors, floor-length balcony doors), mesh-based, analytical mesh and raw scan. Multi-room, multi-floor and sloped ceilings are handled.
 - **HTML report** with a floor plan per story and per room, dimension chains (exterior walls from outside, openings from inside), axis-aligned plans, and tables.
 - **In-headset viewers** – a dollhouse of the whole scan and a floor-plan viewer with paging. Rooms can be named from a preset list (Quest does not share its room names with apps); the names are stored per room and used in plans, reports and folders.
-- Exports go to dated session folders, `Export_<timestamp>_<scan name>`.
+- Exports go to dated session folders, `Export_<timestamp>_<scan name>`; each room also gets its own subfolder with the same 4 model tiers and its own HTML report, scoped to just that room.
 
 ## Using the app
-The menu floats in front of you (follows your gaze); only the right controller is needed. Point and pull the trigger.
+The menu floats in front of you (follows your gaze). Point with the right controller and pull the trigger to click.
 
 | Button | Shortcut | |
 |---|---|---|
-| Export | B | Runs the full export of the selected source |
-| Dollhouse | A | Toggles the in-headset dollhouse |
-| Floor plans | left stick | Plan viewer (`<` `>` page, "Rename room" names the room) |
+| Export | B (right) | Runs the full export of the selected source |
+| Dollhouse | A (right) | Turns the in-headset dollhouse on/off, showing whatever tier was last picked |
+| Mode | right stick left/right | Cycles the dollhouse between its 3 tiers: Anchor (clean, 25cm walls, no furniture), Mesh, Raw |
+| Floor plans | stick click (left) | Plan viewer (`<` `>` page, right stick left/right also pages while open, "Rename room" names the room) |
 | Save scan | X (left) | Stores the live scene in the scan cache |
-| Open report | right stick | Opens the HTML report |
+| Open report | stick click (right) | Opens the HTML report |
 | Load scan | | Loads the selected saved scan |
+| Save log | Y (left) | Writes the on-screen log to a file |
+| Scan source | left stick left/right | Cycles between the live scan and saved scans |
 
 ## Requirements
 - **Unity** 6000.3.9f1 (Unity 6), Android build target (IL2CPP, ARM64), URP.

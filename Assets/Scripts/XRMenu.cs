@@ -44,8 +44,6 @@ public class XRMenu : MonoBehaviour
 
     async void Start()
     {
-        HideLegacyCanvas();
-
         exporter ??= FindAnyObjectByType<MRUKExporter>();
         dollhouse ??= FindAnyObjectByType<DollHouseVisualizer>() ?? gameObject.AddComponent<DollHouseVisualizer>();
         dollhouse.uiLog = this;
@@ -60,16 +58,6 @@ public class XRMenu : MonoBehaviour
         SetStatus("Ready");
         await Task.Delay(300);
         AddLog("XR Ready.");
-    }
-
-    /// <summary>The authored menu canvas (stacked buttons, background swallowed by a layout group, overlay layer) is replaced by BuildMenu.</summary>
-    void HideLegacyCanvas()
-    {
-        if (TryGetComponent<OVROverlayCanvas>(out var overlay)) overlay.enabled = false;
-        foreach (var raycaster in GetComponents<BaseRaycaster>()) raycaster.enabled = false;
-        foreach (var layout in GetComponents<LayoutGroup>()) layout.enabled = false;
-        if (TryGetComponent<Canvas>(out var canvas)) canvas.enabled = false;
-        foreach (Transform child in transform) child.gameObject.SetActive(false);
     }
 
     void BuildMenu()
@@ -87,7 +75,12 @@ public class XRMenu : MonoBehaviour
 
         const float left = 24, right = 308, w = 268, h = 78, gap = 10, top = 84;
         XRUi.CreateButton(root, "Export (B)", left, top, w, h, OnExportAll);
-        XRUi.CreateButton(root, "Dollhouse (A)", right, top, w, h, OnToggleHouseView);
+        // Dollhouse on/off and which of its 3 tiers to show are two separate buttons sharing this cell, so
+        // turning it on never guesses which tier you left it on and switching tiers never needs to cycle
+        // through "off" first.
+        const float modeW = 90;
+        XRUi.CreateButton(root, "Dollhouse (A)", right, top, w - modeW - gap, h, OnToggleHouseView);
+        XRUi.CreateButton(root, "Mode", right + w - modeW, top, modeW, h, OnCycleDollhouseMode, 22);
         XRUi.CreateButton(root, "Floor plans", left, top + (h + gap), w, h, OnShowPlans);
         XRUi.CreateButton(root, "Save scan", right, top + (h + gap), w, h, OnSaveScan);
         XRUi.CreateButton(root, "Open report", left, top + 2 * (h + gap), w, h, OpenReportInApp);
@@ -186,7 +179,8 @@ public class XRMenu : MonoBehaviour
         // app already reads the controllers through OVRInput.
         if (OVRInput.GetDown(OVRInput.Button.PrimaryIndexTrigger, OVRInput.Controller.RTouch)) ClickUnderRay();
 
-        // Right hand: B = export, A = dollhouse, stick click = open report.
+        // Right hand: B = export, A = dollhouse on/off, stick click = open report, stick left/right = dollhouse
+        // mode (only while it's on and floor plans are closed - otherwise the stick pages floor plans instead).
         if (OVRInput.GetDown(OVRInput.Button.Two, OVRInput.Controller.RTouch)) OnExportAll();
         if (OVRInput.GetDown(OVRInput.Button.One, OVRInput.Controller.RTouch)) OnToggleHouseView();
         if (OVRInput.GetDown(OVRInput.Button.PrimaryThumbstick, OVRInput.Controller.RTouch)) OpenReportInApp();
@@ -205,6 +199,12 @@ public class XRMenu : MonoBehaviour
         if (plansOpen && !(dollhouse != null && dollhouse.IsDragging) && Mathf.Abs(right.x) > FlickThreshold)
         {
             plansPanel.Step(right.x > 0 ? 1 : -1);
+            flickCooldown = FlickCooldown;
+        }
+        else if (!plansOpen && dollhouse != null && dollhouse.IsOn && !dollhouse.IsDragging && Mathf.Abs(right.x) > FlickThreshold)
+        {
+            // Quick access to the same 3-tier cycle as the Mode button, without reaching for the menu.
+            OnCycleDollhouseMode();
             flickCooldown = FlickCooldown;
         }
         else if (Mathf.Abs(left.x) > FlickThreshold)
@@ -258,9 +258,14 @@ public class XRMenu : MonoBehaviour
         SetStatus(ok ? "Export done" : "ERROR");
     }
 
+    /// <summary>Plain on/off - it always shows whatever mode was last picked with the Mode button, so it never
+    /// needs the loading/validity checks below except when actually turning on.</summary>
     public async void OnToggleHouseView()
     {
-        if (dollhouse == null || !RequireExporter()) return;
+        if (dollhouse == null) return;
+        if (dollhouse.IsOn) { dollhouse.ToggleOnOff(); AddLog("Dollhouse OFF"); SetStatus("Ready"); return; }
+
+        if (!RequireExporter()) return;
         await Busy("Loading...");
         if (!await exporter.EnsureSelectedSourceLoaded(this)) { SetStatus("ERROR"); return; }
         if (!exporter.HasValidRooms())
@@ -270,9 +275,21 @@ public class XRMenu : MonoBehaviour
             return;
         }
         await Busy("Building...");
-        bool on = dollhouse.Toggle();
-        AddLog(on ? "Dollhouse ON" : "Dollhouse OFF");
-        SetStatus(on ? "Dollhouse" : "Ready");
+        dollhouse.ToggleOnOff();
+        AddLog($"Dollhouse ON - mode: <b>{dollhouse.ModeLabel}</b>");
+        // The mode name stays in the status bar the whole time it's up, not just a log line that scrolls away -
+        // so which of the 3 dollhouse modes (Anchor/Mesh/Raw) is on screen is never a guess.
+        SetStatus($"Dollhouse: {dollhouse.ModeLabel}");
+    }
+
+    /// <summary>Cycles which of the 3 dollhouse tiers (Anchor/Mesh/Raw) is shown - separate from turning the
+    /// dollhouse itself on or off, so switching tiers never needs 1-3 extra presses through an off state first.</summary>
+    public void OnCycleDollhouseMode()
+    {
+        if (dollhouse == null) return;
+        string m = dollhouse.CycleMode();
+        AddLog($"Dollhouse mode: <b>{m}</b>");
+        if (dollhouse.IsOn) SetStatus($"Dollhouse: {m}");
     }
 
     public async void OnSaveScan()

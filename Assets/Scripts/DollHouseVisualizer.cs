@@ -14,18 +14,40 @@ public class DollHouseVisualizer : MonoBehaviour
     public XRMenu uiLog;
     private GameObject root;
     private Transform rightHand;
-    private DollhouseMode mode = DollhouseMode.Off;
+    // On/off and which of the 3 model tiers to show are separate now: one button used to cycle through all 4
+    // states (Off/Anchor/Mesh/Raw) at once, so turning it back on after Raw needed 3 more presses to reach the
+    // familiar Anchor view again, and a stray extra press silently swapped you into a different tier. A
+    // dedicated on/off toggle and a separate mode-cycle keep "on" always showing whatever tier you last picked.
+    private bool isOn = false;
+    private DollhouseMode mode = DollhouseMode.AnchorAnalytical;
     private bool grabbed = false;
     private Vector3 off;
     private Quaternion rotOff;
-    private enum DollhouseMode { Off, AnchorAnalytical, MeshAnalytical, RawMesh }
+    private enum DollhouseMode { AnchorAnalytical, MeshAnalytical, RawMesh }
 
-    public bool Toggle() { mode = (DollhouseMode)(((int)mode+1)%4); Refresh(); return mode != DollhouseMode.Off; }
+    public bool IsOn => isOn;
+    public bool ToggleOnOff() { isOn = !isOn; Refresh(); return isOn; }
+
+    /// <summary>Cycles Anchor -&gt; Mesh -&gt; Raw -&gt; Anchor. Rebuilds immediately if the dollhouse is on.</summary>
+    public string CycleMode() {
+        mode = (DollhouseMode)(((int)mode + 1) % 3);
+        if (isOn) Refresh();
+        return ModeLabel;
+    }
     public bool IsDragging => grabbed;
+
+    /// <summary>Short label for the status bar, so which of the 3 dollhouse modes is on screen is never a guess.</summary>
+    public string ModeLabel => mode switch
+    {
+        DollhouseMode.AnchorAnalytical => "Anchor",
+        DollhouseMode.MeshAnalytical => "Mesh",
+        DollhouseMode.RawMesh => "Raw",
+        _ => "?",
+    };
 
     private async void Refresh() {
         Cleanup();
-        if (mode == DollhouseMode.Off) return;
+        if (!isOn) return;
 
         var camera = Camera.main;
         if (camera == null) { uiLog?.AddLog("<color=red>Dollhouse: no main camera</color>"); return; }
@@ -56,8 +78,8 @@ public class DollHouseVisualizer : MonoBehaviour
 
         try {
             if (mode == DollhouseMode.AnchorAnalytical) m = XRModelFactory.CreateAnchorAnalytical(rooms, yaw, c);
-            else if (mode == DollhouseMode.MeshAnalytical) m = await XRModelFactory.CreateMeshAnalytical(rooms, yaw, c);
-            else if (mode == DollhouseMode.RawMesh) m = await XRModelFactory.CreateRawScan(rooms, yaw, c);
+            else if (mode == DollhouseMode.MeshAnalytical) m = await XRModelFactory.CreateMeshAnalytical(rooms, yaw, c, forDollhouse: true);
+            else if (mode == DollhouseMode.RawMesh) m = await XRModelFactory.CreateRawScan(rooms, yaw, c, forDollhouse: true);
 
             if (m != null) {
                 var visual = UnityModelLoader.LoadToScene(m);
@@ -104,7 +126,7 @@ public class DollHouseVisualizer : MonoBehaviour
     }
 
     void Update() {
-        if (!root || mode == DollhouseMode.Off) return;
+        if (!root || !isOn) return;
         if (!rightHand) {
             var rig = FindFirstObjectByType<OVRCameraRig>();
             rightHand = rig ? rig.rightHandAnchor : null;

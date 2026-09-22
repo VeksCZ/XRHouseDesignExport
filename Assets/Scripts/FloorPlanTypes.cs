@@ -1,7 +1,8 @@
 using System.Collections.Generic;
 using UnityEngine;
 
-public enum PlanStyle { Wall, Door, Window, Dimension, Extension, Tick, Label }
+// Dimension* = short segments measured on the inside (corner-opening, opening widths); Outer* = whole wall lengths measured from outside.
+public enum PlanStyle { Wall, Door, Window, Dimension, Extension, Tick, Label, OuterDimension, OuterExtension, OuterTick }
 public enum OpeningKind { Door, Window }
 
 public struct PlanLine

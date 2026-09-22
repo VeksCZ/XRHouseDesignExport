@@ -20,23 +20,28 @@ public static class XRModelFactory
             var openings = anchors.Where(a => a.Label.ToString().Contains("DOOR") || a.Label.ToString().Contains("WINDOW")).ToList();
             
             foreach (var f in anchors.Where(a => a.Label == MRUKAnchor.SceneLabels.FLOOR))
-                rm.parts.Add(CreateBoxPart("FLOOR", f.transform.position, f.transform.rotation, new Vector3(f.PlaneRect.Value.width, f.PlaneRect.Value.height, 0.05f), "FLOOR", center, rotation, new Vector3(0,0,-0.025f)));
+                rm.parts.Add(CreateFloorSlab(f, center, rotation));
 
             foreach (var w in anchors.Where(MRUKDataProcessor.IsStructuralWall)) {
                 float wW = w.PlaneRect.Value.width, wH = w.PlaneRect.Value.height;
-                // w.transform.forward points into this room, so the opposite room (if scanned) is
-                // on the -forward side - see EstimateWallThickness.
-                float wallThickness = EstimateWallThickness(room, rooms, w.transform.position, -w.transform.forward, wW, w.transform.right, 0.25f);
+                // A real wall's own scanned rotation is never off by more than a few degrees, but drawn as-is
+                // that jitter is exactly what made walls look crooked/non-perpendicular - snap it to the nearest
+                // right angle from the house's own dominant direction so every wall comes out square, the way a
+                // "clean" reconstruction should look regardless of scan noise.
+                Quaternion wallRot = SnapToPerpendicular(w.transform.rotation, rotation);
+                Vector3 wallPos = w.transform.position;
+                // wallRot*forward points into this room, so the opposite room (if scanned) is on the -forward side.
+                float wallThickness = EstimateWallThickness(room, rooms, wallPos, -(wallRot * Vector3.forward), wW, wallRot * Vector3.right, 0.25f);
                 var wallHoles = openings.Where(o => {
-                    Vector3 lp = w.transform.InverseTransformPoint(o.transform.position);
+                    Vector3 lp = Quaternion.Inverse(wallRot) * (o.transform.position - wallPos);
                     return Mathf.Abs(lp.z) < 0.25f && Mathf.Abs(lp.x) < (wW / 2f + 0.1f) && Mathf.Abs(lp.y) < (wH / 2f + 0.1f);
                 }).ToList();
-                
+
                 if (wallHoles.Count > 0) {
                     var xC = new List<float> { -wW/2f, wW/2f };
                     var yC = new List<float> { -wH/2f, wH/2f };
                     foreach(var h in wallHoles) {
-                        Vector3 lp = w.transform.InverseTransformPoint(h.transform.position);
+                        Vector3 lp = Quaternion.Inverse(wallRot) * (h.transform.position - wallPos);
                         float hw = h.PlaneRect.Value.width/2f, hh = h.PlaneRect.Value.height/2f;
                         xC.Add(Mathf.Clamp(lp.x - hw, -wW/2f, wW/2f)); xC.Add(Mathf.Clamp(lp.x + hw, -wW/2f, wW/2f));
                         yC.Add(Mathf.Clamp(lp.y - hh, -wH/2f, wH/2f)); yC.Add(Mathf.Clamp(lp.y + hh, -wH/2f, wH/2f));
@@ -49,25 +54,26 @@ public static class XRModelFactory
                             if (x2-x1 < 0.01f || y2-y1 < 0.01f) continue;
                             float midX = (x1+x2)/2f, midY = (y1+y2)/2f;
                             bool isHole = wallHoles.Any(h => {
-                                Vector3 lp = w.transform.InverseTransformPoint(h.transform.position);
+                                Vector3 lp = Quaternion.Inverse(wallRot) * (h.transform.position - wallPos);
                                 float hw = h.PlaneRect.Value.width/2f, hh = h.PlaneRect.Value.height/2f;
                                 return midX > lp.x-hw+0.01f && midX < lp.x+hw-0.01f && midY > lp.y-hh+0.01f && midY < lp.y+hh-0.01f;
                             });
-                            if (!isHole) rm.parts.Add(CreateBoxPart("WallSeg", w.transform.TransformPoint(new Vector3(midX, midY, 0)), w.transform.rotation, new Vector3(x2-x1, y2-y1, wallThickness), "WALL", center, rotation));
+                            if (!isHole) rm.parts.Add(CreateBoxPart("WallSeg", wallPos + wallRot * new Vector3(midX, midY, 0), wallRot, new Vector3(x2-x1, y2-y1, wallThickness), "WALL", center, rotation));
                         }
                     }
-                } else rm.parts.Add(CreateBoxPart("WALL", w.transform.position, w.transform.rotation, new Vector3(wW, wH, wallThickness), "WALL", center, rotation));
+                } else rm.parts.Add(CreateBoxPart("WALL", wallPos, wallRot, new Vector3(wW, wH, wallThickness), "WALL", center, rotation));
             }
             foreach (var o in openings) {
                 bool isD = MRUKDataProcessor.IsDoor(o);
-                rm.parts.Add(CreateBoxPart(o.Label.ToString(), o.transform.position, o.transform.rotation, new Vector3(o.PlaneRect.Value.width, o.PlaneRect.Value.height, isD ? 0.10f : 0.12f), isD ? "DOOR" : "WINDOW", center, rotation));
+                Quaternion openingRot = SnapToPerpendicular(o.transform.rotation, rotation);
+                rm.parts.Add(CreateBoxPart(o.Label.ToString(), o.transform.position, openingRot, new Vector3(o.PlaneRect.Value.width, o.PlaneRect.Value.height, isD ? 0.10f : 0.12f), isD ? "DOOR" : "WINDOW", center, rotation));
             }
             model.rooms.Add(rm);
         }
         return model;
     }
 
-    public static async Task<XRHouseModel> CreateMeshAnalytical(List<MRUKRoom> rooms, float rotation, Vector3 center)
+    public static async Task<XRHouseModel> CreateMeshAnalytical(List<MRUKRoom> rooms, float rotation, Vector3 center, bool forDollhouse = false)
     {
         var model = new XRHouseModel { center = center, globalRotation = rotation };
         foreach (var room in rooms) {
@@ -78,6 +84,7 @@ public static class XRModelFactory
                 rm.parts.Add(cachedMesh);
             else foreach (var a in room.Anchors.Where(x => MRUKDataProcessor.IsStructuralWall(x) || x.Label == MRUKAnchor.SceneLabels.FLOOR))
                 if (a.Anchor.TryGetComponent<OVRTriangleMesh>(out var tm)) rm.parts.Add(await CreateMeshPart(a.Label.ToString(), tm, a.Anchor, a.Label == MRUKAnchor.SceneLabels.FLOOR ? "FLOOR" : "WALL", center, rotation));
+            if (forDollhouse) SplitScanForDollhouse(rm, room, "GlobalMesh", center);
             foreach (var o in room.Anchors.Where(a => a.PlaneRect.HasValue && (a.Label.ToString().Contains("DOOR") || a.Label.ToString().Contains("WINDOW"))))
                 rm.parts.Add(CreateBoxPart(o.Label.ToString(), o.transform.position, o.transform.rotation, new Vector3(o.PlaneRect.Value.width, o.PlaneRect.Value.height, 0.08f), MRUKDataProcessor.IsDoor(o) ? "DOOR" : "WINDOW", center, rotation));
             model.rooms.Add(rm);
@@ -138,7 +145,9 @@ public static class XRModelFactory
                     fp.vertices.Add(gRot * (worldPt - center));
                     cp.vertices.Add(gRot * (new Vector3(worldPt.x, ceilY[i], worldPt.z) - center));
                 }
-                for (int i = 0; i < c - 2; i++) { fp.triangles.AddRange(new[] { 0, i+1, i+2 }); cp.triangles.AddRange(new[] { 0, i+2, i+1 }); }
+                // Ear clipping: L-shaped rooms are common, a triangle fan would cut across the notch.
+                fp.triangles.AddRange(PolygonTriangulator.TriangulateHorizontal(fp.vertices, true));
+                cp.triangles.AddRange(PolygonTriangulator.TriangulateHorizontal(cp.vertices, false));
                 rm.parts.Add(fp); rm.parts.Add(cp);
 
                 for (int i = 0; i < c; i++) {
@@ -253,34 +262,60 @@ return model;
     /// <summary>
     /// Estimates a wall's real thickness by finding the WALL_FACE anchor of a different, already
     /// scanned room that represents the opposite face of the same physical wall - i.e. one whose
-    /// plane roughly faces back the way we came from (MRUK anchor local +Z always points into its
-    /// own room, so two anchors on either side of one wall point roughly the same way in world
-    /// space) and sits a plausible wall-thickness away, overlapping this segment's span. Measuring
+    /// plane faces back the way we came from (MRUK anchor local +Z always points into its own
+    /// room, so two anchors on either side of one wall point almost exactly opposite ways in world
+    /// space) and sits a plausible wall-thickness away, centred on this segment's span. Measuring
     /// the gap between the two planes gives the true thickness; when no matching anchor exists
     /// (typically an exterior wall, or the other side wasn't scanned) this falls back to a typical
     /// interior wall thickness instead of guessing.
+    ///
+    /// In a home with several scanned rooms there are many wall anchors to check, so every criterion
+    /// here is deliberately strict: a real house has no walls thinner than a few centimetres, two
+    /// faces of the same physical wall point almost exactly opposite ways and sit almost exactly
+    /// behind each other, and their anchors are at almost the same height. A looser match (as this
+    /// used to be) reliably finds some unrelated wall elsewhere in a multi-room scan that happens to
+    /// satisfy a loose test, and reports its distance as this wall's "thickness" - producing walls a
+    /// few centimetres thick that are really many metres apart. Among every anchor that still passes
+    /// every check, the closest one is used, since the true opposite face is always the nearest.
     /// </summary>
+    /// <summary>Snaps a yaw-only rotation to the nearest right angle measured from <paramref name="dominantYawDeg"/>
+    /// (see FloorPlanBuilder.CorrectionYaw) - a few degrees of real scan jitter should never stop two walls that
+    /// are meant to be parallel or perpendicular from actually being drawn that way.</summary>
+    private static Quaternion SnapToPerpendicular(Quaternion raw, float dominantYawDeg)
+    {
+        float rel = Mathf.DeltaAngle(dominantYawDeg, raw.eulerAngles.y);
+        float snappedYaw = dominantYawDeg + Mathf.Round(rel / 90f) * 90f;
+        return Quaternion.Euler(0f, snappedYaw, 0f);
+    }
+
     private static float EstimateWallThickness(MRUKRoom room, List<MRUKRoom> allRooms, Vector3 wallWorldPos, Vector3 outwardNormal, float extentAlongWall, Vector3 wallDir, float fallback)
     {
-        const float minThickness = 0.03f, maxThickness = 0.6f;
+        const float minThickness = 0.06f, maxThickness = 0.5f;
+        float best = float.MaxValue;
         foreach (var other in allRooms) {
             if (other == room) continue;
             foreach (var a in other.Anchors) {
                 if (a == null || a.PlaneRect == null || !MRUKDataProcessor.IsStructuralWall(a)) continue;
-                if (Vector3.Dot(a.transform.forward, outwardNormal) < 0.7f) continue; // not roughly facing back at us
+                if (Vector3.Dot(a.transform.forward, outwardNormal) < 0.9f) continue; // not (almost) facing straight back at us
 
                 Vector3 delta = a.transform.position - wallWorldPos;
                 float gap = Vector3.Dot(delta, outwardNormal);
-                if (gap < minThickness || gap > maxThickness) continue;
+                if (gap < minThickness || gap > maxThickness || gap >= best) continue;
 
+                // The other anchor's centre must sit almost directly behind this wall's own span - not merely
+                // within reach once the other wall's own width is added on top, which is what let barely-adjacent,
+                // unrelated walls match before.
                 float along = Vector3.Dot(delta, wallDir);
-                float halfOtherWidth = a.PlaneRect.Value.width / 2f;
-                if (Mathf.Abs(along) > extentAlongWall / 2f + halfOtherWidth) continue; // doesn't overlap this segment
+                if (Mathf.Abs(along) > extentAlongWall * 0.35f) continue;
 
-                return gap;
+                // Two faces of one physical wall are always at essentially the same height; an unrelated wall
+                // elsewhere in the home is unlikely to also line up in height by coincidence.
+                if (Mathf.Abs(a.transform.position.y - wallWorldPos.y) > 0.4f) continue;
+
+                best = gap;
             }
         }
-        return fallback;
+        return best < float.MaxValue ? best : fallback;
     }
 
     private static bool IsPointInPolygon(Vector2 pt, IReadOnlyList<Vector2> poly)
@@ -329,7 +364,7 @@ return model;
         return part;
     }
 
-    public static async Task<XRHouseModel> CreateRawScan(List<MRUKRoom> rooms, float rotation, Vector3 center)
+    public static async Task<XRHouseModel> CreateRawScan(List<MRUKRoom> rooms, float rotation, Vector3 center, bool forDollhouse = false)
     {
         var model = new XRHouseModel { center = center, globalRotation = rotation };
         foreach (var room in rooms) {
@@ -340,9 +375,90 @@ return model;
                 rm.parts.Add(cachedMesh);
             else foreach (var a in room.Anchors) if (a != null && a.Anchor.TryGetComponent<OVRTriangleMesh>(out var tm))
                 rm.parts.Add(await CreateMeshPart(a.Label.ToString(), tm, a.Anchor, "WALL", center, rotation));
+            if (forDollhouse) SplitScanForDollhouse(rm, room, "Raw", center);
             model.rooms.Add(rm);
         }
         return model;
+    }
+
+    /// <summary>
+    /// A floor slab that follows the room's real outline (PlaneBoundary2D) - the anchor's PlaneRect is only the bounding
+    /// rectangle, which sticks out of every L-shaped or notched room. Its top face is at the floor plane.
+    /// </summary>
+    private static XRMeshPart CreateFloorSlab(MRUKAnchor floor, Vector3 center, float globalRot)
+    {
+        var outline = floor.PlaneBoundary2D;
+        if (outline == null || outline.Count < 3)
+            return CreateBoxPart("FLOOR", floor.transform.position, floor.transform.rotation, new Vector3(floor.PlaneRect.Value.width, floor.PlaneRect.Value.height, 0.05f), "FLOOR", center, globalRot, new Vector3(0, 0, -0.025f));
+
+        const float thickness = 0.05f;
+        Quaternion gRot = Quaternion.Euler(0, globalRot, 0);
+        var part = new XRMeshPart { name = "FLOOR", materialName = "FLOOR", color = GetColorForMaterial("FLOOR") };
+
+        var top = new List<Vector3>(outline.Count);
+        foreach (var p in outline) top.Add(gRot * (floor.transform.position + floor.transform.rotation * new Vector3(p.x, p.y, 0) - center));
+        int n = top.Count;
+        foreach (var v in top) part.vertices.Add(v);
+        foreach (var v in top) part.vertices.Add(v + Vector3.down * thickness);
+
+        var tri = PolygonTriangulator.TriangulateHorizontal(top, true);
+        part.triangles.AddRange(tri);
+        for (int i = 0; i < tri.Count; i += 3) part.triangles.AddRange(new[] { n + tri[i], n + tri[i + 2], n + tri[i + 1] }); // underside
+
+        // Side faces, wound to face outwards: for a CCW-in-(x,z) ring (area > 0) the natural corner order
+        // (i, i+1) is already correct; only a CW ring needs the two corners of each edge swapped.
+        float area = 0;
+        for (int i = 0; i < n; i++) { var a = top[i]; var b = top[(i + 1) % n]; area += a.x * b.z - b.x * a.z; }
+        for (int i = 0; i < n; i++)
+        {
+            int p = i, q = (i + 1) % n;
+            if (area < 0) { p = (i + 1) % n; q = i; }
+            part.triangles.AddRange(new[] { p, n + q, q, p, n + p, n + q });
+        }
+        return part;
+    }
+
+    /// <summary>
+    /// Dollhouse view of a scanned mesh: the ceiling is dropped (it would hide the whole house when looked at from above)
+    /// and the floor gets its own light material, like in the clean model. Faces are classified by normal and height,
+    /// so it works for any scan and any winding.
+    /// </summary>
+    private static void SplitScanForDollhouse(XRRoomModel rm, MRUKRoom room, string partName, Vector3 center)
+    {
+        float floorY = (room.FloorAnchors.Count > 0 ? room.FloorAnchors.Min(f => f.transform.position.y) : room.transform.position.y) - center.y;
+        float ceilY = room.CeilingAnchors.Count > 0 ? room.CeilingAnchors.Max(c => c.transform.position.y) - center.y : floorY + 2.5f;
+        float ceilingStart = floorY + 0.7f * (ceilY - floorY);
+
+        foreach (var whole in rm.parts.Where(p => p.name == partName).ToList())
+        {
+            var floorPart = new XRMeshPart { name = "FLOOR", materialName = "FLOOR", color = GetColorForMaterial("FLOOR") };
+            var restPart = new XRMeshPart { name = partName, materialName = whole.materialName, color = whole.color };
+            var floorMap = new Dictionary<int, int>();
+            var restMap = new Dictionary<int, int>();
+
+            int Take(XRMeshPart dst, Dictionary<int, int> map, int oldIndex)
+            {
+                if (!map.TryGetValue(oldIndex, out int i)) { i = dst.vertices.Count; dst.vertices.Add(whole.vertices[oldIndex]); map[oldIndex] = i; }
+                return i;
+            }
+
+            for (int t = 0; t < whole.triangles.Count; t += 3)
+            {
+                int i0 = whole.triangles[t], i1 = whole.triangles[t + 1], i2 = whole.triangles[t + 2];
+                Vector3 a = whole.vertices[i0], b = whole.vertices[i1], c = whole.vertices[i2];
+                Vector3 n = Vector3.Cross(b - a, c - a).normalized;
+                float ny = Mathf.Abs(n.y), y = (a.y + b.y + c.y) / 3f;
+
+                if (ny > 0.5f && y > ceilingStart) continue; // ceiling
+                var (dst, map) = ny > 0.85f && y < floorY + 0.08f ? (floorPart, floorMap) : (restPart, restMap);
+                dst.triangles.Add(Take(dst, map, i0)); dst.triangles.Add(Take(dst, map, i1)); dst.triangles.Add(Take(dst, map, i2));
+            }
+
+            int at = rm.parts.IndexOf(whole);
+            rm.parts.Remove(whole);
+            if (floorPart.triangles.Count > 0) rm.parts.Insert(at, floorPart);
+            if (restPart.triangles.Count > 0) rm.parts.Insert(at, restPart);
+        }
     }
 
     private static XRMeshPart CreateBoxPart(string name, Vector3 pos, Quaternion rot, Vector3 size, string mat, Vector3 center, float globalRot, Vector3 localOff = default)

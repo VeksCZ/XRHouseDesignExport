@@ -132,20 +132,35 @@ public static class FloorPlanBuilder
         var groups = GroupLevels(alignedRooms);
         for (int i = 0; i < groups.Count; i++)
         {
-            var lp = new LevelPlan { index = i, overview = BuildOverview(groups[i], i) };
-            foreach (var r in groups[i]) lp.rooms.Add(new RoomPlan { room = r, page = BuildRoom(r) });
+            var group = groups[i];
+            var lp = new LevelPlan { index = i };
+            if (group.Count == 1)
+            {
+                // A single-room floor has nothing for the overview to add over the room's own sheet - it would
+                // just repeat the same drawing on the next page. Skip it, but keep the overview's touch: the
+                // room name and area centred in the room, the way the overview places them.
+                var page = BuildRoom(group[0]);
+                AddRoomLabel(page, group[0], TextScale(group[0].polygon, 10f));
+                lp.rooms.Add(new RoomPlan { room = group[0], page = page });
+            }
+            else
+            {
+                lp.overview = BuildOverview(group, i);
+                foreach (var r in group) lp.rooms.Add(new RoomPlan { room = r, page = BuildRoom(r) });
+            }
             plans.Add(lp);
         }
         return plans;
     }
 
-    /// <summary>Overview -> its rooms, for every level: the page order used by the viewer and the report.</summary>
+    /// <summary>Overview -> its rooms, for every level: the page order used by the viewer and the report. A single-room
+    /// level has no overview (see BuildLevels), so it contributes only its one room page.</summary>
     public static List<FloorPlanPage> Flatten(IEnumerable<LevelPlan> levels)
     {
         var pages = new List<FloorPlanPage>();
         foreach (var l in levels)
         {
-            pages.Add(l.overview);
+            if (l.overview != null) pages.Add(l.overview);
             pages.AddRange(l.rooms.Select(r => r.page));
         }
         return pages;
@@ -241,7 +256,6 @@ public static class FloorPlanBuilder
         return ang;
     }
 
-    /// <summary>A dimension line from a to b, shifted by 'offset' with extension lines, ticks and a value label alongside.</summary>
     /// <summary>Text grows with the plan so labels stay legible when a whole house is fitted onto one sheet.</summary>
     static float TextScale(IEnumerable<Vector2> points, float divisor)
     {
@@ -251,18 +265,38 @@ public static class FloorPlanBuilder
         return Mathf.Max(1f, extent / divisor);
     }
 
-    static void AddDimension(FloorPlanPage page, Vector2 a, Vector2 b, Vector2 offset, string text, float textSize = DimTextSize)
+    /// <summary>A dimension line from a to b, shifted by 'offset' with extension lines, ticks and a value label alongside.</summary>
+    static void AddDimension(FloorPlanPage page, Vector2 a, Vector2 b, Vector2 offset, string text, float textSize = DimTextSize, bool outer = false)
     {
+        var line = outer ? PlanStyle.OuterDimension : PlanStyle.Dimension;
+        var ext = outer ? PlanStyle.OuterExtension : PlanStyle.Extension;
+        var tick = outer ? PlanStyle.OuterTick : PlanStyle.Tick;
         Vector2 A = a + offset, B = b + offset;
         Vector2 dir = (b - a).normalized, on = offset.normalized;
-        page.lines.Add(new PlanLine(A, B, PlanStyle.Dimension));
-        page.lines.Add(new PlanLine(a + on * 0.04f, A + on * 0.05f, PlanStyle.Extension));
-        page.lines.Add(new PlanLine(b + on * 0.04f, B + on * 0.05f, PlanStyle.Extension));
+        page.lines.Add(new PlanLine(A, B, line));
+        page.lines.Add(new PlanLine(a + on * 0.04f, A + on * 0.05f, ext));
+        page.lines.Add(new PlanLine(b + on * 0.04f, B + on * 0.05f, ext));
         Vector2 tk = (dir + on).normalized * 0.05f;
-        page.lines.Add(new PlanLine(A - tk, A + tk, PlanStyle.Tick));
-        page.lines.Add(new PlanLine(B - tk, B + tk, PlanStyle.Tick));
-        if ((b - a).magnitude >= 0.2f)
-            page.texts.Add(new PlanText { pos = (A + B) / 2f + on * (0.06f + textSize * 0.4f), text = text, angleDeg = TextAngle(dir), size = textSize, style = PlanStyle.Dimension });
+        page.lines.Add(new PlanLine(A - tk, A + tk, tick));
+        page.lines.Add(new PlanLine(B - tk, B + tk, tick));
+        // The value is only written when it fits between the ticks, so neighbouring labels never pile up.
+        if ((b - a).magnitude >= Mathf.Max(0.2f, textSize * 2.6f))
+            page.texts.Add(new PlanText { pos = (A + B) / 2f + on * (0.06f + textSize * 0.4f), text = text, angleDeg = TextAngle(dir), size = textSize, style = line });
+    }
+
+    /// <summary>The short segments of one wall - corner to opening, opening width, opening to opening, opening to corner - measured on the inside.</summary>
+    static void AddInnerChain(FloorPlanPage page, Edge e, List<(float t0, float t1, PlanOpening o)> spans, float offset, float textSize)
+    {
+        Vector2 inward = -e.outward;
+        float cursor = 0;
+        foreach (var (t0Raw, t1, _) in spans)
+        {
+            float t0 = Mathf.Max(t0Raw, cursor);
+            if (t0 - cursor > 0.02f) AddDimension(page, e.a + e.dir * cursor, e.a + e.dir * t0, inward * offset, Fmt(t0 - cursor), textSize);
+            if (t1 - t0 > 0.02f) AddDimension(page, e.a + e.dir * t0, e.a + e.dir * t1, inward * offset, Fmt(t1 - t0), textSize);
+            cursor = Mathf.Max(cursor, t1);
+        }
+        if (e.len - cursor > 0.02f) AddDimension(page, e.a + e.dir * cursor, e.b, inward * offset, Fmt(e.len - cursor), textSize);
     }
 
     static void AddWallsAndOpenings(FloorPlanPage page, List<Edge> edges, List<List<(float t0, float t1, PlanOpening o)>> perEdge)
@@ -274,15 +308,15 @@ public static class FloorPlanBuilder
                     o.kind == OpeningKind.Door ? PlanStyle.Door : PlanStyle.Window));
     }
 
-    /// <summary>One room: walls and openings, with dimensions measured on the inside - each wall's
-    /// overall length plus a chain of corner-to-opening distances and opening widths.</summary>
+    /// <summary>One room: walls and openings. The whole length of every wall is dimensioned from the outside (green), the short
+    /// segments between corners, doors and windows on the inside (red) - both in the same drawing.</summary>
     public static FloorPlanPage BuildRoom(RoomOutline room)
     {
         var page = new FloorPlanPage
         {
             title = room.name,
             roomKey = room.roomKey,
-            subtitle = $"Area {Fmt1(room.Area)} m2 | Perimeter {Fmt(Perimeter(room))} m | Ceiling {CeilingText(room)} | dimensions in metres, taken inside",
+            subtitle = $"Area {Fmt1(room.Area)} m2 | Perimeter {Fmt(Perimeter(room))} m | Ceiling {CeilingText(room)} | whole walls from outside (green), openings from inside (red), metres",
         };
         float ts = DimTextSize * TextScale(room.polygon, 6f);
         var edges = Edges(room.polygon);
@@ -292,26 +326,8 @@ public static class FloorPlanBuilder
         for (int i = 0; i < edges.Count; i++)
         {
             var e = edges[i];
-            Vector2 inward = -e.outward;
-            var spans = perEdge[i];
-
-            if (spans.Count > 0)
-            {
-                float cursor = 0;
-                foreach (var (t0Raw, t1, _) in spans)
-                {
-                    float t0 = Mathf.Max(t0Raw, cursor);
-                    if (t0 - cursor > 0.02f) AddDimension(page, e.a + e.dir * cursor, e.a + e.dir * t0, inward * InnerChainOffset, Fmt(t0 - cursor), ts);
-                    if (t1 - t0 > 0.02f) AddDimension(page, e.a + e.dir * t0, e.a + e.dir * t1, inward * InnerChainOffset, Fmt(t1 - t0), ts);
-                    cursor = Mathf.Max(cursor, t1);
-                }
-                if (e.len - cursor > 0.02f) AddDimension(page, e.a + e.dir * cursor, e.b, inward * InnerChainOffset, Fmt(e.len - cursor), ts);
-                AddDimension(page, e.a, e.b, inward * InnerTotalOffset, Fmt(e.len), ts);
-            }
-            else
-            {
-                AddDimension(page, e.a, e.b, inward * InnerChainOffset, Fmt(e.len), ts);
-            }
+            AddDimension(page, e.a, e.b, e.outward * OuterOffset, Fmt(e.len), ts, outer: true);
+            if (perEdge[i].Count > 0) AddInnerChain(page, e, perEdge[i], InnerChainOffset, ts);
         }
         return page;
     }
@@ -323,24 +339,29 @@ public static class FloorPlanBuilder
         var page = new FloorPlanPage
         {
             title = $"Floor {levelIndex + 1}",
-            subtitle = $"{level.Count} room(s) | total area {Fmt1(level.Sum(r => r.Area))} m2 | exterior walls dimensioned from outside, in metres",
+            subtitle = $"{level.Count} room(s) | total area {Fmt1(level.Sum(r => r.Area))} m2 | exterior walls from outside (green), openings from inside (red), metres",
         };
         var edgeCache = level.ToDictionary(r => r, r => Edges(r.polygon));
         float ts = TextScale(level.SelectMany(r => r.polygon), 6f);
         float ls = TextScale(level.SelectMany(r => r.polygon), 10f); // room names/areas: smaller so they fit inside rooms
 
+        var openingSpans = new Dictionary<RoomOutline, List<List<(float t0, float t1, PlanOpening o)>>>();
         foreach (var r in level)
         {
             var edges = edgeCache[r];
-            AddWallsAndOpenings(page, edges, AssignOpenings(r, edges));
+            openingSpans[r] = AssignOpenings(r, edges);
+            AddWallsAndOpenings(page, edges, openingSpans[r]);
         }
 
         foreach (var r in level)
         {
-            foreach (var e in edgeCache[r])
+            var edges = edgeCache[r];
+            for (int i = 0; i < edges.Count; i++)
             {
+                var e = edges[i];
                 if (e.len < 0.3f || IsShared(e, r, level, edgeCache)) continue;
-                AddDimension(page, e.a, e.b, e.outward * OuterOffset, Fmt(e.len), DimTextSize * ts);
+                AddDimension(page, e.a, e.b, e.outward * OuterOffset, Fmt(e.len), DimTextSize * ts, outer: true);
+                if (openingSpans[r][i].Count > 0) AddInnerChain(page, e, openingSpans[r][i], InnerChainOffset, DimTextSize * ts * 0.75f);
             }
         }
 
@@ -348,17 +369,25 @@ public static class FloorPlanBuilder
         if (all.Count > 0)
         {
             float minX = all.Min(p => p.x), maxX = all.Max(p => p.x), minY = all.Min(p => p.y), maxY = all.Max(p => p.y);
-            if (maxX - minX > 0.5f) AddDimension(page, new Vector2(minX, minY), new Vector2(maxX, minY), new Vector2(0, -BoundsOffset), Fmt(maxX - minX), DimTextSize * ts * 1.3f);
-            if (maxY - minY > 0.5f) AddDimension(page, new Vector2(minX, minY), new Vector2(minX, maxY), new Vector2(-BoundsOffset, 0), Fmt(maxY - minY), DimTextSize * ts * 1.3f);
+            if (maxX - minX > 0.5f) AddDimension(page, new Vector2(minX, minY), new Vector2(maxX, minY), new Vector2(0, -BoundsOffset), Fmt(maxX - minX), DimTextSize * ts * 1.3f, outer: true);
+            if (maxY - minY > 0.5f) AddDimension(page, new Vector2(minX, minY), new Vector2(minX, maxY), new Vector2(-BoundsOffset, 0), Fmt(maxY - minY), DimTextSize * ts * 1.3f, outer: true);
         }
 
-        foreach (var r in level)
-        {
-            Vector2 c = Centroid(r.polygon);
-            page.texts.Add(new PlanText { pos = c, text = r.name, size = 0.2f * ls, style = PlanStyle.Label, bold = true });
-            page.texts.Add(new PlanText { pos = c + new Vector2(0, -0.25f * ls), text = $"{Fmt1(r.Area)} m2", size = 0.15f * ls, style = PlanStyle.Label });
-        }
+        foreach (var r in level) AddRoomLabel(page, r, ls);
         return page;
+    }
+
+    const float MinLabelledArea = 3f; // m2 - a closet/toilet/narrow hallway this small has no room for a centred name+area label
+
+    /// <summary>The room's name and area, centred inside its own outline - how the overview marks each room.
+    /// Left out for small rooms (a hallway, a closet, a toilet): the label would just spill outside them - the
+    /// room's name is still on its own sheet's title either way.</summary>
+    static void AddRoomLabel(FloorPlanPage page, RoomOutline r, float labelScale)
+    {
+        if (r.Area < MinLabelledArea) return;
+        Vector2 c = Centroid(r.polygon);
+        page.texts.Add(new PlanText { pos = c, text = r.name, size = 0.2f * labelScale, style = PlanStyle.Label, bold = true });
+        page.texts.Add(new PlanText { pos = c + new Vector2(0, -0.25f * labelScale), text = $"{Fmt1(r.Area)} m2", size = 0.15f * labelScale, style = PlanStyle.Label });
     }
 
     /// <summary>A wall edge is shared (interior) if another room has a parallel edge right behind it.</summary>

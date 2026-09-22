@@ -27,8 +27,11 @@ public static class MRUKReportBuilder
         .dimline{stroke:#c53030;stroke-width:0.015}
         .ext{stroke:#c53030;stroke-width:0.01;opacity:.7}
         .tick{stroke:#c53030;stroke-width:0.03}
+        .dimline.outer,.ext.outer,.tick.outer{stroke:#2f855a}
         text{font-family:'Segoe UI',Arial,sans-serif}
-        .dim{fill:#c53030;text-anchor:middle;dominant-baseline:central}
+        /* Dimension numbers are dark (not the line's own red/green) with a white halo, so they stay
+           readable wherever they cross a line, a wall or another number. */
+        .dim{fill:#1a202c;text-anchor:middle;dominant-baseline:central;font-weight:600;paint-order:stroke fill;stroke:#fff;stroke-width:0.05px}
         .lbl{fill:#1a202c;text-anchor:middle;dominant-baseline:central}
         .lblb{font-weight:700}
         .legend{font-size:.8em;color:#4a5568;margin-top:-8px;margin-bottom:12px}
@@ -65,11 +68,16 @@ public static class MRUKReportBuilder
         {
             html.Append($"<div class='floor-section'><h2 class='section-title'>Floor {level.index + 1}</h2>");
 
-            html.Append("<div class='container'><h3>").Append(Enc(level.overview.title)).Append(" - floor plan</h3><p class='sub'>")
-                .Append(Enc(level.overview.subtitle)).Append("</p>");
-            AppendLegend(html);
-            FloorPlanSvg.Write(html, level.overview);
-            html.Append("</div>");
+            // A single-room floor has no overview - its one room's own sheet (with the room name centred in it,
+            // like an overview would) is the whole story, so there is nothing to add before it.
+            if (level.overview != null)
+            {
+                html.Append("<div class='container'><h3>").Append(Enc(level.overview.title)).Append(" - floor plan</h3><p class='sub'>")
+                    .Append(Enc(level.overview.subtitle)).Append("</p>");
+                AppendLegend(html);
+                FloorPlanSvg.Write(html, level.overview);
+                html.Append("</div>");
+            }
 
             foreach (var rp in level.rooms)
             {
@@ -95,7 +103,7 @@ public static class MRUKReportBuilder
 
     static void AppendLegend(StringBuilder html)
     {
-        html.Append("<div class='legend'><b style='border-color:#2d3748'></b>wall<b style='border-color:#b7791f'></b>door<b style='border-color:#3182ce'></b>window<b style='border-color:#c53030;border-top-width:2px'></b>dimension</div>");
+        html.Append("<div class='legend'><b style='border-color:#2d3748'></b>wall<b style='border-color:#b7791f'></b>door<b style='border-color:#3182ce'></b>window<b style='border-color:#2f855a;border-top-width:2px'></b>whole wall (from outside)<b style='border-color:#c53030;border-top-width:2px'></b>openings and segments (from inside)</div>");
     }
 
     static void AppendTables(StringBuilder html, List<(float length, List<PlanOpening> openings)> walls)

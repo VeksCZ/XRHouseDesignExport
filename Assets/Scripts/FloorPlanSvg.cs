@@ -19,6 +19,9 @@ public static class FloorPlanSvg
             case PlanStyle.Window: return "window";
             case PlanStyle.Extension: return "ext";
             case PlanStyle.Tick: return "tick";
+            case PlanStyle.OuterExtension: return "ext outer";
+            case PlanStyle.OuterTick: return "tick outer";
+            case PlanStyle.OuterDimension: return "dimline outer";
             default: return "dimline";
         }
     }
@@ -36,7 +39,7 @@ public static class FloorPlanSvg
 
         foreach (var t in page.texts)
         {
-            string cls = t.style == PlanStyle.Label ? (t.bold ? "lbl lblb" : "lbl") : "dim";
+            string cls = t.style == PlanStyle.Label ? (t.bold ? "lbl lblb" : "lbl") : t.style == PlanStyle.OuterDimension ? "dim outer" : "dim";
             string transform = System.Math.Abs(t.angleDeg) > 0.01f ? string.Format(Inv, " transform='rotate({0} {1} {2})'", N(-t.angleDeg), N(t.pos.x), N(-t.pos.y)) : "";
             html.Append(string.Format(Inv, "<text x='{0}' y='{1}' font-size='{2}' class='{3}'{4}>{5}</text>",
                 N(t.pos.x), N(-t.pos.y), N(t.size), cls, transform, System.Net.WebUtility.HtmlEncode(t.text)));

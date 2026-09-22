@@ -124,12 +124,21 @@ public class SampleSceneTests
         rawModel = rawTask.IsFaulted ? null : rawTask.Result;
         report.Line($"[{sw.ElapsedMilliseconds,6} ms] CreateRawScan -> {(rawTask.IsFaulted ? "FAULT " + rawTask.Exception.GetBaseException().Message : Describe(rawModel))}");
 
+        sw.Restart();
+        var dollTask = XRModelFactory.CreateMeshAnalytical(rooms, yaw, center, forDollhouse: true);
+        yield return Await(dollTask);
+        var meshDollhouse = dollTask.IsFaulted ? null : dollTask.Result;
+        report.Line($"[{sw.ElapsedMilliseconds,6} ms] CreateMeshAnalytical(dollhouse) -> {(dollTask.IsFaulted ? "FAULT " + dollTask.Exception.GetBaseException().Message : Describe(meshDollhouse))}");
+
         report.Step("GenerateJson", () => MRUKDataProcessor.GenerateJson(rooms), v => v.Length + " chars");
         report.Step("GenerateSceneDump", () => MRUKDataProcessor.GenerateSceneDump(rooms), v => v.Length + " chars");
-        foreach (var (name, model) in new[] { ("anchor", anchorModel), ("recon", reconModel), ("mesh", meshModel), ("raw", rawModel) })
+        foreach (var (name, model) in new[] { ("anchor", anchorModel), ("recon", reconModel), ("mesh", meshModel), ("raw", rawModel), ("meshdh", meshDollhouse) })
         {
             if (model == null) continue;
-            report.Step($"OBJWriter[{name}]", () => OBJWriter.WriteToString(model), v => v.Length + " chars");
+            string obj =report.Step($"OBJWriter[{name}]", () => OBJWriter.WriteToString(model), v => v.Length + " chars");
+            string objDir = Path.GetFullPath(Path.Combine(Application.dataPath, "..", "Exports", "Test"));
+            Directory.CreateDirectory(objDir);
+            File.WriteAllText(Path.Combine(objDir, $"{sample}_{name}.obj"), obj); // for eyeballing the geometry outside Unity
             report.Step($"GLBExporter[{name}]", () => GLBExporter.ExportToGLB(model), v => (v?.Length ?? 0) + " bytes");
         }
 
@@ -147,6 +156,60 @@ public class SampleSceneTests
         Finish(report, sample, go);
         Assert.That(anchorModel, Is.Not.Null);
         Assert.That(anchorModel.GetAllParts().Count(), Is.GreaterThan(0));
+    }
+
+    /// <summary>
+    /// A real 7-room apartment scan (Assets/Tests/PlayMode/Fixtures), saved via "Save scan" and pulled from the
+    /// headset. Every other fixture here is a single MRUK sample room, so cross-room wall-thickness matching in
+    /// XRModelFactory.EstimateWallThickness never ran against more than one room until this: on the real scan it
+    /// was matching unrelated walls elsewhere in the home and reporting their distance as a wall's "thickness",
+    /// producing walls as thin as 1-4 cm. This guards against that regressing again.
+    /// </summary>
+    [UnityTest]
+    public IEnumerator RealApartment_AnchorWallsAreRealisticThickness()
+    {
+        var rig = new GameObject("OVRCameraRig_Test");
+        rig.AddComponent<OVRCameraRig>();
+        var go = new GameObject("MRUK_Test");
+        var mruk = go.AddComponent<MRUK>();
+        mruk.SceneSettings = new MRUK.MRUKSettings { LoadSceneOnStartup = false, DataSource = MRUK.SceneDataSource.Json };
+        yield return null;
+
+        string path = Path.Combine(Application.dataPath, "Tests", "PlayMode", "Fixtures", "RealApartment7Rooms.json");
+        string json = File.ReadAllText(path);
+        var load = mruk.LoadSceneFromJsonString(json);
+        yield return Await(load);
+        Assert.That(load.IsFaulted, Is.False, load.Exception?.GetBaseException().Message);
+        Assert.That(load.Result, Is.EqualTo(MRUK.LoadDeviceResult.Success));
+
+        var rooms = MRUKDataProcessor.GetValidRooms(mruk);
+        Assert.That(rooms.Count, Is.GreaterThan(1), "fixture should have several rooms - this test is about cross-room wall matching");
+
+        var model = XRModelFactory.CreateAnchorAnalytical(rooms, 0f, Vector3.zero);
+
+        // Every "WALL" part is one CreateBoxPart box: vertices 0 and 4 are the same corner on the box's two
+        // opposite thickness faces (see CreateBoxPart), so their distance is exactly that box's thickness,
+        // whatever the box's position or rotation in world space.
+        var thicknesses = model.GetAllParts()
+            .Where(p => p.materialName == "WALL" && p.vertices.Count == 8)
+            .Select(p => Vector3.Distance(p.vertices[0], p.vertices[4]))
+            .ToList();
+
+        var report = new StringBuilder();
+        report.AppendLine($"wall boxes: {thicknesses.Count}");
+        report.AppendLine($"min={thicknesses.Min():0.000} max={thicknesses.Max():0.000} mean={thicknesses.Average():0.000}");
+        report.AppendLine("thin (<0.06m, would have failed before the cross-room matching fix): " + thicknesses.Count(t => t < 0.06f));
+        report.AppendLine(string.Join(", ", thicknesses.OrderBy(t => t).Select(t => t.ToString("0.000"))));
+        string dir = Path.GetFullPath(Path.Combine(Application.dataPath, "..", "Exports", "Test"));
+        Directory.CreateDirectory(dir);
+        File.WriteAllText(Path.Combine(dir, "wall_thicknesses_RealApartment.txt"), report.ToString());
+
+        UnityEngine.Object.Destroy(go);
+        UnityEngine.Object.Destroy(rig);
+
+        Assert.That(thicknesses, Is.Not.Empty);
+        // XRModelFactory's own minimum/fallback bounds (0.06-0.5m) - every wall must come out inside them.
+        Assert.That(thicknesses, Has.All.InRange(0.06f, 0.5f), "see Exports/Test/wall_thicknesses_RealApartment.txt");
     }
 
     static void Finish(Report report, string sample, GameObject go)

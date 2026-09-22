@@ -202,18 +202,28 @@ public class MRUKExporter : MonoBehaviour
         // device has it, but don't fail on rooms captured before HiFi scans existed.
         var loadTask = MRUK.Instance.LoadSceneFromDevice(true, true, MRUK.SceneModel.V2FallbackV1);
 
+        // Real scans (several rooms, global meshes) can legitimately take well over 8s to stream from
+        // the OS the first time - that used to abort the load outright even with a valid, complete scan.
         int loadTimeout = 0;
-        while (!loadTask.IsCompleted && loadTimeout < 80) { // 8 seconds
+        while (!loadTask.IsCompleted && loadTimeout < 450) { // 45 seconds
             await Task.Delay(100);
             loadTimeout++;
-            if (loadTimeout % 20 == 0) ui?.AddLog("Still waiting for device sync...");
+            if (loadTimeout % 20 == 0) ui?.AddLog($"Still waiting for device sync... ({loadTimeout / 10}s)");
         }
         if (!loadTask.IsCompleted) {
-            ui?.AddLog("<color=red>FATAL ERROR: LoadSceneFromDevice timed out!</color>");
+            ui?.AddLog("<color=red>FATAL ERROR: LoadSceneFromDevice timed out after 45s!</color>");
             ui?.AddLog("Check if 'Room Setup' is done in Quest settings, or pick a cached scan instead.");
             return false;
         }
-        await loadTask;
+        if (loadTask.IsFaulted) {
+            ui?.AddLog("<color=red>LoadSceneFromDevice failed: " + loadTask.Exception?.GetBaseException().Message + "</color>");
+            return false;
+        }
+        var result = await loadTask;
+        if (result != MRUK.LoadDeviceResult.Success) {
+            ui?.AddLog($"<color=red>LoadSceneFromDevice: {result}</color>");
+            return false;
+        }
 
         int initTimeout = 0;
         while (!MRUK.Instance.IsInitialized && initTimeout < 50) {
@@ -256,14 +266,23 @@ public class MRUKExporter : MonoBehaviour
 
         File.WriteAllText(Path.Combine(session, MRUKPathUtility.MODEL_MTL), OBJWriter.GenerateMTL());
 
-        ui?.AddLog("<color=cyan>[6/6] Room breakdown...</color>");
+        ui?.AddLog("<color=cyan>[6/6] Per-room exports...</color>");
+        // Everything the whole-house export has (all 4 model tiers, the HTML report), but scoped to just this
+        // one room, in its own self-contained subfolder.
         foreach (var r in rooms) {
-            var model = XRModelFactory.CreateReconstruction(new List<MRUKRoom> { r }, angle, LastHouseCenter);
             string rDirName = $"{MRUKDataProcessor.GetSafeName(MRUKDataProcessor.GetRoomLabel(r))}_{r.Anchor.Uuid.ToString().Substring(0, 8)}";
             string rPath = Path.Combine(session, rDirName);
             Directory.CreateDirectory(rPath);
-            // Relative MTL path for subfolders
-            File.WriteAllText(Path.Combine(rPath, "mesh.obj"), OBJWriter.WriteToString(model, "../" + MRUKPathUtility.MODEL_MTL));
+            var rList = new List<MRUKRoom> { r };
+
+            Save(XRModelFactory.CreateAnchorAnalytical(rList, angle, LastHouseCenter), rPath, MRUKPathUtility.MODEL_CLEAN_OBJ, MRUKPathUtility.MODEL_CLEAN_GLB);
+            Save(await XRModelFactory.CreateMeshAnalytical(rList, angle, LastHouseCenter), rPath, MRUKPathUtility.MODEL_MESH_ANALYTICAL_OBJ, MRUKPathUtility.MODEL_MESH_ANALYTICAL_GLB);
+            Save(XRModelFactory.CreateReconstruction(rList, angle, LastHouseCenter), rPath, MRUKPathUtility.MODEL_MESH_OBJ, MRUKPathUtility.MODEL_MESH_GLB);
+            Save(await XRModelFactory.CreateRawScan(rList, angle, LastHouseCenter), rPath, MRUKPathUtility.MODEL_RAW_OBJ, null);
+            File.WriteAllText(Path.Combine(rPath, MRUKPathUtility.MODEL_MTL), OBJWriter.GenerateMTL());
+
+            var roomOutline = MRUKPlanExtractor.Extract(rList);
+            File.WriteAllText(Path.Combine(rPath, MRUKPathUtility.DATA_REPORT_ROOM), MRUKReportBuilder.GenerateFullReport(roomOutline, angle, SelectedSource));
         }
 
         ui?.AddLog("<color=green><b>EXPORT FINISHED!</b></color>");

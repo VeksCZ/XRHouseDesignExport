@@ -63,27 +63,20 @@ var mrukAnchor = room.GetComponent<MRUKAnchor>();
             }
         }
 
-        // 3. Furniture-based heuristics
-        var anchors = room.Anchors.ToList();
-        foreach (var a in anchors)
-        {
-            string l = a.Label.ToString().ToUpperInvariant();
-            if (l.Contains("BED")) return "BEDROOM";
-            if (l.Contains("KITCHEN") || l.Contains("OVEN") || l.Contains("STOVE")) return "KITCHEN";
-            if (l.Contains("SINK") || l.Contains("TOILET") || l.Contains("SHOWER")) return "BATHROOM";
-            if (l.Contains("COUCH") || l.Contains("TELEVISION")) return "LIVING_ROOM";
-        }
+        // 3. Furniture-based heuristics, most telling piece first
+        bool Has(params string[] parts) => room.Anchors.Any(a => a != null && parts.Any(p => a.Label.ToString().ToUpperInvariant().Contains(p)));
+        if (Has("BED")) return "BEDROOM";
+        if (Has("KITCHEN", "OVEN", "STOVE")) return "KITCHEN";
+        if (Has("SINK", "TOILET", "SHOWER")) return "BATHROOM";
+        if (Has("COUCH", "TELEVISION")) return "LIVING_ROOM";
+        if (Has("SCREEN") && Has("TABLE")) return "OFFICE";
     #endif
 
-        string cleanName = room.name; if (cleanName.Length > 8) cleanName = cleanName.Substring(0, 5);
-        if (cleanName.StartsWith("Room - ")) cleanName = cleanName.Replace("Room - ", "");
-        else if (cleanName.StartsWith("Room_")) cleanName = cleanName.Replace("Room_", "");
-        
-        // If it's a GUID, return first 4 chars
-        if (cleanName.Length > 12 && cleanName.Contains("-")) cleanName = cleanName.Substring(0, 4);
-
-        if (cleanName.Length > 12 && cleanName.Contains("-")) cleanName = cleanName.Substring(0, 4);
-        return "Room_" + (string.IsNullOrEmpty(cleanName) ? "Unknown" : cleanName);
+        // No hint at all: "ROOM_" plus the first characters of the room's id, so unnamed rooms stay distinguishable.
+        string id = room.name;
+        foreach (var prefix in new[] { "Room - ", "Room_" }) if (id.StartsWith(prefix)) id = id.Substring(prefix.Length);
+        id = id.Replace("-", "");
+        return "ROOM_" + (id.Length >= 4 ? id.Substring(0, 4).ToUpperInvariant() : (string.IsNullOrEmpty(id) ? "UNKNOWN" : id.ToUpperInvariant()));
         }
 
     public static string GenerateSceneDump(List<MRUKRoom> rooms)

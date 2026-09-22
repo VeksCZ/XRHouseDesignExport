@@ -16,6 +16,7 @@ public static class MRUKPathUtility
     public const string DATA_JSON = "90_Data_Rooms.json";
     public const string DATA_DUMP = "91_Data_Scene_Dump.txt";
     public const string DATA_REPORT = "99_Report_House.html";
+    public const string DATA_REPORT_ROOM = "99_Report_Room.html";
 
     public static string GetExportRoot()
     {
