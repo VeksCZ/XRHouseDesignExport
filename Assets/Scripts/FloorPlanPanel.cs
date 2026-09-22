@@ -182,7 +182,9 @@ public class FloorPlanPanel : MonoBehaviour
             tmp.text = t.text;
             tmp.fontSize = Mathf.Max(16f, t.size * graphic.Scale);
             tmp.fontStyle = t.bold ? FontStyles.Bold : FontStyles.Normal;
-            tmp.color = t.style == PlanStyle.Label ? Color.white : t.style == PlanStyle.OuterDimension ? new Color(0.45f, 0.9f, 0.6f) : new Color(1f, 0.55f, 0.55f);
+            // Dimension numbers are a neutral pale yellow - distinct from both the red (inner) and green (outer)
+            // dimension lines they sit on, so they stay readable regardless of which one they're next to.
+            tmp.color = t.style == PlanStyle.Label ? Color.white : new Color(1f, 0.92f, 0.55f);
             tmp.rectTransform.anchoredPosition = graphic.ToLocal(t.pos);
             tmp.rectTransform.localRotation = Quaternion.Euler(0, 0, t.angleDeg);
         }

@@ -297,4 +297,27 @@ public class FloorPlanTests
             }
         }
     }
+
+    /// <summary>
+    /// XRModelFactory.SnapToPerpendicular composes with CreateBoxPart's own global-rotation step by simple
+    /// addition (both are Y-axis-only rotations, which always commute), so what must land on a multiple of 90 is
+    /// dominantYawDeg + result.eulerAngles.y - not the result on its own. A wrong-signed correction here once
+    /// rotated every wall in a scan by roughly double the house's own correction angle instead of fixing it.
+    /// </summary>
+    [TestCase(0f, 0f)]
+    [TestCase(0f, 1.5f)]
+    [TestCase(0f, -1.5f)]
+    [TestCase(-32.7f, 0f)]
+    [TestCase(-32.7f, 30f)]      // raw wall already near a right angle relative to the correction
+    [TestCase(-32.7f, 32.9f)]    // raw wall near yaw 0 (i.e. near-unrotated) - the case a sign error breaks worst
+    [TestCase(58.2f, -58f)]
+    public void SnapToPerpendicular_LandsOnARightAngle_OnceTheGlobalCorrectionIsAdded(float dominantYawDeg, float rawYawDeg)
+    {
+        var snapped = XRModelFactory.SnapToPerpendicular(Quaternion.Euler(0, rawYawDeg, 0), dominantYawDeg);
+        float corrected = dominantYawDeg + snapped.eulerAngles.y;
+        float offFromRightAngle = Mathf.Abs(Mathf.DeltaAngle(0, corrected % 90f));
+        Assert.That(offFromRightAngle, Is.LessThan(0.01f).Or.GreaterThan(89.99f));
+        // And it should be the *nearest* right angle - never more than 45 deg away from the original.
+        Assert.That(Mathf.Abs(Mathf.DeltaAngle(dominantYawDeg + rawYawDeg, corrected)), Is.LessThanOrEqualTo(45f));
+    }
 }

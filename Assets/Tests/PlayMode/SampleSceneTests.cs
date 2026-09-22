@@ -185,21 +185,37 @@ public class SampleSceneTests
         var rooms = MRUKDataProcessor.GetValidRooms(mruk);
         Assert.That(rooms.Count, Is.GreaterThan(1), "fixture should have several rooms - this test is about cross-room wall matching");
 
-        var model = XRModelFactory.CreateAnchorAnalytical(rooms, 0f, Vector3.zero);
+        // The real pipeline never calls CreateAnchorAnalytical with rotation=0 - it always passes the scan's own
+        // CorrectionYaw. That angle is exactly what SnapToPerpendicular's correction is measured against, so a
+        // rotation=0 call here would pass even if that correction's sign were wrong (0 is its own inverse).
+        float angle = FloorPlanBuilder.CorrectionYaw(MRUKPlanExtractor.Extract(rooms));
+        var model = XRModelFactory.CreateAnchorAnalytical(rooms, angle, Vector3.zero);
 
         // Every "WALL" part is one CreateBoxPart box: vertices 0 and 4 are the same corner on the box's two
         // opposite thickness faces (see CreateBoxPart), so their distance is exactly that box's thickness,
         // whatever the box's position or rotation in world space.
-        var thicknesses = model.GetAllParts()
-            .Where(p => p.materialName == "WALL" && p.vertices.Count == 8)
-            .Select(p => Vector3.Distance(p.vertices[0], p.vertices[4]))
-            .ToList();
+        var wallParts = model.GetAllParts().Where(p => p.materialName == "WALL" && p.vertices.Count == 8).ToList();
+        var thicknesses = wallParts.Select(p => Vector3.Distance(p.vertices[0], p.vertices[4])).ToList();
+
+        // Every wall must end up parallel or perpendicular to every other wall - not merely close to it, exactly,
+        // since that's the entire point of snapping. Vertices 0->1 is a box's own width edge (see CreateBoxPart),
+        // i.e. the direction the wall itself runs in, independent of its position or thickness.
+        var wallDirs = wallParts.Select(p => (p.vertices[1] - p.vertices[0]).normalized).ToList();
+        var offAngles = new List<float>();
+        for (int i = 0; i < wallDirs.Count; i++)
+            for (int j = i + 1; j < wallDirs.Count; j++)
+            {
+                float a = Vector3.Angle(wallDirs[i], wallDirs[j]) % 90f;
+                offAngles.Add(Mathf.Min(a, 90f - a)); // distance to the nearest multiple of 90 deg
+            }
 
         var report = new StringBuilder();
+        report.AppendLine($"correction yaw: {angle:0.0} deg");
         report.AppendLine($"wall boxes: {thicknesses.Count}");
-        report.AppendLine($"min={thicknesses.Min():0.000} max={thicknesses.Max():0.000} mean={thicknesses.Average():0.000}");
+        report.AppendLine($"thickness min={thicknesses.Min():0.000} max={thicknesses.Max():0.000} mean={thicknesses.Average():0.000}");
         report.AppendLine("thin (<0.06m, would have failed before the cross-room matching fix): " + thicknesses.Count(t => t < 0.06f));
         report.AppendLine(string.Join(", ", thicknesses.OrderBy(t => t).Select(t => t.ToString("0.000"))));
+        report.AppendLine($"worst off-perpendicular angle: {(offAngles.Count > 0 ? offAngles.Max() : 0f):0.00} deg (of {offAngles.Count} wall pairs)");
         string dir = Path.GetFullPath(Path.Combine(Application.dataPath, "..", "Exports", "Test"));
         Directory.CreateDirectory(dir);
         File.WriteAllText(Path.Combine(dir, "wall_thicknesses_RealApartment.txt"), report.ToString());
@@ -210,6 +226,10 @@ public class SampleSceneTests
         Assert.That(thicknesses, Is.Not.Empty);
         // XRModelFactory's own minimum/fallback bounds (0.06-0.5m) - every wall must come out inside them.
         Assert.That(thicknesses, Has.All.InRange(0.06f, 0.5f), "see Exports/Test/wall_thicknesses_RealApartment.txt");
+        // A couple of degrees of real scan jitter is fine; anything more means SnapToPerpendicular isn't snapping
+        // to the right angle (this is what catches a wrong-signed correction, which "off by a couple degrees"
+        // would not - a sign error is off by roughly double the whole house's own correction angle).
+        Assert.That(offAngles, Has.All.LessThan(2f), "see Exports/Test/wall_thicknesses_RealApartment.txt");
     }
 
     static void Finish(Report report, string sample, GameObject go)

@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Runtime.CompilerServices;
 using System.Threading.Tasks;
 using UnityEngine;
 using Unity.Collections;
@@ -8,6 +9,8 @@ using Unity.Collections;
 using Meta.XR.MRUtilityKit;
 using Meta.XR;
 #endif
+
+[assembly: InternalsVisibleTo("XRHouse.Tests.EditMode")]
 
 public static class XRModelFactory
 {
@@ -278,14 +281,22 @@ return model;
     /// few centimetres thick that are really many metres apart. Among every anchor that still passes
     /// every check, the closest one is used, since the true opposite face is always the nearest.
     /// </summary>
-    /// <summary>Snaps a yaw-only rotation to the nearest right angle measured from <paramref name="dominantYawDeg"/>
-    /// (see FloorPlanBuilder.CorrectionYaw) - a few degrees of real scan jitter should never stop two walls that
-    /// are meant to be parallel or perpendicular from actually being drawn that way.</summary>
-    private static Quaternion SnapToPerpendicular(Quaternion raw, float dominantYawDeg)
+    /// <summary>
+    /// Snaps a yaw-only rotation so that, once the caller's global <paramref name="dominantYawDeg"/> correction
+    /// (see FloorPlanBuilder.CorrectionYaw, applied by CreateBoxPart's own gRot) is added on top of it, the wall
+    /// ends up exactly axis-aligned - a few degrees of real scan jitter should never stop two walls that are meant
+    /// to be parallel or perpendicular from actually being drawn that way.
+    ///
+    /// CreateBoxPart composes this rotation with dominantYawDeg by simple addition (both are rotations about the
+    /// same Y axis, which always commute), so the value that must land on a multiple of 90 is their sum, not this
+    /// raw rotation on its own - snapping the raw value directly against dominantYawDeg (as an earlier version of
+    /// this method did) rotated every wall by roughly dominantYawDeg twice over.
+    /// </summary>
+    internal static Quaternion SnapToPerpendicular(Quaternion raw, float dominantYawDeg)
     {
-        float rel = Mathf.DeltaAngle(dominantYawDeg, raw.eulerAngles.y);
-        float snappedYaw = dominantYawDeg + Mathf.Round(rel / 90f) * 90f;
-        return Quaternion.Euler(0f, snappedYaw, 0f);
+        float corrected = dominantYawDeg + raw.eulerAngles.y;
+        float snappedCorrected = Mathf.Round(corrected / 90f) * 90f;
+        return Quaternion.Euler(0f, snappedCorrected - dominantYawDeg, 0f);
     }
 
     private static float EstimateWallThickness(MRUKRoom room, List<MRUKRoom> allRooms, Vector3 wallWorldPos, Vector3 outwardNormal, float extentAlongWall, Vector3 wallDir, float fallback)
