@@ -66,6 +66,10 @@ public class RoomOutline
     public float floorY;
     public float ceilingMin = 2.5f;
     public float ceilingMax = 2.5f;
+    /// <summary>Ceiling height (above floorY) sampled directly above each polygon vertex, in the same order -
+    /// lets an elevation view show a sloped ceiling's true height at each end of a wall instead of only the
+    /// room-wide ceilingMin/ceilingMax range. Empty for outlines built without MRUK data (e.g. in tests).</summary>
+    public List<float> cornerCeilingHeights = new List<float>();
     public int detail;    // how much the scan captured (anchor count) - used to pick the better of two duplicate scans
     public List<PlanOpening> openings = new List<PlanOpening>();
 

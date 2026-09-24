@@ -43,7 +43,13 @@ public static class UnityModelLoader
                   ?? Shader.Find("Standard");
                   
         if (shader == null) Debug.LogError("[UnityModelLoader] Could not find any suitable shader!");
-        
-        return new Material(shader) { name = name, color = color };
+
+        var mat = new Material(shader) { name = name, color = color };
+        // Every part here is a thin box (wall, door, window...) that gets walked around and looked at from
+        // both sides - single-sided (the shader's own default) made a wall render solid from whichever side
+        // happens to face its winding and invisible from the other, and a mesh-mode door/window box only
+        // showed up looking in from outside the room, not from inside it.
+        if (mat.HasProperty("_Cull")) mat.SetFloat("_Cull", (float)UnityEngine.Rendering.CullMode.Off);
+        return mat;
     }
 }

@@ -43,6 +43,16 @@ public static class MRUKSceneCache
             .ToList();
     }
 
+    /// <summary>Deletes a previously cached scan by name. Returns true if a file was actually removed.</summary>
+    public static bool DeleteCachedScan(string name)
+    {
+        if (string.IsNullOrEmpty(name)) return false;
+        string path = Path.Combine(GetCacheRoot(), name + EXTENSION);
+        if (!File.Exists(path)) return false;
+        File.Delete(path);
+        return true;
+    }
+
 #if META_XR_SDK_INSTALLED
     /// <summary>
     /// Snapshots whatever MRUK currently has loaded (all rooms, anchors and the global mesh) to a

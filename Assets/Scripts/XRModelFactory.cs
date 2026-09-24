@@ -17,11 +17,32 @@ public static class XRModelFactory
     public static XRHouseModel CreateAnchorAnalytical(List<MRUKRoom> rooms, float rotation, Vector3 center)
     {
         var model = new XRHouseModel { center = center, globalRotation = rotation };
+        Quaternion gRotForLabels = Quaternion.Euler(0, rotation, 0);
+
+        // A shared doorway between two scanned rooms is usually captured as two separate anchors - one per
+        // room, scanned independently - and occasionally by only one of them. Matching every room's walls
+        // against this single, cross-room, de-duplicated pool of openings (instead of only that room's own
+        // anchors) means the door gets cut and drawn on every wall that actually borders it, in every room,
+        // instead of only whichever room happened to own the anchor MRUK attached it to.
+        var allOpenings = rooms.SelectMany(r => r.Anchors)
+            .Where(a => a != null && a.PlaneRect.HasValue && (a.Label.ToString().Contains("DOOR") || a.Label.ToString().Contains("WINDOW")))
+            .ToList();
+        var uniqueOpenings = new List<MRUKAnchor>();
+        foreach (var o in allOpenings)
+            if (!uniqueOpenings.Any(existing => Vector3.Distance(o.transform.position, existing.transform.position) < 0.15f))
+                uniqueOpenings.Add(o);
+        var openingsPlacedAnywhere = new HashSet<MRUKAnchor>();
+
         foreach (var room in rooms) {
             var rm = new XRRoomModel { roomName = MRUKDataProcessor.GetRoomLabel(room) };
             var anchors = room.Anchors.Where(a => a != null && a.PlaneRect.HasValue).ToList();
-            var openings = anchors.Where(a => a.Label.ToString().Contains("DOOR") || a.Label.ToString().Contains("WINDOW")).ToList();
-            
+            // Per room, not global - so a shared opening still gets placed independently on each side of the wall.
+            var openingsPlaced = new HashSet<MRUKAnchor>();
+            // Only needed for the "sill height above floor" dimension label - falls back to the first wall's own
+            // Y if this room somehow has no FLOOR anchor, so the label math never divides against a missing value.
+            float floorY = anchors.FirstOrDefault(a => a.Label == MRUKAnchor.SceneLabels.FLOOR)?.transform.position.y
+                ?? anchors.FirstOrDefault(MRUKDataProcessor.IsStructuralWall)?.transform.position.y ?? 0f;
+
             foreach (var f in anchors.Where(a => a.Label == MRUKAnchor.SceneLabels.FLOOR))
                 rm.parts.Add(CreateFloorSlab(f, center, rotation));
 
@@ -35,7 +56,7 @@ public static class XRModelFactory
                 Vector3 wallPos = w.transform.position;
                 // wallRot*forward points into this room, so the opposite room (if scanned) is on the -forward side.
                 float wallThickness = EstimateWallThickness(room, rooms, wallPos, -(wallRot * Vector3.forward), wW, wallRot * Vector3.right, 0.25f);
-                var wallHoles = openings.Where(o => {
+                var wallHoles = uniqueOpenings.Where(o => {
                     Vector3 lp = Quaternion.Inverse(wallRot) * (o.transform.position - wallPos);
                     return Mathf.Abs(lp.z) < 0.25f && Mathf.Abs(lp.x) < (wW / 2f + 0.1f) && Mathf.Abs(lp.y) < (wH / 2f + 0.1f);
                 }).ToList();
@@ -65,13 +86,33 @@ public static class XRModelFactory
                         }
                     }
                 } else rm.parts.Add(CreateBoxPart("WALL", wallPos, wallRot, new Vector3(wW, wH, wallThickness), "WALL", center, rotation));
-            }
-            foreach (var o in openings) {
-                bool isD = MRUKDataProcessor.IsDoor(o);
-                Quaternion openingRot = SnapToPerpendicular(o.transform.rotation, rotation);
-                rm.parts.Add(CreateBoxPart(o.Label.ToString(), o.transform.position, openingRot, new Vector3(o.PlaneRect.Value.width, o.PlaneRect.Value.height, isD ? 0.10f : 0.12f), isD ? "DOOR" : "WINDOW", center, rotation));
+
+                AddWallLengthLabel(model.dimensions, wallPos, wallRot, wW, wH, wallThickness, center, gRotForLabels);
+
+                // Each hole's own box is built in this exact wall's rotation and plane, not re-derived from the
+                // opening's own anchor - independently snapping the two let them drift apart by a degree or so,
+                // which showed up as a gap or z-fighting right at the seam between wall and opening, worst along
+                // a window's top edge (the wall segment above it comes from this same wallRot too, so the two
+                // always meet exactly now).
+                foreach (var h in wallHoles) {
+                    if (!openingsPlaced.Add(h)) continue;
+                    openingsPlacedAnywhere.Add(h);
+                    bool isD = MRUKDataProcessor.IsDoor(h);
+                    Vector3 lp = Quaternion.Inverse(wallRot) * (h.transform.position - wallPos);
+                    Vector3 openingPos = wallPos + wallRot * new Vector3(lp.x, lp.y, 0);
+                    rm.parts.Add(CreateBoxPart(h.Label.ToString(), openingPos, wallRot, new Vector3(h.PlaneRect.Value.width, h.PlaneRect.Value.height, isD ? 0.10f : 0.12f), isD ? "DOOR" : "WINDOW", center, rotation));
+                    AddOpeningDimensionLabels(model.dimensions, openingPos, wallRot, h.PlaneRect.Value.width, h.PlaneRect.Value.height, floorY, wallThickness, center, gRotForLabels);
+                }
             }
             model.rooms.Add(rm);
+        }
+        // An opening that never landed on any wall in any room (shouldn't normally happen) is still drawn once,
+        // using its own rotation since there's no wall frame to match it to.
+        foreach (var o in uniqueOpenings.Where(o => !openingsPlacedAnywhere.Contains(o))) {
+            bool isD = MRUKDataProcessor.IsDoor(o);
+            Quaternion openingRot = SnapToPerpendicular(o.transform.rotation, rotation);
+            var bucket = model.rooms.Count > 0 ? model.rooms[0] : null;
+            bucket?.parts.Add(CreateBoxPart(o.Label.ToString(), o.transform.position, openingRot, new Vector3(o.PlaneRect.Value.width, o.PlaneRect.Value.height, isD ? 0.10f : 0.12f), isD ? "DOOR" : "WINDOW", center, rotation));
         }
         return model;
     }
@@ -111,10 +152,14 @@ public static class XRModelFactory
                 uniqueOpenings.Add(o);
         }
 
-        var addedOpenings = new HashSet<Guid>();
+        var addedOpeningsAnywhere = new HashSet<Guid>();
 
         foreach (var room in rooms) {
             var rm = new XRRoomModel { roomName = MRUKDataProcessor.GetRoomLabel(room) };
+            // Openings that actually got a hole cut into one of THIS room's own walls - a shared doorway
+            // between two scanned rooms matches (and is drawn on) both rooms' walls independently, instead of
+            // only whichever room happened to own the anchor MRUK attached it to.
+            var roomOpenings = new HashSet<MRUKAnchor>();
 
             // A room can report more than one FloorAnchor (e.g. a split-level room) - build each
             // floor "island" separately instead of only ever looking at FloorAnchors[0].
@@ -178,6 +223,7 @@ public static class XRModelFactory
                     }).ToList();
 
                     if (holes.Count > 0) {
+                        foreach (var ho in holes) roomOpenings.Add(ho);
                         var xC = new List<float> { -segLen/2f, segLen/2f };
                         var yC = new List<float> { -hMin/2f, hMin/2f };
                         foreach(var ho in holes) {
@@ -214,17 +260,19 @@ public static class XRModelFactory
                 }
             }
 
-            // Deduplicated door/window boxes (once per room, not per floor island)
-            foreach (var o in uniqueOpenings) {
-                if (addedOpenings.Contains(o.Anchor.Uuid)) continue;
-                // Only add if it belongs to this room (exists in room anchors)
-                if (room.Anchors.Any(ra => ra.Anchor.Uuid == o.Anchor.Uuid)) {
-                    bool isD = MRUKDataProcessor.IsDoor(o);
-                    rm.parts.Add(CreateBoxPart(o.Label.ToString(), o.transform.position, o.transform.rotation, new Vector3(o.PlaneRect.Value.width, o.PlaneRect.Value.height, isD ? 0.12f : 0.14f), isD ? "DOOR" : "WINDOW", center, rotation));
-                    addedOpenings.Add(o.Anchor.Uuid);
-                }
+            // One box per opening that actually got a hole cut in this room (once per room, not per floor island).
+            foreach (var o in roomOpenings) {
+                bool isD = MRUKDataProcessor.IsDoor(o);
+                rm.parts.Add(CreateBoxPart(o.Label.ToString(), o.transform.position, o.transform.rotation, new Vector3(o.PlaneRect.Value.width, o.PlaneRect.Value.height, isD ? 0.12f : 0.14f), isD ? "DOOR" : "WINDOW", center, rotation));
+                addedOpeningsAnywhere.Add(o.Anchor.Uuid);
             }
             model.rooms.Add(rm);
+        }
+        // An opening that never landed on any wall in any room (shouldn't normally happen) is still drawn once.
+        foreach (var o in uniqueOpenings.Where(o => !addedOpeningsAnywhere.Contains(o.Anchor.Uuid))) {
+            bool isD = MRUKDataProcessor.IsDoor(o);
+            var bucket = model.rooms.Count > 0 ? model.rooms[0] : null;
+            bucket?.parts.Add(CreateBoxPart(o.Label.ToString(), o.transform.position, o.transform.rotation, new Vector3(o.PlaneRect.Value.width, o.PlaneRect.Value.height, isD ? 0.12f : 0.14f), isD ? "DOOR" : "WINDOW", center, rotation));
         }
 return model;
     }
@@ -236,7 +284,7 @@ return model;
     /// (PlaneBoundary2D) is checked to find which plane actually covers that point; if none of them
     /// do (e.g. right at a seam), the nearest one is used instead of falling back to a flat guess.
     /// </summary>
-    private static float SampleCeilingHeight(IEnumerable<MRUKAnchor> ceilingAnchors, Vector3 probeWorldXZ, float fallback)
+    internal static float SampleCeilingHeight(IEnumerable<MRUKAnchor> ceilingAnchors, Vector3 probeWorldXZ, float fallback)
     {
         bool haveFallback = false; float fallbackY = fallback; float bestDist = float.MaxValue;
 
@@ -292,10 +340,15 @@ return model;
     /// raw rotation on its own - snapping the raw value directly against dominantYawDeg (as an earlier version of
     /// this method did) rotated every wall by roughly dominantYawDeg twice over.
     /// </summary>
+    // A wall this far from a right angle is more likely a real angled feature (a bay window, a cut corner) than
+    // scan jitter - snapping it anyway would draw a wrong angle instead of the true one, so it's left alone.
+    const float MaxJitterToSnapDeg = 15f;
+
     internal static Quaternion SnapToPerpendicular(Quaternion raw, float dominantYawDeg)
     {
         float corrected = dominantYawDeg + raw.eulerAngles.y;
         float snappedCorrected = Mathf.Round(corrected / 90f) * 90f;
+        if (Mathf.Abs(Mathf.DeltaAngle(corrected, snappedCorrected)) > MaxJitterToSnapDeg) return raw;
         return Quaternion.Euler(0f, snappedCorrected - dominantYawDeg, 0f);
     }
 
@@ -470,6 +523,68 @@ return model;
             if (floorPart.triangles.Count > 0) rm.parts.Insert(at, floorPart);
             if (restPart.triangles.Count > 0) rm.parts.Insert(at, restPart);
         }
+    }
+
+    /// <summary>
+    /// One label for a wall's total length, pulled a bit into the room off its inner face (never flush against/
+    /// inside the wall), with an actual line spanning the wall's width alongside it - the same number a floor
+    /// plan's outer (green) dimension would show for that wall, but readable directly on the 3D model. A
+    /// Dollhouse can be freely picked up and turned any way, so a single fixed orientation baked in here can
+    /// never stay readable from every angle - DollHouseVisualizer billboards the actual text towards whichever
+    /// way the viewer is currently looking every frame; 'rotation' here is only the untextured line's initial
+    /// orientation. Position is computed in world space then converted into the model's own local space
+    /// (matching CreateBoxPart's own gRot*(worldPos-center) convention) so it can be parented directly under
+    /// the same visual root as the rest of the Dollhouse.
+    /// </summary>
+    private static void AddWallLengthLabel(List<XRDimensionLabel> dims, Vector3 wallPos, Quaternion wallRot, float wW, float wH, float thickness, Vector3 center, Quaternion gRot)
+    {
+        Vector3 inward = wallRot * Vector3.forward; // wallRot*forward points into the room
+        Vector3 tangent = wallRot * Vector3.right;
+        Vector3 worldPos = wallPos + inward * (thickness / 2f + 0.30f) + Vector3.up * (wH / 2f - 0.15f);
+        dims.Add(new XRDimensionLabel
+        {
+            position = gRot * (worldPos - center),
+            rotation = gRot * Quaternion.LookRotation(inward, Vector3.up),
+            lineStart = gRot * (worldPos - tangent * (wW / 2f) - center),
+            lineEnd = gRot * (worldPos + tangent * (wW / 2f) - center),
+            text = $"{wW:0.00} m",
+        });
+    }
+
+    /// <summary>
+    /// Three labels for one door/window, each with its own line, all pulled into the room off the wall's inner
+    /// face like AddWallLengthLabel: its width (centred above it, like a floor plan) and, only visible in this
+    /// 3D mode, two vertical measurements a top-down floor plan can never show - the opening's own height and
+    /// its sill height (floor to the bottom of the opening) - placed either side of it so the three never
+    /// overlap each other.
+    /// </summary>
+    private static void AddOpeningDimensionLabels(List<XRDimensionLabel> dims, Vector3 openingPos, Quaternion wallRot, float ow, float oh, float floorY, float wallThickness, Vector3 center, Quaternion gRot)
+    {
+        Vector3 inward = wallRot * Vector3.forward;
+        Vector3 right = wallRot * Vector3.right;
+        Vector3 facePos = openingPos + inward * (wallThickness / 2f + 0.30f);
+        Quaternion faceRot = Quaternion.LookRotation(inward, Vector3.up); // overridden per-frame by billboarding
+        float sill = Mathf.Max(0f, (openingPos.y - oh / 2f) - floorY);
+
+        void Add(Vector3 worldPos, Vector3 lineStart, Vector3 lineEnd, string text) => dims.Add(new XRDimensionLabel
+        {
+            position = gRot * (worldPos - center),
+            rotation = gRot * faceRot,
+            lineStart = gRot * (lineStart - center),
+            lineEnd = gRot * (lineEnd - center),
+            text = text,
+        });
+
+        Vector3 topEdge = facePos + Vector3.up * (oh / 2f);
+        Add(topEdge + Vector3.up * 0.10f, topEdge - right * (ow / 2f), topEdge + right * (ow / 2f), $"{ow:0.00} m");
+
+        Vector3 rightSide = facePos + right * (ow / 2f + 0.15f);
+        Add(rightSide, rightSide - Vector3.up * (oh / 2f), rightSide + Vector3.up * (oh / 2f), $"H {oh:0.00} m");
+
+        Vector3 leftSide = facePos - right * (ow / 2f + 0.15f);
+        Vector3 leftFloor = new Vector3(leftSide.x, floorY, leftSide.z);
+        Vector3 leftSill = new Vector3(leftSide.x, floorY + sill, leftSide.z);
+        Add(new Vector3(leftSide.x, floorY + sill / 2f, leftSide.z), leftFloor, leftSill, $"Sill {sill:0.00} m");
     }
 
     private static XRMeshPart CreateBoxPart(string name, Vector3 pos, Quaternion rot, Vector3 size, string mat, Vector3 center, float globalRot, Vector3 localOff = default)

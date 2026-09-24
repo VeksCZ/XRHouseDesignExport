@@ -16,6 +16,14 @@ public static class XRUi
     public static readonly Color ButtonHover = new Color(0.20f, 0.55f, 0.40f, 1f);
     public static readonly Color ButtonPressed = new Color(0.15f, 0.42f, 0.85f, 1f);
     public static readonly Color ButtonDisabled = new Color(0.12f, 0.13f, 0.16f, 1f);
+    // A toggle button's resting tint while it's ON, and a fixed warning tint for a destructive action - distinct
+    // from ButtonHover/ButtonPressed (which are only ever transient, on-press states) so they read at a glance.
+    public static readonly Color ButtonOnColor = new Color(0.16f, 0.60f, 0.32f, 1f);
+    public static readonly Color ButtonDangerColor = new Color(0.75f, 0.18f, 0.30f, 1f);
+    // A toggle button's resting tint while it's OFF - distinct from a plain action button's own ButtonColor, so
+    // "this button is a toggle" is visible even before it's ever been turned on (ButtonOnColor still takes over
+    // once it is on).
+    public static readonly Color ButtonToggleColor = new Color(0.15f, 0.28f, 0.52f, 1f);
     public static readonly Color TextColor = new Color(0.94f, 0.95f, 0.97f, 1f);
     public static readonly Color MutedText = new Color(0.62f, 0.68f, 0.78f, 1f);
     public static readonly Color AccentText = new Color(0.45f, 0.85f, 1f, 1f);
@@ -112,5 +120,17 @@ public static class XRUi
     {
         var tmp = button != null ? button.GetComponentInChildren<TMP_Text>() : null;
         if (tmp != null) tmp.text = label;
+    }
+
+    /// <summary>Changes a button's resting (non-hover, non-pressed) tint - used both for a fixed warning colour
+    /// on a destructive action and for an on/off toggle's own indicator, so its current state is visible without
+    /// having to read the label or remember what was last pressed.</summary>
+    public static void SetTint(Button button, Color color)
+    {
+        if (button == null) return;
+        var colors = button.colors;
+        colors.normalColor = color;
+        colors.selectedColor = color;
+        button.colors = colors;
     }
 }

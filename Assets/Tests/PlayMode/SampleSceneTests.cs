@@ -219,6 +219,7 @@ public class SampleSceneTests
         string dir = Path.GetFullPath(Path.Combine(Application.dataPath, "..", "Exports", "Test"));
         Directory.CreateDirectory(dir);
         File.WriteAllText(Path.Combine(dir, "wall_thicknesses_RealApartment.txt"), report.ToString());
+        File.WriteAllText(Path.Combine(dir, "RealApartment_anchor.obj"), OBJWriter.WriteToString(model)); // for eyeballing the geometry outside Unity
 
         UnityEngine.Object.Destroy(go);
         UnityEngine.Object.Destroy(rig);
@@ -230,6 +231,115 @@ public class SampleSceneTests
         // to the right angle (this is what catches a wrong-signed correction, which "off by a couple degrees"
         // would not - a sign error is off by roughly double the whole house's own correction angle).
         Assert.That(offAngles, Has.All.LessThan(2f), "see Exports/Test/wall_thicknesses_RealApartment.txt");
+    }
+
+    /// <summary>
+    /// Diagnostic dump (not a pass/fail test): every DOOR_FRAME/WINDOW_FRAME anchor's real width/height/sill
+    /// vs. its room's ceiling height, plus which rooms each opening appears in (by proximity), so one-sided
+    /// doors and the balcony window's true scanned shape can be inspected against the real apartment data
+    /// instead of guessed at. Written to Exports/Test/openings_RealApartment.txt.
+    /// </summary>
+    [UnityTest]
+    public IEnumerator RealApartment_DumpOpeningInfo()
+    {
+        var rig = new GameObject("OVRCameraRig_Test");
+        rig.AddComponent<OVRCameraRig>();
+        var go = new GameObject("MRUK_Test");
+        var mruk = go.AddComponent<MRUK>();
+        mruk.SceneSettings = new MRUK.MRUKSettings { LoadSceneOnStartup = false, DataSource = MRUK.SceneDataSource.Json };
+        yield return null;
+
+        string path = Path.Combine(Application.dataPath, "Tests", "PlayMode", "Fixtures", "RealApartment7Rooms.json");
+        var load = mruk.LoadSceneFromJsonString(File.ReadAllText(path));
+        yield return Await(load);
+
+        var rooms = MRUKDataProcessor.GetValidRooms(mruk);
+        var report = new StringBuilder();
+
+        var allOpenings = new List<(MRUKRoom room, MRUKAnchor anchor)>();
+        foreach (var room in rooms)
+        {
+            string label = MRUKDataProcessor.GetRoomLabel(room);
+            float floorY = room.FloorAnchors.Count > 0 ? room.FloorAnchors[0].transform.position.y : 0f;
+            float ceilY = room.CeilingAnchors.Count > 0 ? room.CeilingAnchors[0].transform.position.y : floorY + 2.5f;
+            report.AppendLine($"=== Room '{label}' floorY={floorY:0.000} ceilY={ceilY:0.000} height={ceilY - floorY:0.000} ===");
+            foreach (var a in room.Anchors.Where(a => a != null && (a.Label.ToString().Contains("DOOR") || a.Label.ToString().Contains("WINDOW"))))
+            {
+                allOpenings.Add((room, a));
+                float w = a.PlaneRect?.width ?? -1f, h = a.PlaneRect?.height ?? -1f;
+                float sill = a.transform.position.y - floorY;
+                float top = sill + h;
+                int pts = a.PlaneBoundary2D?.Count ?? -1;
+                report.AppendLine($"  {a.Label,-14} w={w:0.000} h={h:0.000} sill={sill:0.000} top={top:0.000} (ceil-top={ceilY - (a.transform.position.y + h):0.000}) boundaryPts={pts} pos={a.transform.position}");
+            }
+        }
+
+        report.AppendLine();
+        report.AppendLine("=== Cross-room grouping (openings within 0.5m of each other) ===");
+        var grouped = new List<List<(MRUKRoom room, MRUKAnchor anchor)>>();
+        foreach (var o in allOpenings)
+        {
+            var group = grouped.FirstOrDefault(g => g.Any(x => Vector3.Distance(x.anchor.transform.position, o.anchor.transform.position) < 0.5f));
+            if (group == null) { group = new List<(MRUKRoom, MRUKAnchor)>(); grouped.Add(group); }
+            group.Add(o);
+        }
+        foreach (var g in grouped)
+        {
+            report.AppendLine($"Group ({g.Count} anchor(s)):");
+            foreach (var (room, anchor) in g)
+                report.AppendLine($"  room='{MRUKDataProcessor.GetRoomLabel(room)}' label={anchor.Label} pos={anchor.transform.position} w={anchor.PlaneRect?.width:0.000} h={anchor.PlaneRect?.height:0.000}");
+        }
+
+        report.AppendLine();
+        report.AppendLine("=== Wall-match check (replicates CreateAnchorAnalytical's wallHoles predicate) ===");
+        foreach (var room in rooms)
+        {
+            string label = MRUKDataProcessor.GetRoomLabel(room);
+            var walls = room.Anchors.Where(MRUKDataProcessor.IsStructuralWall).ToList();
+            foreach (var o in room.Anchors.Where(a => a != null && (a.Label.ToString().Contains("DOOR") || a.Label.ToString().Contains("WINDOW"))))
+            {
+                int matches = 0; string matchInfo = "";
+                foreach (var w in walls)
+                {
+                    float wW = w.PlaneRect.Value.width, wH = w.PlaneRect.Value.height;
+                    Vector3 lp = Quaternion.Inverse(w.transform.rotation) * (o.transform.position - w.transform.position);
+                    bool ok = Mathf.Abs(lp.z) < 0.25f && Mathf.Abs(lp.x) < (wW / 2f + 0.1f) && Mathf.Abs(lp.y) < (wH / 2f + 0.1f);
+                    if (ok) { matches++; matchInfo += $" [wall w={wW:0.00} h={wH:0.00} lp=({lp.x:0.00},{lp.y:0.00},{lp.z:0.00})]"; }
+                }
+                report.AppendLine($"  room='{label}' {o.Label} pos={o.transform.position} -> {matches} matching wall(s){matchInfo}");
+            }
+        }
+
+        report.AppendLine();
+        report.AppendLine("=== DOOR/WINDOW parts actually drawn per room (Anchor and Reconstruction models) ===");
+        float angle = FloorPlanBuilder.CorrectionYaw(MRUKPlanExtractor.Extract(rooms));
+        var anchorModel = XRModelFactory.CreateAnchorAnalytical(rooms, angle, Vector3.zero);
+        var reconModel = XRModelFactory.CreateReconstruction(rooms, angle, Vector3.zero);
+        foreach (var rm in anchorModel.rooms)
+            report.AppendLine($"  Anchor: room='{rm.roomName}' doors/windows drawn: {rm.parts.Count(p => p.materialName == "DOOR" || p.materialName == "WINDOW")}");
+        foreach (var rm in reconModel.rooms)
+            report.AppendLine($"  Reconstruction: room='{rm.roomName}' doors/windows drawn: {rm.parts.Count(p => p.materialName == "DOOR" || p.materialName == "WINDOW")}");
+
+        report.AppendLine();
+        report.AppendLine("=== 3D dimension labels (Anchor+Dim mode) - line length and clearance from the nearest wall part ===");
+        var wallParts = anchorModel.GetAllParts().Where(p => p.materialName == "WALL" && p.vertices.Count == 8).ToList();
+        foreach (var d in anchorModel.dimensions)
+        {
+            float lineLen = Vector3.Distance(d.lineStart, d.lineEnd);
+            // Same box-corner trick as the wall-thickness test: for a WALL box, distance from any point to the
+            // box's own centre-of-a-face plane isn't trivial from vertices alone, so just report the closest
+            // approach to any of the wall's 8 corners as a lower-bound sanity check that the label isn't
+            // sitting essentially on top of a wall.
+            float nearestWallCorner = wallParts.Count > 0 ? wallParts.SelectMany(p => p.vertices).Min(v => Vector3.Distance(v, d.position)) : -1f;
+            report.AppendLine($"  '{d.text}' lineLen={lineLen:0.000} nearestWallCornerDist={nearestWallCorner:0.000} pos={d.position}");
+        }
+        report.AppendLine($"  total dimension labels: {anchorModel.dimensions.Count}");
+
+        string dir = Path.GetFullPath(Path.Combine(Application.dataPath, "..", "Exports", "Test"));
+        Directory.CreateDirectory(dir);
+        File.WriteAllText(Path.Combine(dir, "openings_RealApartment.txt"), report.ToString());
+        UnityEngine.Object.Destroy(go);
+        UnityEngine.Object.Destroy(rig);
     }
 
     static void Finish(Report report, string sample, GameObject go)

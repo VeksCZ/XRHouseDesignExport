@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using NUnit.Framework;
@@ -135,14 +136,53 @@ public class FloorPlanTests
     }
 
     [Test]
-    public void Overview_ShowsOpeningSegmentsInsideTheRoom_OnExteriorWalls()
+    public void Overview_HasNoInnerOpeningChains_OnlyOuterWallLengths()
     {
+        // The overview used to show inner (opening-segment) dimension chains only on exterior walls - never on
+        // a wall shared with a neighbouring room (IsShared skips it), which read as an arbitrary "some walls
+        // get them, some don't" on the one sheet meant to summarise the whole floor. Per-room sheets
+        // (BuildRoom) still show every inner chain for that specific room.
         var a = Box("a", "A", 0, 0, 4, 3);
         a.openings.Add(Opening(OpeningKind.Window, 2.0f, 0f, 1.2f));   // bottom (exterior) wall
         var page = FloorPlanBuilder.BuildOverview(new System.Collections.Generic.List<RoomOutline> { a }, 0);
         var inner = page.lines.Where(l => l.style == PlanStyle.Dimension).ToList();
-        Assert.That(inner.Count, Is.EqualTo(3));
-        foreach (var l in inner) Assert.That((l.a.y + l.b.y) / 2f, Is.InRange(0f, 3f));
+        Assert.That(inner, Is.Empty);
+        var outer = page.lines.Where(l => l.style == PlanStyle.OuterDimension).ToList();
+        Assert.That(outer, Is.Not.Empty);
+    }
+
+    [Test]
+    public void Elevation_DrawsAWindowAtItsRealSillAndHeight()
+    {
+        var a = Box("a", "A", 0, 0, 4, 3);
+        a.openings.Add(Opening(OpeningKind.Window, 2.0f, 0f, 1.2f, height: 1.4f, sill: 0.9f)); // bottom wall, x=2
+        var page = FloorPlanBuilder.BuildElevation(a);
+
+        var windowLines = page.lines.Where(l => l.style == PlanStyle.Window).ToList();
+        Assert.That(windowLines, Is.Not.Empty, "the opening should have been matched to the wall it's on");
+        // Both the sill (bottom edge) and sill+height (top edge) must appear somewhere among the window's lines.
+        float minY = windowLines.Min(l => Mathf.Min(l.a.y, l.b.y));
+        float maxY = windowLines.Max(l => Mathf.Max(l.a.y, l.b.y));
+        Assert.That(minY, Is.EqualTo(0.9f).Within(0.01f));
+        Assert.That(maxY, Is.EqualTo(0.9f + 1.4f).Within(0.01f));
+    }
+
+    [Test]
+    public void Elevation_ShowsTwoDifferentCornerHeights_ForASlopedCeiling()
+    {
+        var a = Box("a", "A", 0, 0, 4, 3);
+        // 4 corners, one per polygon vertex (0,0)->(4,0)->(4,3)->(0,3) - give them a real slope, not a flat ceiling.
+        a.cornerCeilingHeights = new List<float> { 2.2f, 2.4f, 2.6f, 2.4f };
+        var page = FloorPlanBuilder.BuildElevation(a);
+
+        var outerDimTexts = page.texts.Where(t => t.style == PlanStyle.OuterDimension).Select(t => t.text).ToList();
+        Assert.That(outerDimTexts, Does.Contain("2.20"));
+        Assert.That(outerDimTexts, Does.Contain("2.60"));
+        // A uniform-height room (the fallback when there's no per-corner data at all) must never claim a slope.
+        var flat = Box("b", "B", 0, 0, 4, 3);
+        var flatPage = FloorPlanBuilder.BuildElevation(flat);
+        var flatTexts = flatPage.texts.Where(t => t.style == PlanStyle.OuterDimension).Select(t => t.text).Distinct().ToList();
+        Assert.That(flatTexts, Has.Count.EqualTo(1));
     }
 
     [Test]
@@ -165,21 +205,28 @@ public class FloorPlanTests
         Assert.That(html, Does.Contain("Floor 1"));
         Assert.That(html, Does.Contain("Floor 2"));
         // Floor 1 (Living + Kitchen): overview + 2 room sheets. Floor 2 (Bedroom alone): just its own sheet.
-        Assert.That(System.Text.RegularExpressions.Regex.Matches(html, "<svg ").Count, Is.EqualTo(3 + 1));
+        // Each of the 3 rooms also gets its own elevation sheet. Doubled: the report renders both the Exact
+        // and the Adjusted view of every sheet (elevations included, since they're built from the same aligned
+        // room outlines inside the shared AppendLevels pass).
+        Assert.That(System.Text.RegularExpressions.Regex.Matches(html, "<svg ").Count, Is.EqualTo((3 + 1 + 3) * 2));
     }
 
     [Test]
-    public void SingleRoomFloor_HasOnlyOneSheet_WithTheRoomNameCentredOnIt()
+    public void SingleRoomFloor_HasOnlyOneSheet_NamedOnlyInItsTitle()
     {
         var room = Box("a", "STUDIO", 0, 0, 5, 4);
         var plans = FloorPlanBuilder.BuildLevels(new[] { room });
         Assert.That(plans[0].overview, Is.Null);
         var pages = FloorPlanBuilder.Flatten(plans);
         Assert.That(pages.Count, Is.EqualTo(1));
-        Assert.That(pages[0].texts.Any(t => t.style == PlanStyle.Label && t.text == "STUDIO"));
+        Assert.That(pages[0].title, Is.EqualTo("STUDIO"));
+        // The room's name used to also be drawn a second time, centred over the room itself - just clutter,
+        // since the sheet's own title (checked above) already names it.
+        Assert.That(pages[0].texts.Any(t => t.text == "STUDIO"), Is.False);
 
         string html = MRUKReportBuilder.GenerateFullReport(new System.Collections.Generic.List<RoomOutline> { room }, 0f, "Test");
-        Assert.That(System.Text.RegularExpressions.Regex.Matches(html, "<svg ").Count, Is.EqualTo(1));
+        // The room's own floor plan plus its elevation sheet, doubled for the Exact and Adjusted views.
+        Assert.That(System.Text.RegularExpressions.Regex.Matches(html, "<svg ").Count, Is.EqualTo((1 + 1) * 2));
         Assert.That(System.Text.RegularExpressions.Regex.Matches(html, "- floor plan</h3>").Count, Is.EqualTo(0));
     }
 
@@ -304,10 +351,11 @@ public class FloorPlanTests
     /// dominantYawDeg + result.eulerAngles.y - not the result on its own. A wrong-signed correction here once
     /// rotated every wall in a scan by roughly double the house's own correction angle instead of fixing it.
     /// </summary>
+    /// <summary>Every case here is within the jitter tolerance (MaxJitterToSnapDeg), so all of them snap.</summary>
     [TestCase(0f, 0f)]
     [TestCase(0f, 1.5f)]
     [TestCase(0f, -1.5f)]
-    [TestCase(-32.7f, 0f)]
+    [TestCase(0f, 179f)]         // near 180, not 0 - exercises a different quadrant than the others
     [TestCase(-32.7f, 30f)]      // raw wall already near a right angle relative to the correction
     [TestCase(-32.7f, 32.9f)]    // raw wall near yaw 0 (i.e. near-unrotated) - the case a sign error breaks worst
     [TestCase(58.2f, -58f)]
@@ -319,5 +367,81 @@ public class FloorPlanTests
         Assert.That(offFromRightAngle, Is.LessThan(0.01f).Or.GreaterThan(89.99f));
         // And it should be the *nearest* right angle - never more than 45 deg away from the original.
         Assert.That(Mathf.Abs(Mathf.DeltaAngle(dominantYawDeg + rawYawDeg, corrected)), Is.LessThanOrEqualTo(45f));
+    }
+
+    /// <summary>
+    /// A wall that's a real 32.7 deg off the house's own dominant direction (far more than scan jitter, which the
+    /// real apartment fixture measured at under 2 deg) is a genuinely angled feature - a bay window, a cut corner
+    /// - not noise, so it must come back completely unchanged rather than forced onto the nearest right angle.
+    /// </summary>
+    [Test]
+    public void SnapToPerpendicular_LeavesARealAngleAlone_WhenFarFromARightAngle()
+    {
+        var raw = Quaternion.Euler(0, 0f, 0);
+        var snapped = XRModelFactory.SnapToPerpendicular(raw, -32.7f);
+        Assert.That(snapped.eulerAngles.y, Is.EqualTo(raw.eulerAngles.y).Within(0.01f));
+    }
+
+    /// <summary>
+    /// MRUK only ever attaches a door/window anchor to whichever room's own scan captured it, so a real doorway
+    /// between two rooms often has an anchor on just one side - the plan showed a door from that room, but a
+    /// plain solid wall from the other, for the exact same physical opening.
+    /// </summary>
+    [Test]
+    public void MirrorSharedOpenings_CopiesADoorToTheNeighbourOnTheOtherSideOfTheSharedWall()
+    {
+        var a = Box("a", "A", 0, 0, 4, 3);   // shares the wall at x=4 with room b
+        var b = Box("b", "B", 4, 0, 8, 3);
+        a.openings.Add(Opening(OpeningKind.Door, 4f, 1.5f, 0.9f)); // on A's right wall, exactly on the shared wall
+
+        var rooms = new System.Collections.Generic.List<RoomOutline> { a, b };
+        MRUKPlanExtractor.MirrorSharedOpenings(rooms);
+
+        Assert.That(a.openings, Has.Count.EqualTo(1), "A's own door should not be duplicated");
+        Assert.That(b.openings, Has.Count.EqualTo(1), "B was missing the same door on its side of the shared wall");
+        Assert.That(b.openings[0].kind, Is.EqualTo(OpeningKind.Door));
+        Assert.That(b.openings[0].center, Is.EqualTo(a.openings[0].center));
+    }
+
+    [Test]
+    public void MirrorSharedOpenings_DoesNothingAcrossRoomsThatDoNotShareAWall()
+    {
+        var a = Box("a", "A", 0, 0, 4, 3);
+        var farAway = Box("b", "B", 20, 20, 24, 23); // nowhere near A
+        a.openings.Add(Opening(OpeningKind.Window, 2f, 3f, 1.2f));
+
+        var rooms = new System.Collections.Generic.List<RoomOutline> { a, farAway };
+        MRUKPlanExtractor.MirrorSharedOpenings(rooms);
+
+        Assert.That(farAway.openings, Is.Empty);
+    }
+
+    [Test]
+    public void Rectified_SnapsSmallJitterToRightAngles_KeepingEdgeLengths()
+    {
+        var room = Box("a", "A", 0, 0, 5, 4);
+        // 3 deg of jitter on every edge - well within real scan noise - should all come back axis-aligned.
+        var jittered = FloorPlanBuilder.Aligned(new[] { room }, 3f)[0];
+
+        var rectified = FloorPlanBuilder.Rectified(new[] { jittered })[0];
+        AssertAxisAligned(rectified);
+
+        var lengths = new System.Collections.Generic.List<float>();
+        for (int i = 0; i < rectified.polygon.Count; i++)
+            lengths.Add(Vector2.Distance(rectified.polygon[i], rectified.polygon[(i + 1) % rectified.polygon.Count]));
+        foreach (var expected in new[] { 4f, 4f, 5f, 5f })
+            Assert.That(lengths.Any(l => Mathf.Abs(l - expected) < 0.01f), $"missing an edge of length {expected}: [{string.Join(", ", lengths)}]");
+    }
+
+    [Test]
+    public void Rectified_LeavesARealAngleAlone_WhenFarFromARightAngle()
+    {
+        // A pentagon with one corner cut at 45 deg - a real chamfered corner, not scan noise.
+        var room = new RoomOutline { id = "a", name = "A", polygon = new System.Collections.Generic.List<Vector2> { new(0, 0), new(4, 0), new(4, 2), new(3, 3), new(0, 3) } };
+        var rectified = FloorPlanBuilder.Rectified(new[] { room })[0];
+
+        Vector2 chamfer = rectified.polygon[3] - rectified.polygon[2]; // (4,2) -> (3,3): the cut corner
+        Assert.That(Mathf.Abs(chamfer.x - (-1f)), Is.LessThan(0.01f));
+        Assert.That(Mathf.Abs(chamfer.y - 1f), Is.LessThan(0.01f));
     }
 }

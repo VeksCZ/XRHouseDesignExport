@@ -142,6 +142,26 @@ public class MRUKExporter : MonoBehaviour
     #endif
     }
 
+    /// <summary>Deletes the currently selected cached scan (the live source isn't a saved file, so there's
+    /// nothing to delete for it). Falls back to the live source afterwards since the deleted one no longer exists.</summary>
+    public bool DeleteSelectedScan(XRMenu ui = null)
+    {
+        if (SelectedSource == LiveSource)
+        {
+            ui?.AddLog("<color=orange>The live scan isn't a saved file - nothing to delete.</color>");
+            return false;
+        }
+        string name = SelectedSource;
+        bool ok = MRUKSceneCache.DeleteCachedScan(name);
+        ui?.AddLog(ok ? $"<color=green>Deleted cached scan '{name}'.</color>" : $"<color=red>Could not delete '{name}'.</color>");
+        if (ok)
+        {
+            if (ActiveSource == name) ActiveSource = null;
+            SelectedSource = LiveSource;
+        }
+        return ok;
+    }
+
     /// <summary>True if whatever MRUK currently holds contains at least one exportable room.</summary>
     public bool HasValidRooms()
     {
@@ -152,15 +172,23 @@ public class MRUKExporter : MonoBehaviour
     #endif
     }
 
-    /// <summary>All plan sheets of whatever MRUK currently holds: per story an overview, then its rooms.</summary>
-    public List<FloorPlanPage> BuildPlanPages()
+    /// <summary>
+    /// All plan sheets of whatever MRUK currently holds: per story an overview, then its rooms - in both the
+    /// true measured shape ("Exact") and with small corner jitter cleaned up to real right angles ("Adjusted";
+    /// see FloorPlanBuilder.Rectified). The viewer/report offer both rather than picking one, since a floor plan
+    /// is meant to show the real shape but a cleaner-looking one is sometimes what you actually want.
+    /// </summary>
+    public (List<FloorPlanPage> exact, List<FloorPlanPage> adjusted) BuildPlanPages()
     {
     #if META_XR_SDK_INSTALLED
         var outlines = MRUKPlanExtractor.Extract(MRUKDataProcessor.GetValidRooms(MRUK.Instance));
         float yaw = FloorPlanBuilder.CorrectionYaw(outlines);
-        return FloorPlanBuilder.Flatten(FloorPlanBuilder.BuildLevels(FloorPlanBuilder.Aligned(outlines, yaw)));
+        var aligned = FloorPlanBuilder.Aligned(outlines, yaw);
+        var exact = FloorPlanBuilder.Flatten(FloorPlanBuilder.BuildLevels(aligned));
+        var adjusted = FloorPlanBuilder.Flatten(FloorPlanBuilder.BuildLevels(FloorPlanBuilder.Rectified(aligned)));
+        return (exact, adjusted);
     #else
-        return new List<FloorPlanPage>();
+        return (new List<FloorPlanPage>(), new List<FloorPlanPage>());
     #endif
     }
 
@@ -262,7 +290,7 @@ public class MRUKExporter : MonoBehaviour
         Save(XRModelFactory.CreateAnchorAnalytical(rooms, angle, LastHouseCenter), session, MRUKPathUtility.MODEL_CLEAN_OBJ, MRUKPathUtility.MODEL_CLEAN_GLB); SetProgress(60, ui);
         Save(await XRModelFactory.CreateMeshAnalytical(rooms, angle, LastHouseCenter), session, MRUKPathUtility.MODEL_MESH_ANALYTICAL_OBJ, MRUKPathUtility.MODEL_MESH_ANALYTICAL_GLB); SetProgress(75, ui);
         Save(XRModelFactory.CreateReconstruction(rooms, angle, LastHouseCenter), session, MRUKPathUtility.MODEL_MESH_OBJ, MRUKPathUtility.MODEL_MESH_GLB); SetProgress(85, ui);
-        Save(await XRModelFactory.CreateRawScan(rooms, angle, LastHouseCenter), session, MRUKPathUtility.MODEL_RAW_OBJ, null); SetProgress(95, ui);
+        Save(await XRModelFactory.CreateRawScan(rooms, angle, LastHouseCenter), session, MRUKPathUtility.MODEL_RAW_OBJ, MRUKPathUtility.MODEL_RAW_GLB); SetProgress(95, ui);
 
         File.WriteAllText(Path.Combine(session, MRUKPathUtility.MODEL_MTL), OBJWriter.GenerateMTL());
 
@@ -278,7 +306,7 @@ public class MRUKExporter : MonoBehaviour
             Save(XRModelFactory.CreateAnchorAnalytical(rList, angle, LastHouseCenter), rPath, MRUKPathUtility.MODEL_CLEAN_OBJ, MRUKPathUtility.MODEL_CLEAN_GLB);
             Save(await XRModelFactory.CreateMeshAnalytical(rList, angle, LastHouseCenter), rPath, MRUKPathUtility.MODEL_MESH_ANALYTICAL_OBJ, MRUKPathUtility.MODEL_MESH_ANALYTICAL_GLB);
             Save(XRModelFactory.CreateReconstruction(rList, angle, LastHouseCenter), rPath, MRUKPathUtility.MODEL_MESH_OBJ, MRUKPathUtility.MODEL_MESH_GLB);
-            Save(await XRModelFactory.CreateRawScan(rList, angle, LastHouseCenter), rPath, MRUKPathUtility.MODEL_RAW_OBJ, null);
+            Save(await XRModelFactory.CreateRawScan(rList, angle, LastHouseCenter), rPath, MRUKPathUtility.MODEL_RAW_OBJ, MRUKPathUtility.MODEL_RAW_GLB);
             File.WriteAllText(Path.Combine(rPath, MRUKPathUtility.MODEL_MTL), OBJWriter.GenerateMTL());
 
             var roomOutline = MRUKPlanExtractor.Extract(rList);

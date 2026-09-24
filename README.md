@@ -12,17 +12,23 @@
 ## Using the app
 The menu floats in front of you (follows your gaze). Point with the right controller and pull the trigger to click.
 
+On/off buttons (Dollhouse, Floor plans, Scan overlay, Minimap) tint green while they're on, and the two Delete
+buttons are tinted red as a standing warning - both colours are always kept in sync with what's actually on
+screen, however it got that way (another button, a shortcut, or a scan-source change turning something back off).
+
 | Button | Shortcut | |
 |---|---|---|
 | Export | B (right) | Runs the full export of the selected source |
 | Dollhouse | A (right) | Turns the in-headset dollhouse on/off, showing whatever tier was last picked |
-| Mode | right stick left/right | Cycles the dollhouse between its 3 tiers: Anchor (clean, 25cm walls, no furniture), Mesh, Raw |
+| Mode | right stick left/right | Cycles the dollhouse between its 4 tiers: Anchor (clean, 25cm walls, no furniture), Anchor+Dim (same, with 3D dimension labels including sill/opening heights), Mesh, Raw |
 | Floor plans | stick click (left) | Plan viewer (`<` `>` page, right stick left/right also pages while open, "Rename room" names the room) |
 | Save scan | X (left) | Stores the live scene in the scan cache |
-| Open report | stick click (right) | Opens the HTML report |
-| Load scan | | Loads the selected saved scan |
+| Delete scan | | Deletes the currently selected saved scan (not the live source) |
+| Delete exports | | Clears every exported session from device storage |
+| Scan overlay | | Highlights the scanned room(s) over passthrough, like Quest's own Room Setup preview |
+| Minimap | | Small always-facing copy of the house near your left wrist with a live position marker |
 | Save log | Y (left) | Writes the on-screen log to a file |
-| Scan source | left stick left/right | Cycles between the live scan and saved scans |
+| Scan source | left stick left/right | Cycles between the live scan and saved scans; clicking the scan name force-reloads it |
 
 ## Requirements
 - **Unity** 6000.3.9f1 (Unity 6), Android build target (IL2CPP, ARM64), URP.

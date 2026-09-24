@@ -86,10 +86,15 @@ public static class GLBExporter
         for (int i = 0; i < colors.Count; i++)
         {
             Color c = colors[i];
-            sb.Append("{\"pbrMetallicRoughness\":{\"baseColorFactor\":[" + 
-                c.r.ToString("F3", System.Globalization.CultureInfo.InvariantCulture) + "," + 
-                c.g.ToString("F3", System.Globalization.CultureInfo.InvariantCulture) + "," + 
-                c.b.ToString("F3", System.Globalization.CultureInfo.InvariantCulture) + ",1.0],\"metallicFactor\":0.0,\"roughnessFactor\":1.0}}");
+            // doubleSided defaults to false in glTF 2.0 when omitted - every wall/door/window here is a thin box
+            // that gets looked at from either side (inside or outside the room), so without this every strict
+            // viewer (Windows 3D Viewer, Blender with backface culling on, ...) backface-culls whichever face
+            // isn't wound towards the camera, making walls look caved in/see-through from one side - the exact
+            // glTF equivalent of the _Cull=Off fix UnityModelLoader.GetMaterial already needed for the same reason.
+            sb.Append("{\"pbrMetallicRoughness\":{\"baseColorFactor\":[" +
+                c.r.ToString("F3", System.Globalization.CultureInfo.InvariantCulture) + "," +
+                c.g.ToString("F3", System.Globalization.CultureInfo.InvariantCulture) + "," +
+                c.b.ToString("F3", System.Globalization.CultureInfo.InvariantCulture) + ",1.0],\"metallicFactor\":0.0,\"roughnessFactor\":1.0},\"doubleSided\":true");
             if (i < colors.Count - 1) sb.Append(",");
         }
         sb.Append("],");

@@ -180,9 +180,14 @@ public static class MRUKEditorTools {
         string sdk = EditorPrefs.GetString("AndroidSdkRoot");
         if(string.IsNullOrEmpty(sdk)) sdk = Path.Combine(EditorApplication.applicationContentsPath, "PlaybackEngines/AndroidPlayer/SDK");
         string adb = Path.Combine(sdk, "platform-tools", "adb" + (Application.platform == RuntimePlatform.WindowsEditor ? ".exe" : ""));
-        
+
         if (File.Exists(adb)) {
-            var info = new System.Diagnostics.ProcessStartInfo(adb, args) { 
+            // A headset reachable both by USB and by wireless ADB (adb tcpip) shows up as two devices for the
+            // same physical unit - a plain "adb install"/"adb uninstall" with no explicit target then refuses
+            // to guess ("more than one device/emulator") instead of picking one, failing the whole fast-build's
+            // install step even though the build itself succeeded.
+            args = GetDeviceArg(adb) + args;
+            var info = new System.Diagnostics.ProcessStartInfo(adb, args) {
                 UseShellExecute = false, 
                 CreateNoWindow = true,
                 RedirectStandardError = true,
@@ -204,6 +209,36 @@ public static class MRUKEditorTools {
             Debug.LogError("ADB executable not found. Please check Android SDK path in Preferences.");
             EditorUtility.DisplayDialog("ADB Not Found", "Could not find adb.exe. Please check Android SDK path.", "OK");
             return false;
+        }
+    }
+
+    /// <summary>
+    /// "" if zero or one device is connected (nothing to disambiguate); otherwise "-s &lt;serial&gt; " for a
+    /// specific one - a USB serial (no ':') is preferred over a Wi-Fi one (host:port), since a wireless ADB
+    /// link can be slower/less reliable for pushing a whole APK.
+    /// </summary>
+    static string GetDeviceArg(string adb) {
+        try {
+            var info = new System.Diagnostics.ProcessStartInfo(adb, "devices") {
+                UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true
+            };
+            var process = System.Diagnostics.Process.Start(info);
+            string output = process.StandardOutput.ReadToEnd();
+            process.WaitForExit();
+
+            var serials = output.Split('\n')
+                .Select(l => l.Trim())
+                .Where(l => l.EndsWith("\tdevice"))
+                .Select(l => l.Split('\t')[0])
+                .ToList();
+            if (serials.Count <= 1) return "";
+
+            string chosen = serials.FirstOrDefault(s => !s.Contains(':')) ?? serials[0];
+            Debug.Log($"<color=cyan>Multiple ADB devices connected ({string.Join(", ", serials)}) - using {chosen}.</color>");
+            return "-s " + chosen + " ";
+        } catch (Exception ex) {
+            Debug.LogWarning($"Could not list ADB devices to disambiguate ({ex.Message}); proceeding without -s.");
+            return "";
         }
     }
 }

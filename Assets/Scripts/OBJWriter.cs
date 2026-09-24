@@ -4,8 +4,13 @@ using System.IO;
 
 public static class OBJWriter
 {
-    public static string WriteToString(XRHouseModel model, string mtlName = "01_Materials.mtl")
+    public static string WriteToString(XRHouseModel model, string mtlName = null)
     {
+        // Must match MRUKPathUtility.MODEL_MTL, the name the .mtl file is actually written under - this
+        // constant used to be "01_Materials.mtl" and got renumbered to "00_..." without updating this default,
+        // so every exported OBJ's "mtllib" line pointed at a file that didn't exist and viewers silently
+        // dropped every material (walls, floor, and the door/window colors that actually carry meaning).
+        mtlName ??= MRUKPathUtility.MODEL_MTL;
         StringBuilder sb = new StringBuilder();
         sb.AppendLine("mtllib " + mtlName);
         int vOff = 0;

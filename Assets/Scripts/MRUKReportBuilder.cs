@@ -24,10 +24,13 @@ public static class MRUKReportBuilder
         .wall{stroke:#2d3748;stroke-width:0.12;stroke-linecap:square}
         .door{stroke:#b7791f;stroke-width:0.14}
         .window{stroke:#3182ce;stroke-width:0.14}
-        .dimline{stroke:#c53030;stroke-width:0.015}
+        /* Guide/extension lines and ticks stay red on both inner and outer dimensions (no .outer override needed
+           since they're already red) - only the dimension line itself (where the number sits) tells the two
+           apart: purple inside, green outside. */
+        .dimline{stroke:#805ad5;stroke-width:0.015}
         .ext{stroke:#c53030;stroke-width:0.01;opacity:.7}
         .tick{stroke:#c53030;stroke-width:0.03}
-        .dimline.outer,.ext.outer,.tick.outer{stroke:#2f855a}
+        .dimline.outer{stroke:#2f855a}
         text{font-family:'Segoe UI',Arial,sans-serif}
         /* Dimension numbers are dark (not the line's own red/green) with a white halo, so they stay
            readable wherever they cross a line, a wall or another number. */
@@ -43,10 +46,16 @@ public static class MRUKReportBuilder
         .type-door{color:#b7791f;font-weight:600} .type-window{color:#3182ce;font-weight:600}
         .zoom-controls{position:absolute; top:16px; left:16px; z-index:10; display:flex; flex-direction:column; gap:8px;}
         .zoom-controls button{width:38px; height:38px; cursor:pointer; background:white; border:none; border-radius:8px; font-weight:bold; box-shadow:0 3px 6px rgba(0,0,0,0.1); font-size:1.1em; color:#2d3748;}
-        @media print{body{background:white} .container{box-shadow:none;break-inside:avoid;break-after:page} .zoom-controls{display:none} .svg-container{height:150mm;border:none}}
+        .mode-toggle{margin-top:14px; background:rgba(255,255,255,.12); color:white; border:1px solid rgba(255,255,255,.4); border-radius:20px; padding:8px 18px; font-size:.85em; font-weight:700; cursor:pointer;}
+        .mode-toggle:hover{background:rgba(255,255,255,.2)}
+        @media print{body{background:white} .container{box-shadow:none;break-inside:avoid;break-after:page} .zoom-controls{display:none} .mode-toggle{display:none} .svg-container{height:150mm;border:none}}
     ";
 
     const string SCRIPT = "document.querySelectorAll('.svg-container').forEach(c=>{const s=c.querySelector('svg');let sc=1,x=0,y=0,d=false,sx,sy;c.onwheel=e=>{e.preventDefault();sc=Math.min(Math.max(0.1,sc*(e.deltaY>0?0.9:1.1)),10);u()};c.onmousedown=e=>{if(e.target.tagName=='BUTTON')return;d=true;sx=e.clientX-x;sy=e.clientY-y};window.onmousemove=e=>{if(d){x=e.clientX-sx;y=e.clientY-sy;u()}};window.onmouseup=()=>d=false;function u(){s.style.transform=`translate(${x}px,${y}px) scale(${sc})`};c.querySelector('.btn-in').onclick=()=>{sc*=1.2;u()};c.querySelector('.btn-out').onclick=()=>{sc/=1.2;u()};c.querySelector('.btn-reset').onclick=()=>{sc=1;x=0;y=0;u()}})";
+
+    // Toggles between the "Exact" (true measured shape) and "Adjusted" (small corner jitter cleaned up to real
+    // right angles) floor plans, both already rendered into the page - this just shows/hides one or the other.
+    const string MODE_SCRIPT = "(function(){var b=document.getElementById('modeToggle'),e=document.getElementById('mode-exact'),a=document.getElementById('mode-adjusted'),adj=false;b.onclick=function(){adj=!adj;e.style.display=adj?'none':'block';a.style.display=adj?'block':'none';b.textContent=(adj?'Adjusted':'Exact')+' view (click for '+(adj?'Exact':'Adjusted')+')'};})();";
 
     static string Enc(string s) => WebUtility.HtmlEncode(s ?? "");
 
@@ -54,16 +63,34 @@ public static class MRUKReportBuilder
     /// <param name="alignYaw">Yaw from FloorPlanBuilder.CorrectionYaw, so walls run parallel to the page edges.</param>
     public static string GenerateFullReport(List<RoomOutline> rooms, float alignYaw, string sourceName)
     {
-        var levels = FloorPlanBuilder.BuildLevels(FloorPlanBuilder.Aligned(rooms, alignYaw));
+        var aligned = FloorPlanBuilder.Aligned(rooms, alignYaw);
+        var levelsExact = FloorPlanBuilder.BuildLevels(aligned);
+        var levelsAdjusted = FloorPlanBuilder.BuildLevels(FloorPlanBuilder.Rectified(aligned));
 
         var html = new StringBuilder();
         html.Append("<html><head><meta charset='UTF-8'><title>Property Report</title><style>" + STYLE + "</style></head><body>");
         html.Append("<div class='header'><h1>Property Documentation</h1><p>")
             .Append(Enc(sourceName)).Append(" &middot; ").Append(DateTime.Now.ToString("yyyy-MM-dd HH:mm"))
-            .Append(" &middot; ").Append(rooms.Count).Append(" room(s), ").Append(levels.Count).Append(" floor(s), ")
-            .Append(rooms.Sum(r => r.Area).ToString("0.0", System.Globalization.CultureInfo.InvariantCulture)).Append(" m&sup2;</p></div>");
+            .Append(" &middot; ").Append(rooms.Count).Append(" room(s), ").Append(levelsExact.Count).Append(" floor(s), ")
+            .Append(rooms.Sum(r => r.Area).ToString("0.0", System.Globalization.CultureInfo.InvariantCulture)).Append(" m&sup2;</p>")
+            // "Exact" shows the true measured shape; "Adjusted" cleans up small corner jitter to real right
+            // angles (FloorPlanBuilder.Rectified) - a real angled wall (a bay window, a cut corner) stays as
+            // measured either way. Both are already rendered below; this just shows one and hides the other.
+            .Append("<button id='modeToggle' class='mode-toggle'>Exact view (click for Adjusted)</button>")
+            .Append("</div>");
         html.Append("<div class='content'>");
+        html.Append("<div id='mode-exact'>"); AppendLevels(html, levelsExact); html.Append("</div>");
+        html.Append("<div id='mode-adjusted' style='display:none'>"); AppendLevels(html, levelsAdjusted); html.Append("</div>");
 
+        // The explicit ';' between the two scripts matters: with none, "...forEach(...)})(function(){...})();"
+        // parses as calling forEach's return value (undefined) as a function - a TypeError that aborts before
+        // the mode-toggle IIFE ever runs, which is exactly why "click for Adjusted" silently did nothing.
+        html.Append("</div><script>").Append(SCRIPT).Append(";").Append(MODE_SCRIPT).Append("</script></body></html>");
+        return html.ToString();
+    }
+
+    static void AppendLevels(StringBuilder html, List<LevelPlan> levels)
+    {
         foreach (var level in levels)
         {
             html.Append($"<div class='floor-section'><h2 class='section-title'>Floor {level.index + 1}</h2>");
@@ -93,17 +120,23 @@ public static class MRUKReportBuilder
                 FloorPlanSvg.Write(html, rp.page);
                 AppendTables(html, walls);
                 html.Append("</div>");
+
+                // Every wall unfolded flat, with real sill heights, opening heights and (for a sloped ceiling)
+                // the true height at each end of each wall - none of which a top-down floor plan can show.
+                var elevation = FloorPlanBuilder.BuildElevation(r);
+                html.Append("<div class='container'><h3>").Append(Enc(r.name)).Append(" - elevation</h3><p class='sub'>")
+                    .Append(Enc(elevation.subtitle)).Append("</p>");
+                AppendLegend(html);
+                FloorPlanSvg.Write(html, elevation);
+                html.Append("</div>");
             }
             html.Append("</div>");
         }
-
-        html.Append("</div><script>").Append(SCRIPT).Append("</script></body></html>");
-        return html.ToString();
     }
 
     static void AppendLegend(StringBuilder html)
     {
-        html.Append("<div class='legend'><b style='border-color:#2d3748'></b>wall<b style='border-color:#b7791f'></b>door<b style='border-color:#3182ce'></b>window<b style='border-color:#2f855a;border-top-width:2px'></b>whole wall (from outside)<b style='border-color:#c53030;border-top-width:2px'></b>openings and segments (from inside)</div>");
+        html.Append("<div class='legend'><b style='border-color:#2d3748'></b>wall<b style='border-color:#b7791f'></b>door<b style='border-color:#3182ce'></b>window<b style='border-color:#2f855a;border-top-width:2px'></b>whole wall (from outside)<b style='border-color:#805ad5;border-top-width:2px'></b>openings and segments (from inside)</div>");
     }
 
     static void AppendTables(StringBuilder html, List<(float length, List<PlanOpening> openings)> walls)

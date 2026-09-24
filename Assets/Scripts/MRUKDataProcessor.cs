@@ -220,25 +220,19 @@ var mrukAnchor = room.GetComponent<MRUKAnchor>();
         return rooms.Where(keptRooms.Contains).ToList();
     }
 
+    // A room that turned out to be a real, small pantry got excluded here for a while by a "must have a door
+    // or window" heuristic aimed at a different case (a doorless alcove around a water pipe that Quest's own
+    // room detection had boxed in on its own, not a room the user ever walked into). But Quest's live scan is
+    // the actual source of truth for what counts as a room - if its own Space Setup presents something as a
+    // room, this app must too, door/window or not. Only a genuinely degenerate (near-zero) floor rect is
+    // rejected here, since that's not a room shape at all, not a judgement about whether the room is "real".
     private static bool IsRoomAreaValid(MRUKRoom room)
     {
         var floor = room.Anchors.FirstOrDefault(a => a.Label == MRUKAnchor.SceneLabels.FLOOR && a.PlaneRect.HasValue);
         if (floor == null) return false;
 
         float area = floor.PlaneRect.Value.width * floor.PlaneRect.Value.height;
-        if (area < 0.8f) return false;
-
-        if (area < 3.5f)
-        {
-            bool isSignificant = room.Anchors.Any(a => {
-                string l = a.Label.ToString().ToUpperInvariant();
-                return l.Contains("DOOR") || l.Contains("WINDOW") ||
-                       (!l.Contains("WALL") && !l.Contains("FLOOR") && !l.Contains("CEILING") &&
-                        !l.Contains("OTHER") && !l.Contains("STORAGE"));
-            });
-            if (!isSignificant) return false;
-        }
-        return true;
+        return area >= 0.8f;
     }
 
     /// <summary>
@@ -259,20 +253,13 @@ var mrukAnchor = room.GetComponent<MRUKAnchor>();
     }
 
     /// <summary>
-    /// True for anything you can walk through: a DOOR_FRAME, or a WINDOW_FRAME whose bottom edge sits
-    /// at floor level (e.g. a balcony/patio door, which MRUK has no dedicated label for and reports
-    /// as a window). A window next to it that doesn't reach the floor stays a window.
+    /// True for a real, solid DOOR_FRAME. A floor-reaching WINDOW_FRAME (a glass balcony door) used to be
+    /// reclassified as a door here, but it's still glass, not a solid door leaf - it stays a window (blue), even
+    /// the narrower pane of a balcony assembly that's actually the walkable part.
     /// </summary>
     public static bool IsDoor(MRUKAnchor a)
     {
-        if (a == null) return false;
-        string l = a.Label.ToString().ToUpperInvariant();
-        if (l.Contains("DOOR")) return true;
-        if (!l.Contains("WINDOW") || !a.PlaneRect.HasValue || a.Room == null || a.Room.FloorAnchors.Count == 0) return false;
-
-        float floorY = a.Room.FloorAnchors.Min(f => f.transform.position.y);
-        float bottomY = a.transform.position.y - a.PlaneRect.Value.height / 2f;
-        return bottomY - floorY < 0.15f;
+        return a != null && a.Label.ToString().ToUpperInvariant().Contains("DOOR");
     }
 
     public static bool IsWindow(MRUKAnchor a)
