@@ -194,7 +194,8 @@ public class FloorPlanTests
         Assert.That(plans[0].rooms.Count, Is.EqualTo(2));
         Assert.That(plans[1].rooms.Count, Is.EqualTo(1));
         // Floor 1 has 2 rooms -> overview + 2 room pages; floor 2 has only 1 room -> just that one page, no overview.
-        Assert.That(FloorPlanBuilder.Flatten(plans).Count, Is.EqualTo(3 + 1));
+        // Each room page is also followed by its own elevation page in the flattened (in-headset) list.
+        Assert.That(FloorPlanBuilder.Flatten(plans).Count, Is.EqualTo(1 + 2 * 2 + 1 * 2));
     }
 
     [Test]
@@ -218,7 +219,8 @@ public class FloorPlanTests
         var plans = FloorPlanBuilder.BuildLevels(new[] { room });
         Assert.That(plans[0].overview, Is.Null);
         var pages = FloorPlanBuilder.Flatten(plans);
-        Assert.That(pages.Count, Is.EqualTo(1));
+        // The room's own floor plan page plus its elevation page.
+        Assert.That(pages.Count, Is.EqualTo(2));
         Assert.That(pages[0].title, Is.EqualTo("STUDIO"));
         // The room's name used to also be drawn a second time, centred over the room itself - just clutter,
         // since the sheet's own title (checked above) already names it.

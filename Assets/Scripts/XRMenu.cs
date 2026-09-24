@@ -62,6 +62,9 @@ public class XRMenu : MonoBehaviour
 
     async void Start()
     {
+        // Shown right after Meta's own passthrough loading environment settles, before the wrist menu appears.
+        await gameObject.AddComponent<SplashScreen>().ShowAndWait();
+
         exporter ??= FindAnyObjectByType<MRUKExporter>();
         dollhouse ??= FindAnyObjectByType<DollHouseVisualizer>() ?? gameObject.AddComponent<DollHouseVisualizer>();
         dollhouse.uiLog = this;

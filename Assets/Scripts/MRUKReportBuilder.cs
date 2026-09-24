@@ -51,7 +51,13 @@ public static class MRUKReportBuilder
         @media print{body{background:white} .container{box-shadow:none;break-inside:avoid;break-after:page} .zoom-controls{display:none} .mode-toggle{display:none} .svg-container{height:150mm;border:none}}
     ";
 
-    const string SCRIPT = "document.querySelectorAll('.svg-container').forEach(c=>{const s=c.querySelector('svg');let sc=1,x=0,y=0,d=false,sx,sy;c.onwheel=e=>{e.preventDefault();sc=Math.min(Math.max(0.1,sc*(e.deltaY>0?0.9:1.1)),10);u()};c.onmousedown=e=>{if(e.target.tagName=='BUTTON')return;d=true;sx=e.clientX-x;sy=e.clientY-y};window.onmousemove=e=>{if(d){x=e.clientX-sx;y=e.clientY-sy;u()}};window.onmouseup=()=>d=false;function u(){s.style.transform=`translate(${x}px,${y}px) scale(${sc})`};c.querySelector('.btn-in').onclick=()=>{sc*=1.2;u()};c.querySelector('.btn-out').onclick=()=>{sc/=1.2;u()};c.querySelector('.btn-reset').onclick=()=>{sc=1;x=0;y=0;u()}})";
+    // Each .svg-container's pan/zoom state (sc/x/y) has to live in its OWN closure (st below) - assigning
+    // window.onmousemove/onmouseup directly inside the forEach loop, as an earlier version did, overwrote them
+    // on every iteration, so only the very last container on the whole page ever actually panned; every
+    // earlier one still set its own "dragging" flag on mousedown but had no working handler left to apply it.
+    // A single shared 'active' reference (which container/state is currently being dragged) fixes that while
+    // still only ever dragging one container at a time, which is the only sensible behaviour anyway.
+    const string SCRIPT = "(function(){var active=null;document.querySelectorAll('.svg-container').forEach(c=>{const s=c.querySelector('svg');const st={sc:1,x:0,y:0,sx:0,sy:0};function u(){s.style.transform=`translate(${st.x}px,${st.y}px) scale(${st.sc})`}c.onwheel=e=>{e.preventDefault();st.sc=Math.min(Math.max(0.1,st.sc*(e.deltaY>0?0.9:1.1)),10);u()};c.onmousedown=e=>{if(e.target.tagName=='BUTTON')return;st.sx=e.clientX-st.x;st.sy=e.clientY-st.y;active={st,u}};c.querySelector('.btn-in').onclick=()=>{st.sc*=1.2;u()};c.querySelector('.btn-out').onclick=()=>{st.sc/=1.2;u()};c.querySelector('.btn-reset').onclick=()=>{st.sc=1;st.x=0;st.y=0;u()}});window.onmousemove=e=>{if(active){active.st.x=e.clientX-active.st.sx;active.st.y=e.clientY-active.st.sy;active.u()}};window.onmouseup=()=>active=null;})();";
 
     // Toggles between the "Exact" (true measured shape) and "Adjusted" (small corner jitter cleaned up to real
     // right angles) floor plans, both already rendered into the page - this just shows/hides one or the other.

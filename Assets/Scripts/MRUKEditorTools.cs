@@ -93,14 +93,54 @@ public static class MRUKEditorTools {
         else Debug.LogError("MRUKExporter not found in scene.");
     }
 
-    [MenuItem("MRUK/7. Open Exports Folder", false, 50)]
+    /// <summary>
+    /// Every "Export" run creates its own timestamped session folder on the Quest and never overwrites or
+    /// removes an earlier one - the in-headset "Delete exports" button wipes everything, but exporting the
+    /// same scan a few times in a row (the normal course of iterating) otherwise just keeps piling up old
+    /// sessions that "Pull data from Quest" then downloads right along with the one you actually want. This
+    /// keeps only the newest session per scan name and deletes the rest directly on the device.
+    /// </summary>
+    [MenuItem("MRUK/7. Delete Old Exports On Quest (keep newest per scan)", false, 40)]
+    public static void DeleteOldExportsOnQuest() {
+        const string remoteDir = "/sdcard/Download/XRHouseExports";
+        if (!RunAdb($"shell ls -1 \"{remoteDir}\"", out string listing)) {
+            Debug.LogError("<color=red>Could not list exports on Quest.</color>");
+            return;
+        }
+
+        var folders = listing.Split('\n').Select(s => s.Trim()).Where(s => s.StartsWith("Export_")).ToList();
+        // Export_{yyyyMMdd_HHmmss}_{scan name} - the scan name is everything after that timestamp, and the
+        // timestamp itself sorts correctly as plain text, so no date parsing is needed to find the newest.
+        var rx = new System.Text.RegularExpressions.Regex(@"^Export_(\d{8}_\d{6})_(.+)$");
+        var byScan = new System.Collections.Generic.Dictionary<string, System.Collections.Generic.List<string>>();
+        foreach (var f in folders) {
+            var m = rx.Match(f);
+            if (!m.Success) continue;
+            if (!byScan.TryGetValue(m.Groups[2].Value, out var list)) byScan[m.Groups[2].Value] = list = new System.Collections.Generic.List<string>();
+            list.Add(f);
+        }
+
+        if (byScan.Count == 0) { Debug.Log("No exports found on Quest."); return; }
+
+        int deleted = 0;
+        foreach (var kv in byScan) {
+            var sorted = kv.Value.OrderBy(f => f, StringComparer.Ordinal).ToList();
+            for (int i = 0; i < sorted.Count - 1; i++) {
+                RunAdb($"shell rm -rf \"{remoteDir}/{sorted[i]}\"");
+                deleted++;
+            }
+        }
+        Debug.Log($"<color=green>Deleted {deleted} old export session(s) on Quest, kept the newest of each of {byScan.Count} scan(s).</color>");
+    }
+
+    [MenuItem("MRUK/8. Open Exports Folder", false, 50)]
     public static void OpenExportsFolder() {
         string path = Path.GetFullPath("Exports/RoomData");
         Directory.CreateDirectory(path);
         EditorUtility.RevealInFinder(path);
     }
 
-    [MenuItem("MRUK/8. Backup Project (Zipped)", false, 100)]
+    [MenuItem("MRUK/9. Backup Project (Zipped)", false, 100)]
     public static void BackupProject() {
         string timestamp = DateTime.Now.ToString("yyyyMMdd_HHmm");
         string zipPath = $"Backups/XRHouse_Backup_{timestamp}.zip";
@@ -135,6 +175,13 @@ public static class MRUKEditorTools {
 
         SetDebugSymbols(fast ? "SymbolTable" : "Full");
         PlayerSettings.Android.targetArchitectures = AndroidArchitecture.ARM64;
+
+        // SideQuest (and Android sideloading generally) only offers an update over an already-installed APK if
+        // its version code is higher than the installed one - bump it on every build so a real release is
+        // never accidentally shipped with a code that's already out there. PlayerSettings.bundleVersion (the
+        // human-readable "1.1.0" string) is left alone; that's a deliberate call, not something to automate.
+        PlayerSettings.Android.bundleVersionCode++;
+        Debug.Log($"<color=cyan>Android version code: {PlayerSettings.Android.bundleVersionCode}</color>");
 
         // Build timestamp for VersionDisplay.BuildTime - a data file, so no script recompile is triggered.
         Directory.CreateDirectory("Assets/Resources");
@@ -176,7 +223,10 @@ public static class MRUKEditorTools {
         return RunAdb("install -r \"" + Path.GetFullPath(apk) + "\""); 
     }
 
-    public static bool RunAdb(string args) {
+    public static bool RunAdb(string args) => RunAdb(args, out _);
+
+    public static bool RunAdb(string args, out string output) {
+        output = "";
         string sdk = EditorPrefs.GetString("AndroidSdkRoot");
         if(string.IsNullOrEmpty(sdk)) sdk = Path.Combine(EditorApplication.applicationContentsPath, "PlaybackEngines/AndroidPlayer/SDK");
         string adb = Path.Combine(sdk, "platform-tools", "adb" + (Application.platform == RuntimePlatform.WindowsEditor ? ".exe" : ""));
@@ -188,16 +238,16 @@ public static class MRUKEditorTools {
             // install step even though the build itself succeeded.
             args = GetDeviceArg(adb) + args;
             var info = new System.Diagnostics.ProcessStartInfo(adb, args) {
-                UseShellExecute = false, 
+                UseShellExecute = false,
                 CreateNoWindow = true,
                 RedirectStandardError = true,
                 RedirectStandardOutput = true
             };
             var process = System.Diagnostics.Process.Start(info);
-            string output = process.StandardOutput.ReadToEnd();
+            output = process.StandardOutput.ReadToEnd();
             string error = process.StandardError.ReadToEnd();
             process.WaitForExit();
-            
+
             if (process.ExitCode != 0) {
                 Debug.LogError($"ADB Error ({process.ExitCode}): {error}");
                 return false;

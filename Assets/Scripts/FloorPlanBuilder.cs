@@ -200,15 +200,20 @@ public static class FloorPlanBuilder
         return plans;
     }
 
-    /// <summary>Overview -> its rooms, for every level: the page order used by the viewer and the report. A single-room
-    /// level has no overview (see BuildLevels), so it contributes only its one room page.</summary>
+    /// <summary>Overview -> its rooms (each followed by its own elevation page), for every level: the page order
+    /// used by the viewer and the report. A single-room level has no overview (see BuildLevels), so it
+    /// contributes only its one room page plus its elevation.</summary>
     public static List<FloorPlanPage> Flatten(IEnumerable<LevelPlan> levels)
     {
         var pages = new List<FloorPlanPage>();
         foreach (var l in levels)
         {
             if (l.overview != null) pages.Add(l.overview);
-            pages.AddRange(l.rooms.Select(r => r.page));
+            foreach (var r in l.rooms)
+            {
+                pages.Add(r.page);
+                pages.Add(BuildElevation(r.room));
+            }
         }
         return pages;
     }
