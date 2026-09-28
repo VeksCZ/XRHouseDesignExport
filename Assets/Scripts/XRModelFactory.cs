@@ -87,7 +87,23 @@ public static class XRModelFactory
                     }
                 } else rm.parts.Add(CreateBoxPart("WALL", wallPos, wallRot, new Vector3(wW, wH, wallThickness), "WALL", center, rotation));
 
+                // A wall anchor's own PlaneRect height is whatever flat rectangle MRUK fit to that panel, which
+                // stops short of the real ceiling under a sloped/vaulted roof - sample the actual ceiling height
+                // at each of the wall's two ends (same technique CreateReconstruction uses per floor-polygon
+                // corner) and, if that reveals a gap above the panel's own height, close it with a sloped cap
+                // instead of leaving the anchor box's flat top as the wall's apparent ceiling line.
+                Vector3 tangent = wallRot * Vector3.right;
+                Vector3 wallFloorCenter = new Vector3(wallPos.x, floorY, wallPos.z);
+                Vector3 leftFloor = wallFloorCenter - tangent * (wW / 2f);
+                Vector3 rightFloor = wallFloorCenter + tangent * (wW / 2f);
+                float fallbackTop = floorY + wH;
+                float h1 = Mathf.Max(wH, SampleCeilingHeight(room.CeilingAnchors, leftFloor, fallbackTop) - floorY);
+                float h2 = Mathf.Max(wH, SampleCeilingHeight(room.CeilingAnchors, rightFloor, fallbackTop) - floorY);
+                if (Mathf.Max(h1, h2) - wH > 0.03f)
+                    rm.parts.Add(CreateSlopedCapPart(leftFloor, rightFloor, wH, h1, h2, wallThickness, "WALL", center, rotation));
+
                 AddWallLengthLabel(model.dimensions, wallPos, wallRot, wW, wH, wallThickness, center, gRotForLabels);
+                AddWallHeightLabels(model.dimensions, wallPos, wallRot, wW, h1, h2, floorY, wallThickness, center, gRotForLabels);
 
                 // Each hole's own box is built in this exact wall's rotation and plane, not re-derived from the
                 // opening's own anchor - independently snapping the two let them drift apart by a degree or so,
@@ -549,6 +565,46 @@ return model;
             lineEnd = gRot * (worldPos + tangent * (wW / 2f) - center),
             text = $"{wW:0.00} m",
         });
+    }
+
+    /// <summary>
+    /// One ceiling-height label per wall (floor to the real sampled ceiling, not the wall anchor's own possibly-
+    /// short PlaneRect), positioned like AddWallLengthLabel's line but vertical and inset from the wall's own
+    /// corners so it never overlaps the adjacent wall's label. A flat ceiling gets a single label near the
+    /// wall's centre; a sloped one gets two - one at each end - since a single number can no longer describe
+    /// the whole wall.
+    /// </summary>
+    private static void AddWallHeightLabels(List<XRDimensionLabel> dims, Vector3 wallPos, Quaternion wallRot, float wW, float h1, float h2, float floorY, float wallThickness, Vector3 center, Quaternion gRot)
+    {
+        Vector3 inward = wallRot * Vector3.forward;
+        Vector3 tangent = wallRot * Vector3.right;
+        Vector3 facePos = wallPos + inward * (wallThickness / 2f + 0.30f);
+        Quaternion faceRot = Quaternion.LookRotation(inward, Vector3.up); // overridden per-frame by billboarding
+
+        void Add(Vector3 xzSource, float h, string text)
+        {
+            Vector3 bottom = new Vector3(xzSource.x, floorY, xzSource.z);
+            Vector3 top = new Vector3(xzSource.x, floorY + h, xzSource.z);
+            dims.Add(new XRDimensionLabel
+            {
+                position = gRot * (new Vector3(xzSource.x, floorY + h / 2f, xzSource.z) - center),
+                rotation = gRot * faceRot,
+                lineStart = gRot * (bottom - center),
+                lineEnd = gRot * (top - center),
+                text = text,
+            });
+        }
+
+        if (Mathf.Abs(h1 - h2) < 0.05f)
+        {
+            Add(facePos, (h1 + h2) / 2f, $"H {((h1 + h2) / 2f):0.00} m");
+        }
+        else
+        {
+            float inset = Mathf.Min(0.15f, wW * 0.4f);
+            Add(facePos - tangent * (wW / 2f - inset), h1, $"H {h1:0.00} m");
+            Add(facePos + tangent * (wW / 2f - inset), h2, $"H {h2:0.00} m");
+        }
     }
 
     /// <summary>

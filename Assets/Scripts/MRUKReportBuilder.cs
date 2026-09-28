@@ -33,8 +33,12 @@ public static class MRUKReportBuilder
         .dimline.outer{stroke:#2f855a}
         text{font-family:'Segoe UI',Arial,sans-serif}
         /* Dimension numbers are dark (not the line's own red/green) with a white halo, so they stay
-           readable wherever they cross a line, a wall or another number. */
-        .dim{fill:#1a202c;text-anchor:middle;dominant-baseline:central;font-weight:600;paint-order:stroke fill;stroke:#fff;stroke-width:0.05px}
+           readable wherever they cross a line, a wall or another number. Every other stroke-width in this
+           sheet (.wall, .dimline, .ext, .tick) is unitless, i.e. measured in the SVG's own user-space units
+           (the viewBox is in metres) so it scales with the drawing; a trailing 'px' here would instead be an
+           absolute CSS pixel width, making the halo a fraction of a real screen pixel and effectively invisible
+           regardless of zoom - it must stay unitless like its siblings to actually render as a visible halo. */
+        .dim{fill:#1a202c;text-anchor:middle;dominant-baseline:central;font-weight:600;paint-order:stroke fill;stroke:#fff;stroke-width:0.012}
         .lbl{fill:#1a202c;text-anchor:middle;dominant-baseline:central}
         .lblb{font-weight:700}
         .legend{font-size:.8em;color:#4a5568;margin-top:-8px;margin-bottom:12px}
