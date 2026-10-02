@@ -18,7 +18,7 @@ using Meta.XR.MRUtilityKit;
 /// </summary>
 public static class MRUKSceneCache
 {
-    private const string EXTENSION = ".scene.json";
+    public const string EXTENSION = ".scene.json";
 
     /// <summary>
     /// The app's own storage on the headset (Android/data/&lt;package&gt;/files/ScanCache). Unlike the Downloads

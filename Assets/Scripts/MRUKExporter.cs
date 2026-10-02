@@ -262,9 +262,23 @@ public class MRUKExporter : MonoBehaviour
     }
 
     /// <summary>Steps 3-6: layout, data dumps, report and all model tiers for an already resolved room list.</summary>
-    private async Task<bool> RunExportPipeline(List<MRUKRoom> rooms, XRMenu ui)
+    /// <summary>
+    /// Exports whatever MRUK currently holds (e.g. a scene JSON loaded by a test or tool via
+    /// LoadSceneFromJsonString) under the given source name, into 'root' (default: the normal export root).
+    /// Used by the batch export (ScanExportTests) that runs the real pipeline on a saved scan without a headset.
+    /// Returns the session folder, or null on failure.
+    /// </summary>
+    public async Task<string> ExportLoadedScene(string sourceName, string root = null)
     {
-        string root = MRUKPathUtility.GetExportRoot();
+        SelectedSource = ActiveSource = sourceName;
+        var rooms = MRUKDataProcessor.GetValidRooms(MRUK.Instance);
+        if (rooms.Count == 0) { Debug.LogError("[BatchExport] No valid rooms in the loaded scene."); return null; }
+        return await RunExportPipeline(rooms, null, root) ? Path.GetDirectoryName(LastReportPath) : null;
+    }
+
+    private async Task<bool> RunExportPipeline(List<MRUKRoom> rooms, XRMenu ui, string rootOverride = null)
+    {
+        string root = rootOverride ?? MRUKPathUtility.GetExportRoot();
         // Android 13+ storage protection fallback
         try { if (!Directory.Exists(root)) Directory.CreateDirectory(root); }
         catch {
@@ -283,6 +297,16 @@ public class MRUKExporter : MonoBehaviour
         ui?.AddLog("<color=cyan>[4/6] Data generation...</color>");
         File.WriteAllText(Path.Combine(session, MRUKPathUtility.DATA_JSON), MRUKDataProcessor.GenerateJson(rooms));
         File.WriteAllText(Path.Combine(session, MRUKPathUtility.DATA_DUMP), MRUKDataProcessor.GenerateSceneDump(rooms));
+        // The whole scan itself (MRUK scene JSON incl. global mesh), whether it came live from the device or
+        // from a saved scan - lets the PC keep and re-load the exact scan this export was made from.
+        try {
+            string sceneJson = MRUK.Instance.SaveSceneToJsonString(true);
+            if (!string.IsNullOrEmpty(sceneJson)) File.WriteAllText(Path.Combine(session, MRUKPathUtility.DATA_SCENE), sceneJson);
+            else ui?.AddLog("<color=orange>Scan JSON was empty - not included in the export.</color>");
+        } catch (Exception ex) {
+            Debug.LogException(ex);
+            ui?.AddLog("<color=orange>Could not include the scan JSON: " + ex.Message + "</color>");
+        }
         File.WriteAllText(Path.Combine(session, MRUKPathUtility.DATA_REPORT), MRUKReportBuilder.GenerateFullReport(outlines, angle, SelectedSource));
         SetProgress(45, ui);
 
@@ -319,7 +343,7 @@ public class MRUKExporter : MonoBehaviour
         SetProgress(100, ui);
         LastReportPath = Path.Combine(session, MRUKPathUtility.DATA_REPORT);
         #if UNITY_EDITOR
-        UnityEditor.EditorUtility.RevealInFinder(session);
+        if (!Application.isBatchMode) UnityEditor.EditorUtility.RevealInFinder(session);
         #endif
         return true;
     }

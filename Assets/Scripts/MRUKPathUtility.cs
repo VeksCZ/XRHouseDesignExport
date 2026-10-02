@@ -22,6 +22,9 @@ public static class MRUKPathUtility
     
     public const string DATA_JSON = "90_Data_Rooms.json";
     public const string DATA_DUMP = "91_Data_Scene_Dump.txt";
+    /// <summary>MRUK's own full scene JSON (all rooms, anchors, global mesh) - the same format "Save scan" writes
+    /// to the ScanCache, so the export can be reloaded as a scan source later (see MRUKSceneCache).</summary>
+    public const string DATA_SCENE = "92_Data_Scan" + MRUKSceneCache.EXTENSION;
     public const string DATA_REPORT = "99_Report_House.html";
     public const string DATA_REPORT_ROOM = "99_Report_Room.html";
 

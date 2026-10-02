@@ -419,6 +419,35 @@ public class FloorPlanTests
     }
 
     [Test]
+    public void MirrorSharedOpenings_DoesNotCopyAnUpstairsDoorIntoTheRoomBelow()
+    {
+        // Two stories stacked exactly on top of each other: same outline in plan, floors 3.2 m apart.
+        var below = Box("a", "Below", 0, 0, 4, 3, floorY: -3.2f);
+        var above = Box("b", "Above", 0, 0, 4, 3, floorY: 0f);
+        above.openings.Add(Opening(OpeningKind.Door, 4f, 1.5f, 0.9f));
+        above.openings.Add(Opening(OpeningKind.Window, 2f, 3f, 1.2f, height: 1.2f, sill: 0.9f));
+
+        var rooms = new System.Collections.Generic.List<RoomOutline> { below, above };
+        MRUKPlanExtractor.MirrorSharedOpenings(rooms);
+
+        Assert.That(below.openings, Is.Empty, "openings of the story above must not land in the room below");
+    }
+
+    [Test]
+    public void MirrorSharedOpenings_StillCopiesAcrossASmallSplitLevelStep()
+    {
+        var a = Box("a", "A", 0, 0, 4, 3, floorY: 0f);
+        var b = Box("b", "B", 4, 0, 8, 3, floorY: 0.15f);
+        a.openings.Add(Opening(OpeningKind.Door, 4f, 1.5f, 0.9f, height: 2.1f, sill: 0.15f));
+
+        var rooms = new System.Collections.Generic.List<RoomOutline> { a, b };
+        MRUKPlanExtractor.MirrorSharedOpenings(rooms);
+
+        Assert.That(b.openings, Has.Count.EqualTo(1));
+        Assert.That(b.openings[0].sill, Is.EqualTo(0f).Within(0.001f));
+    }
+
+    [Test]
     public void Rectified_SnapsSmallJitterToRightAngles_KeepingEdgeLengths()
     {
         var room = Box("a", "A", 0, 0, 5, 4);

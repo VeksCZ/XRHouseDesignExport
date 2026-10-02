@@ -83,11 +83,16 @@ public static class MRUKPlanExtractor
     /// solid wall in the other. Copies every opening across to any other room whose own wall runs right through
     /// that same spot and doesn't already have one there. Pure RoomOutline geometry (no MRUK types), so it can be
     /// unit-tested directly instead of only indirectly through a full MRUK scan.
+    /// The match is 3D, not just top-down: in a multi-story house a room directly above or below shares the
+    /// same wall line in XZ, and a 2D-only test copied every upstairs door/window into the room underneath,
+    /// where it then floated ~3 m up in that room's elevation (sill measured from the lower floor). An opening
+    /// is only copied when it also fits within the target room's own floor-to-ceiling span.
     /// </summary>
     internal static void MirrorSharedOpenings(List<RoomOutline> rooms)
     {
         const float onWallTolerance = 0.35f;    // how far off a neighbour's wall line still counts as "on it"
         const float alreadyThereTolerance = 0.5f; // this room's own opening already covers that spot
+        const float verticalTolerance = 0.3f;     // scan noise on floor/ceiling heights and frame edges
 
         foreach (var src in rooms)
             foreach (var dst in rooms)
@@ -101,6 +106,10 @@ public static class MRUKPlanExtractor
                     // Sill height is relative to each room's own floor - convert through the shared world height
                     // in case the two rooms' floors aren't at exactly the same level.
                     float worldSillY = op.sill + src.floorY;
+                    float worldTopY = worldSillY + op.height;
+                    // Same wall line in plan, but another story (or an opening that can't fit into this room's walls).
+                    if (worldSillY < dst.floorY - verticalTolerance) continue;
+                    if (worldTopY > dst.floorY + dst.ceilingMax + verticalTolerance) continue;
                     dst.openings.Add(new PlanOpening
                     {
                         kind = op.kind, center = op.center, width = op.width, height = op.height,

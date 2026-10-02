@@ -1,70 +1,146 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.IO;
+using System.Linq;
 using System.Text;
 using UnityEngine;
 
+/// <summary>
+/// Writes an XRHouseModel as a binary glTF 2.0 (.glb): one node + mesh per room, one primitive per part, one
+/// material per distinct part colour. Kept strictly spec-valid (checked with the Khronos glTF validator), because
+/// strict viewers such as Windows 3D Viewer refuse files that lenient tools still open:
+///   - every accessor gets its own bufferView with the right target (vertex vs. index data), no shared views;
+///   - POSITION min/max are computed from the exact float values written to the BIN chunk (and printed
+///     round-trip exact), so they always match the data bit for bit;
+///   - empty parts (no vertices/triangles) are skipped - a zero-count accessor is invalid - and a room left with
+///     nothing to draw becomes a node without a mesh instead of a mesh with no primitives.
+/// </summary>
 public static class GLBExporter
 {
+    const int ArrayBuffer = 34962, ElementArrayBuffer = 34963, Float = 5126, UInt = 5125;
+    static readonly CultureInfo Inv = CultureInfo.InvariantCulture;
+
+    static string F(float v) => v.ToString("R", Inv);
+
+    static string Esc(string s)
+    {
+        if (string.IsNullOrEmpty(s)) return "";
+        var sb = new StringBuilder();
+        foreach (char c in s)
+        {
+            if (c == '"' || c == '\\') sb.Append('\\').Append(c);
+            else if (c < 0x20) sb.Append("\\u").Append(((int)c).ToString("x4"));
+            else sb.Append(c);
+        }
+        return sb.ToString();
+    }
+
     public static byte[] ExportToGLB(XRHouseModel model)
     {
         if (model == null || model.rooms.Count == 0) return null;
 
         try
         {
-            using (var ms = new MemoryStream())
-            using (var bw = new BinaryWriter(ms))
+            var colors = new List<Color>();
+            var bin = new MemoryStream();
+            var bw = new BinaryWriter(bin);
+            var bufferViews = new List<string>();
+            var accessors = new List<string>();
+            var meshes = new List<string>();
+            var nodes = new List<string>();
+
+            foreach (var room in model.rooms)
             {
-                var uniqueColors = new List<Color>();
-                int totalVerts = 0;
-                int totalTris = 0;
-
-                foreach (var part in model.GetAllParts())
+                var prims = new List<string>();
+                foreach (var part in room.parts)
                 {
-                    totalVerts += part.vertices.Count;
-                    totalTris += part.triangles.Count;
-                    if (!uniqueColors.Contains(part.color)) uniqueColors.Add(part.color);
-                }
+                    if (part == null || part.vertices.Count == 0 || part.triangles.Count < 3) continue;
+                    int vCount = part.vertices.Count;
+                    int triCount = part.triangles.Count / 3 * 3;
+                    if (part.triangles.Take(triCount).Any(t => t < 0 || t >= vCount)) continue; // corrupt part - skip, don't break the file
 
-                int bufferLength = (totalVerts * 12) + (totalTris * 4);
-                string json = BuildJSON(model, uniqueColors, out int finalOffset);
-                byte[] jsonBytes = Encoding.UTF8.GetBytes(json);
-                int jsonPad = (4 - (jsonBytes.Length % 4)) % 4;
-                int binPad = (4 - (bufferLength % 4)) % 4;
+                    if (!colors.Contains(part.color)) colors.Add(part.color);
+                    int mat = colors.IndexOf(part.color);
 
-                // Header
-                bw.Write(0x46546C67); // magic
-                bw.Write(2);          // version
-                bw.Write(12 + 8 + jsonBytes.Length + jsonPad + 8 + bufferLength + binPad);
-
-                // JSON Chunk
-                bw.Write(jsonBytes.Length + jsonPad);
-                bw.Write(0x4E4F534A);
-                bw.Write(jsonBytes);
-                for (int i = 0; i < jsonPad; i++) bw.Write((byte)0x20);
-
-                // BIN Chunk
-                bw.Write(bufferLength + binPad);
-                bw.Write(0x004E4942);
-                
-                foreach (var part in model.GetAllParts())
-                {
+                    // Positions (Z mirrored: Unity is left-handed, glTF right-handed).
+                    long posOffset = bin.Position;
+                    float minX = float.MaxValue, minY = float.MaxValue, minZ = float.MaxValue;
+                    float maxX = float.MinValue, maxY = float.MinValue, maxZ = float.MinValue;
                     foreach (var v in part.vertices)
                     {
-                        bw.Write(v.x);
-                        bw.Write(v.y);
-                        bw.Write(-v.z); // Mirror Z for GLTF (RH system)
+                        float x = v.x, y = v.y, z = -v.z;
+                        bw.Write(x); bw.Write(y); bw.Write(z);
+                        minX = Math.Min(minX, x); minY = Math.Min(minY, y); minZ = Math.Min(minZ, z);
+                        maxX = Math.Max(maxX, x); maxY = Math.Max(maxY, y); maxZ = Math.Max(maxZ, z);
                     }
-                    // Reverse winding order because of Z mirror to keep faces outward
-                    for (int i = 0; i < part.triangles.Count; i += 3)
+                    bufferViews.Add($"{{\"buffer\":0,\"byteOffset\":{posOffset},\"byteLength\":{vCount * 12},\"target\":{ArrayBuffer}}}");
+                    int posAcc = accessors.Count;
+                    accessors.Add($"{{\"bufferView\":{bufferViews.Count - 1},\"componentType\":{Float},\"count\":{vCount},\"type\":\"VEC3\"," +
+                                  $"\"min\":[{F(minX)},{F(minY)},{F(minZ)}],\"max\":[{F(maxX)},{F(maxY)},{F(maxZ)}]}}");
+
+                    // Indices - winding reversed because of the Z mirror, so faces keep pointing outward.
+                    long idxOffset = bin.Position;
+                    for (int i = 0; i < triCount; i += 3)
                     {
-                        bw.Write(part.triangles[i]);
-                        bw.Write(part.triangles[i + 2]);
-                        bw.Write(part.triangles[i + 1]);
+                        bw.Write((uint)part.triangles[i]);
+                        bw.Write((uint)part.triangles[i + 2]);
+                        bw.Write((uint)part.triangles[i + 1]);
                     }
+                    bufferViews.Add($"{{\"buffer\":0,\"byteOffset\":{idxOffset},\"byteLength\":{triCount * 4},\"target\":{ElementArrayBuffer}}}");
+                    int idxAcc = accessors.Count;
+                    accessors.Add($"{{\"bufferView\":{bufferViews.Count - 1},\"componentType\":{UInt},\"count\":{triCount},\"type\":\"SCALAR\"}}");
+
+                    prims.Add($"{{\"attributes\":{{\"POSITION\":{posAcc}}},\"indices\":{idxAcc},\"material\":{mat}}}");
                 }
-                
-                for (int i = 0; i < binPad; i++) bw.Write((byte)0);
+
+                string name = Esc(room.roomName);
+                if (prims.Count > 0)
+                {
+                    meshes.Add($"{{\"name\":\"{name}\",\"primitives\":[{string.Join(",", prims)}]}}");
+                    nodes.Add($"{{\"mesh\":{meshes.Count - 1},\"name\":\"{name}\"}}");
+                }
+                else nodes.Add($"{{\"name\":\"{name}\"}}");
+            }
+            if (meshes.Count == 0) return null;
+
+            // doubleSided: every wall/door/window is a thin box seen from both sides; glTF defaults to false,
+            // which makes strict viewers backface-cull one side (walls look see-through from outside/inside).
+            var materials = colors.Select(c =>
+                $"{{\"pbrMetallicRoughness\":{{\"baseColorFactor\":[{c.r.ToString("0.###", Inv)},{c.g.ToString("0.###", Inv)},{c.b.ToString("0.###", Inv)},1.0]," +
+                "\"metallicFactor\":0.0,\"roughnessFactor\":1.0},\"doubleSided\":true}");
+
+            int binLength = (int)bin.Length;
+            int binPad = (4 - binLength % 4) % 4;
+            string json =
+                "{\"asset\":{\"version\":\"2.0\",\"generator\":\"XRHouseDesignExport\"},\"scene\":0," +
+                $"\"scenes\":[{{\"nodes\":[{string.Join(",", Enumerable.Range(0, nodes.Count))}]}}]," +
+                $"\"nodes\":[{string.Join(",", nodes)}]," +
+                $"\"meshes\":[{string.Join(",", meshes)}]," +
+                $"\"materials\":[{string.Join(",", materials)}]," +
+                $"\"accessors\":[{string.Join(",", accessors)}]," +
+                $"\"bufferViews\":[{string.Join(",", bufferViews)}]," +
+                $"\"buffers\":[{{\"byteLength\":{binLength + binPad}}}]}}";
+
+            byte[] jsonBytes = Encoding.UTF8.GetBytes(json);
+            int jsonPad = (4 - jsonBytes.Length % 4) % 4;
+
+            using (var ms = new MemoryStream())
+            using (var w = new BinaryWriter(ms))
+            {
+                w.Write(0x46546C67); // "glTF"
+                w.Write(2);
+                w.Write(12 + 8 + jsonBytes.Length + jsonPad + 8 + binLength + binPad);
+
+                w.Write(jsonBytes.Length + jsonPad);
+                w.Write(0x4E4F534A); // "JSON"
+                w.Write(jsonBytes);
+                for (int i = 0; i < jsonPad; i++) w.Write((byte)0x20);
+
+                w.Write(binLength + binPad);
+                w.Write(0x004E4942); // "BIN\0"
+                w.Write(bin.GetBuffer(), 0, binLength);
+                for (int i = 0; i < binPad; i++) w.Write((byte)0);
 
                 return ms.ToArray();
             }
@@ -74,98 +150,5 @@ public static class GLBExporter
             Debug.LogError($"Structured GLB export failed: {ex.Message}");
             return null;
         }
-    }
-
-    private static string BuildJSON(XRHouseModel model, List<Color> colors, out int totalByteOffset)
-    {
-        StringBuilder sb = new StringBuilder();
-        sb.Append("{\"asset\":{\"version\":\"2.0\"},\"scene\":0,");
-        
-        // Materials
-        sb.Append("\"materials\":[");
-        for (int i = 0; i < colors.Count; i++)
-        {
-            Color c = colors[i];
-            // doubleSided defaults to false in glTF 2.0 when omitted - every wall/door/window here is a thin box
-            // that gets looked at from either side (inside or outside the room), so without this every strict
-            // viewer (Windows 3D Viewer, Blender with backface culling on, ...) backface-culls whichever face
-            // isn't wound towards the camera, making walls look caved in/see-through from one side - the exact
-            // glTF equivalent of the _Cull=Off fix UnityModelLoader.GetMaterial already needed for the same reason.
-            sb.Append("{\"pbrMetallicRoughness\":{\"baseColorFactor\":[" +
-                c.r.ToString("F3", System.Globalization.CultureInfo.InvariantCulture) + "," +
-                c.g.ToString("F3", System.Globalization.CultureInfo.InvariantCulture) + "," +
-                c.b.ToString("F3", System.Globalization.CultureInfo.InvariantCulture) + ",1.0],\"metallicFactor\":0.0,\"roughnessFactor\":1.0},\"doubleSided\":true");
-            if (i < colors.Count - 1) sb.Append(",");
-        }
-        sb.Append("],");
-
-        // Scenes & Nodes
-        sb.Append("\"scenes\":[{\"nodes\":[");
-        for (int i = 0; i < model.rooms.Count; i++) sb.Append(i + (i == model.rooms.Count - 1 ? "" : ","));
-        sb.Append("]}],");
-
-        sb.Append("\"nodes\":[");
-        for (int i = 0; i < model.rooms.Count; i++)
-        {
-            sb.Append("{\"mesh\":" + i + ",\"name\":\"" + model.rooms[i].roomName + "\"}");
-            if (i < model.rooms.Count - 1) sb.Append(",");
-        }
-        sb.Append("],");
-
-        // Meshes
-        sb.Append("\"meshes\":[");
-        int accIdx = 0;
-        for (int i = 0; i < model.rooms.Count; i++)
-        {
-            var room = model.rooms[i];
-            sb.Append("{\"name\":\"" + room.roomName + "\",\"primitives\":[");
-            for (int j = 0; j < room.parts.Count; j++)
-            {
-                int matIdx = colors.IndexOf(room.parts[j].color);
-                sb.Append("{\"attributes\":{\"POSITION\":" + (accIdx * 2) + "},\"indices\":" + (accIdx * 2 + 1) + ",\"material\":" + matIdx + "}");
-                if (j < room.parts.Count - 1) sb.Append(",");
-                accIdx++;
-            }
-            sb.Append("]}");
-            if (i < model.rooms.Count - 1) sb.Append(",");
-        }
-        sb.Append("],");
-
-        // Accessors
-        sb.Append("\"accessors\":[");
-        int off = 0;
-        bool first = true;
-        var ic = System.Globalization.CultureInfo.InvariantCulture;
-        foreach (var p in model.GetAllParts())
-        {
-            if (!first) sb.Append(",");
-
-            // glTF 2.0 spec requires min/max on any accessor used as a POSITION attribute.
-            Vector3 min = new Vector3(float.MaxValue, float.MaxValue, float.MaxValue);
-            Vector3 max = new Vector3(float.MinValue, float.MinValue, float.MinValue);
-            foreach (var v in p.vertices)
-            {
-                float mz = -v.z; // matches the Z-mirrored coordinates actually written to the BIN chunk
-                min.x = Mathf.Min(min.x, v.x); min.y = Mathf.Min(min.y, v.y); min.z = Mathf.Min(min.z, mz);
-                max.x = Mathf.Max(max.x, v.x); max.y = Mathf.Max(max.y, v.y); max.z = Mathf.Max(max.z, mz);
-            }
-            if (p.vertices.Count == 0) { min = Vector3.zero; max = Vector3.zero; }
-
-            sb.Append("{\"bufferView\":0,\"byteOffset\":" + off + ",\"componentType\":5126,\"count\":" + p.vertices.Count + ",\"type\":\"VEC3\"," +
-                "\"min\":[" + min.x.ToString("F6", ic) + "," + min.y.ToString("F6", ic) + "," + min.z.ToString("F6", ic) + "]," +
-                "\"max\":[" + max.x.ToString("F6", ic) + "," + max.y.ToString("F6", ic) + "," + max.z.ToString("F6", ic) + "]},");
-            off += p.vertices.Count * 12;
-            sb.Append("{\"bufferView\":0,\"byteOffset\":" + off + ",\"componentType\":5125,\"count\":" + p.triangles.Count + ",\"type\":\"SCALAR\"}");
-            off += p.triangles.Count * 4;
-            first = false;
-        }
-        totalByteOffset = off;
-        sb.Append("],");
-
-        // BufferViews & Buffers
-        sb.Append("\"bufferViews\":[{\"buffer\":0,\"byteLength\":" + off + "}],");
-        sb.Append("\"buffers\":[{\"byteLength\":" + off + "}]}");
-
-        return sb.ToString();
     }
 }

@@ -59,9 +59,15 @@ public static class MRUKEditorTools {
         }
     }
 
+    /// <summary>How many export sessions "Delete Old Exports" keeps - on the Quest and in Exports/RoomData.</summary>
+    const int KeepExports = 5;   // keep in sync with "(keep 5)" in the menu item name below (attributes can't format an int)
+    const string RemoteExportDir = "/sdcard/Download/XRHouseExports";
+
+    /// <summary>Pulls every export session (and the saved scans) from the Quest. Use "7. Delete Old Exports" first
+    /// to trim what's there. Each pulled export's scan JSON is also copied into Exports/ScanCache so it shows up
+    /// as a scan source in the Editor.</summary>
     [MenuItem("MRUK/5. Pull data from Quest", false, 30)]
     public static void PullFromQuest() {
-        string remote = "/sdcard/Download/XRHouseExports/.";
         string local = Path.GetFullPath("Exports/RoomData");
         Directory.CreateDirectory(local);
         Debug.Log($"<color=cyan>Pulling data from Quest to {local}...</color>");
@@ -70,10 +76,11 @@ public static class MRUKEditorTools {
         string scanLocal = Path.GetFullPath("Exports/ScanCache");
         Directory.CreateDirectory(scanLocal);
         RunAdb($"pull \"/sdcard/Android/data/com.veks.XRHouseDesignExport/files/ScanCache/.\" \"{scanLocal}\"");
-        if (RunAdb($"pull \"{remote}\" \"{local}\"")) {
+        if (RunAdb($"pull \"{RemoteExportDir}/.\" \"{local}\"")) {
             var dirs = Directory.GetDirectories(local, "Export_*");
+            foreach (var d in dirs) CopyExportScanToCache(d, scanLocal);
             if (dirs.Length > 0) {
-                var latest = dirs.OrderByDescending(d => Directory.GetCreationTime(d)).First();
+                var latest = dirs.OrderByDescending(d => Path.GetFileName(d), StringComparer.Ordinal).First();
                 Debug.Log($"<color=green>DOWNLOADED: Opening {Path.GetFileName(latest)}</color>");
                 EditorUtility.RevealInFinder(latest);
             } else {
@@ -83,7 +90,6 @@ public static class MRUKEditorTools {
         } else {
             Debug.LogError("<color=red>PULL FAILED: Could not download data from Quest.</color>");
         }
-        Application.OpenURL("file://" + local);
     }
 
     [MenuItem("MRUK/6. Run Export (in Play Mode)", false, 31)]
@@ -94,43 +100,64 @@ public static class MRUKEditorTools {
     }
 
     /// <summary>
-    /// Every "Export" run creates its own timestamped session folder on the Quest and never overwrites or
-    /// removes an earlier one - the in-headset "Delete exports" button wipes everything, but exporting the
-    /// same scan a few times in a row (the normal course of iterating) otherwise just keeps piling up old
-    /// sessions that "Pull data from Quest" then downloads right along with the one you actually want. This
-    /// keeps only the newest session per scan name and deletes the rest directly on the device.
+    /// Keeps only the newest KeepExports export sessions (by the timestamp in the folder name), both on the Quest
+    /// and in Exports/RoomData; with KeepExports or fewer nothing is deleted. Deletes on the Quest over ADB: the
+    /// in-headset "Delete exports" button can't remove sessions written by an earlier install of the APK (Android
+    /// scoped storage only lets an app delete files it created itself, and every reinstall counts as a new app),
+    /// so those used to stay in Download/XRHouseExports forever and came back on every pull.
     /// </summary>
-    [MenuItem("MRUK/7. Delete Old Exports On Quest (keep newest per scan)", false, 40)]
-    public static void DeleteOldExportsOnQuest() {
-        const string remoteDir = "/sdcard/Download/XRHouseExports";
-        if (!RunAdb($"shell ls -1 \"{remoteDir}\"", out string listing)) {
-            Debug.LogError("<color=red>Could not list exports on Quest.</color>");
-            return;
-        }
+    [MenuItem("MRUK/7. Delete Old Exports (keep 5)", false, 40)]
+    public static void DeleteOldExportsMenu() {
+        if (DeleteOldExportsOnQuest(KeepExports) == null)
+            Debug.LogError("<color=red>Could not list exports on Quest (is it connected?) - nothing deleted there.</color>");
+        int removedLocal = TrimLocalExports(Path.GetFullPath("Exports/RoomData"), KeepExports);
+        Debug.Log($"<color=green>PC: removed {removedLocal} older export(s), kept the newest {KeepExports}.</color>");
+    }
 
-        var folders = listing.Split('\n').Select(s => s.Trim()).Where(s => s.StartsWith("Export_")).ToList();
-        // Export_{yyyyMMdd_HHmmss}_{scan name} - the scan name is everything after that timestamp, and the
-        // timestamp itself sorts correctly as plain text, so no date parsing is needed to find the newest.
-        var rx = new System.Text.RegularExpressions.Regex(@"^Export_(\d{8}_\d{6})_(.+)$");
-        var byScan = new System.Collections.Generic.Dictionary<string, System.Collections.Generic.List<string>>();
-        foreach (var f in folders) {
-            var m = rx.Match(f);
-            if (!m.Success) continue;
-            if (!byScan.TryGetValue(m.Groups[2].Value, out var list)) byScan[m.Groups[2].Value] = list = new System.Collections.Generic.List<string>();
-            list.Add(f);
-        }
+    /// <summary>
+    /// Deletes every export session on the Quest except the newest 'keep' ones (by the timestamp in the folder name,
+    /// Export_yyyyMMdd_HHmmss[_scan], which sorts correctly as plain text). Returns the kept folder names, newest
+    /// first, or null if the Quest couldn't be listed.
+    /// </summary>
+    static System.Collections.Generic.List<string> DeleteOldExportsOnQuest(int keep) {
+        if (!RunAdb($"shell ls -1 \"{RemoteExportDir}\"", out string listing)) return null;
 
-        if (byScan.Count == 0) { Debug.Log("No exports found on Quest."); return; }
+        var rx = new System.Text.RegularExpressions.Regex(@"^Export_\d{8}_\d{6}");
+        var folders = listing.Split('\n').Select(s => s.Trim()).Where(s => rx.IsMatch(s))
+            .OrderByDescending(s => s, StringComparer.Ordinal).ToList();
 
-        int deleted = 0;
-        foreach (var kv in byScan) {
-            var sorted = kv.Value.OrderBy(f => f, StringComparer.Ordinal).ToList();
-            for (int i = 0; i < sorted.Count - 1; i++) {
-                RunAdb($"shell rm -rf \"{remoteDir}/{sorted[i]}\"");
-                deleted++;
-            }
+        int deleted = 0, failed = 0;
+        foreach (var old in folders.Skip(keep)) {
+            if (RunAdb($"shell rm -rf \"{RemoteExportDir}/{old}\"")) deleted++; else failed++;
         }
-        Debug.Log($"<color=green>Deleted {deleted} old export session(s) on Quest, kept the newest of each of {byScan.Count} scan(s).</color>");
+        // Loose files left in the export root by very old builds.
+        RunAdb($"shell rm -f \"{RemoteExportDir}/session_debug_log.txt\"");
+
+        string msg = $"Quest: kept {Math.Min(keep, folders.Count)} newest export(s), deleted {deleted} older one(s)";
+        if (failed > 0) Debug.LogWarning($"<color=orange>{msg}, {failed} could not be deleted.</color>");
+        else Debug.Log($"<color=green>{msg}.</color>");
+        return folders.Take(keep).ToList();
+    }
+
+    /// <summary>Deletes all but the newest 'keep' Export_* folders in the local export folder. Returns how many were removed.</summary>
+    static int TrimLocalExports(string local, int keep) {
+        int removed = 0;
+        var dirs = Directory.GetDirectories(local, "Export_*")
+            .OrderByDescending(d => Path.GetFileName(d), StringComparer.Ordinal).Skip(keep);
+        foreach (var d in dirs) {
+            try { Directory.Delete(d, true); removed++; }
+            catch (Exception ex) { Debug.LogWarning($"Could not delete local export '{d}': {ex.Message}"); }
+        }
+        return removed;
+    }
+
+    /// <summary>Copies an export's scan JSON into the Editor's ScanCache (named after the export), so the exact
+    /// scan behind that export can be picked as a source and re-exported or inspected on the PC.</summary>
+    static void CopyExportScanToCache(string exportDir, string scanCache) {
+        string src = Path.Combine(exportDir, MRUKPathUtility.DATA_SCENE);
+        if (!File.Exists(src)) return;
+        string dst = Path.Combine(scanCache, Path.GetFileName(exportDir) + MRUKSceneCache.EXTENSION);
+        if (!File.Exists(dst)) File.Copy(src, dst);
     }
 
     [MenuItem("MRUK/8. Open Exports Folder", false, 50)]
