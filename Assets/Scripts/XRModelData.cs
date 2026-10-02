@@ -31,6 +31,8 @@ public class XRDimensionLabel
     /// space as 'position'.</summary>
     public Vector3 lineStart, lineEnd;
     public string text;
+    /// <summary>Direction the measurement faces (into the room), model space - orients the exported number.</summary>
+    public Vector3 normal;
     /// <summary>Same outer/inner split as a floor plan's own dimension lines: true for a whole wall's length or
     /// its ceiling height (measured "from outside", drawn green), false for an opening's width/height/sill
     /// (measured "from inside", drawn purple) - see DimensionColors and MRUKReportBuilder's .dimline CSS.</summary>

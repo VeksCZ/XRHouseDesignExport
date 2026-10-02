@@ -42,7 +42,7 @@ public static class GLBExporter
 
         try
         {
-            var colors = new List<Color>();
+            var materialsUsed = new List<(Color color, bool doubleSided)>();
             var bin = new MemoryStream();
             var bw = new BinaryWriter(bin);
             var bufferViews = new List<string>();
@@ -60,8 +60,11 @@ public static class GLBExporter
                     int triCount = part.triangles.Count / 3 * 3;
                     if (part.triangles.Take(triCount).Any(t => t < 0 || t >= vCount)) continue; // corrupt part - skip, don't break the file
 
-                    if (!colors.Contains(part.color)) colors.Add(part.color);
-                    int mat = colors.IndexOf(part.color);
+                    // Dimension text is the one single-sided material: it is drawn as two back-to-back copies so
+                    // it reads correctly from either side (see DimensionGeometry), never mirrored.
+                    var key = (part.color, part.materialName != "DIM_TEXT");
+                    if (!materialsUsed.Contains(key)) materialsUsed.Add(key);
+                    int mat = materialsUsed.IndexOf(key);
 
                     // Positions (Z mirrored: Unity is left-handed, glTF right-handed).
                     long posOffset = bin.Position;
@@ -106,9 +109,9 @@ public static class GLBExporter
 
             // doubleSided: every wall/door/window is a thin box seen from both sides; glTF defaults to false,
             // which makes strict viewers backface-cull one side (walls look see-through from outside/inside).
-            var materials = colors.Select(c =>
-                $"{{\"pbrMetallicRoughness\":{{\"baseColorFactor\":[{c.r.ToString("0.###", Inv)},{c.g.ToString("0.###", Inv)},{c.b.ToString("0.###", Inv)},1.0]," +
-                "\"metallicFactor\":0.0,\"roughnessFactor\":1.0},\"doubleSided\":true}");
+            var materials = materialsUsed.Select(m =>
+                $"{{\"pbrMetallicRoughness\":{{\"baseColorFactor\":[{m.color.r.ToString("0.###", Inv)},{m.color.g.ToString("0.###", Inv)},{m.color.b.ToString("0.###", Inv)},1.0]," +
+                "\"metallicFactor\":0.0,\"roughnessFactor\":1.0}" + (m.doubleSided ? ",\"doubleSided\":true}" : "}"));
 
             int binLength = (int)bin.Length;
             int binPad = (4 - binLength % 4) % 4;

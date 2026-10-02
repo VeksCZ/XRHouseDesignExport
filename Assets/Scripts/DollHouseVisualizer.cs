@@ -102,7 +102,10 @@ public class DollHouseVisualizer : MonoBehaviour
         XRHouseModel m = null;
 
         try {
-            if (mode == DollhouseMode.AnchorAnalytical || mode == DollhouseMode.AnchorWithDimensions) m = XRModelFactory.CreateAnchorAnalytical(rooms, yaw, c);
+            if (mode == DollhouseMode.AnchorAnalytical) m = XRModelFactory.CreateAnchorAnalytical(rooms, yaw, c);
+            // Same baked dimension lines as the exported model (thin bars that scale with the model, so they
+            // read as fine lines at any zoom); only the numbers are added separately below as billboarded text.
+            else if (mode == DollhouseMode.AnchorWithDimensions) m = XRModelFactory.CreateAnchorAnalyticalWithDimensions(rooms, yaw, c, withText: false);
             else if (mode == DollhouseMode.MeshAnalytical) m = await XRModelFactory.CreateMeshAnalytical(rooms, yaw, c, forDollhouse: true);
             else if (mode == DollhouseMode.RawMesh) m = await XRModelFactory.CreateRawScan(rooms, yaw, c, forDollhouse: true);
 
@@ -135,30 +138,13 @@ public class DollHouseVisualizer : MonoBehaviour
         dimensionLabels.Clear();
         // Same green/purple as a floor plan's own outer/inner dimension lines (DimensionColors) - two shared
         // materials, not one per label, so a rebuild never leaks more than these two unique instances.
-        var outerMat = new Material(Shader.Find("Universal Render Pipeline/Unlit")) { color = DimensionColors.Outer };
-        var innerMat = new Material(Shader.Find("Universal Render Pipeline/Unlit")) { color = DimensionColors.Inner };
-        foreach (var m in new[] { outerMat, innerMat }) if (m.HasProperty("_Cull")) m.SetFloat("_Cull", (float)UnityEngine.Rendering.CullMode.Off);
         // The number itself stays a single neutral colour regardless of outer/inner, exactly like a floor
         // plan's own dimension text (dark on paper, white here for contrast against the model) - only the line
         // it belongs to is colour-coded.
         var textColor = Color.white;
 
         foreach (var d in dims) {
-            // The line sits on its own identity-transform child, separate from the label's own positioned one
-            // below, so its two endpoints (already in the model's local space) map directly with no further
-            // transform applied on top.
-            var lineGo = new GameObject("DimLine_" + d.text);
-            lineGo.transform.SetParent(root.transform, false);
-            var lr = lineGo.AddComponent<LineRenderer>();
-            lr.material = d.outer ? outerMat : innerMat;
-            lr.useWorldSpace = false;
-            lr.positionCount = 2;
-            lr.SetPosition(0, d.lineStart);
-            lr.SetPosition(1, d.lineEnd);
-            lr.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
-            // Width is set every frame in Update() (DimLineWidthMeters / current scale) so its real-world
-            // thickness stays constant regardless of Dollhouse zoom - left at 0 here, not a guess, since the
-            // very first Update() tick overwrites it before the frame is ever rendered.
+            LineRenderer lr = null; // the line itself is part of the model mesh (DimensionGeometry)
 
             var go = new GameObject("Dim_" + d.text);
             go.transform.SetParent(root.transform, false);
@@ -235,12 +221,19 @@ public class DollHouseVisualizer : MonoBehaviour
                 // Stays visually attached to its own line: reading direction (local right) is locked to the
                 // line's own axis, only the perpendicular-to-that-axis component of "towards the camera" is
                 // free, so it only ever flips 180 degrees around the line rather than spinning freely.
+                // TextMeshPro is readable from behind its transform (looking along its +Z), so forward must point
+                // from the camera to the text - pointing it at the camera (as before) showed the text mirrored.
+                // Then flip the reading direction if needed so the text is never upside down (horizontal
+                // lines) and reads bottom-to-top on vertical lines.
                 Vector3 right = root.transform.TransformDirection(localDir).normalized;
-                Vector3 forward = Vector3.ProjectOnPlane(camPos - t.position, right);
-                if (forward.sqrMagnitude < 1e-6f) forward = Vector3.ProjectOnPlane(Vector3.up, right);
+                Vector3 forward = Vector3.ProjectOnPlane(t.position - camPos, right);
                 if (forward.sqrMagnitude < 1e-6f) continue; // camera exactly on the line's own axis - keep last frame's rotation
                 forward.Normalize();
+                Vector3 worldUp = root.transform.up;
+                bool vertical = Mathf.Abs(Vector3.Dot(right, worldUp)) > 0.7f;
+                if (vertical && Vector3.Dot(right, worldUp) < 0) right = -right;
                 Vector3 up = Vector3.Cross(forward, right);
+                if (!vertical && Vector3.Dot(up, worldUp) < 0) { right = -right; up = -up; }
                 t.rotation = Quaternion.LookRotation(forward, up);
             }
         }
