@@ -373,31 +373,12 @@ public static class FloorPlanBuilder
     /// band of this width just outside its room's outline; two neighbouring rooms' bands then sit back to back
     /// in the real wall between them.</summary>
     public const float WallBand = 0.12f;
-    const int DoorArcSegments = 10;
-    const float MaxSingleLeafWidth = 1.25f; // wider: a double door (two leaves)
-    const float MaxSwingDoorWidth = 2.2f;   // wider: a garage/sectional/sliding door, drawn without a swing
-
-    /// <summary>A door leaf hinged at 'hinge', opened 90 degrees towards 'into', with its quarter-circle swing
-    /// back to the closed position along 'along'.</summary>
-    static void AddDoorLeaf(FloorPlanPage page, Vector2 hinge, Vector2 along, Vector2 into, float w, PlanStyle style)
-    {
-        Vector2 prev = hinge + into * w;
-        page.lines.Add(new PlanLine(hinge, prev, style));
-        for (int k = 1; k <= DoorArcSegments; k++)
-        {
-            float ang = k / (float)DoorArcSegments * Mathf.PI / 2f;
-            Vector2 p = hinge + (into * Mathf.Cos(ang) + along * Mathf.Sin(ang)) * w;
-            page.lines.Add(new PlanLine(prev, p, style));
-            prev = p;
-        }
-    }
-
     /// <summary>
     /// Walls as a band just outside the room outline, interrupted wherever a door or window sits, with the
     /// usual plan symbols in the gap: a window as three thin lines along the wall (both faces and the glass)
-    /// with its jambs, a door as its jambs, the leaf opened 90 degrees into the room and the quarter-circle
-    /// swing. MRUK doesn't report hinge side or swing direction, so every door is drawn hinged at its
-    /// start-of-wall end, opening into the room it belongs to. 'skipMirroredSymbols' (story overviews) still
+    /// with its jambs, a door as its jambs and a single line across the opening - no leaf or swing, since MRUK
+    /// doesn't report hinge side or swing direction and a guess would be wrong half the time.
+    /// 'skipMirroredSymbols' (story overviews) still
     /// cuts the gap for an opening copied in from the neighbour but leaves its symbol to the owning room.
     /// </summary>
     static void AddWallsAndOpenings(FloorPlanPage page, List<Edge> edges, List<List<(float t0, float t1, PlanOpening o)>> perEdge, bool skipMirroredSymbols = false)
@@ -464,23 +445,7 @@ public static class FloorPlanBuilder
                     page.lines.Add(new PlanLine(At(t0, h), At(t1, h), style));
                     page.lines.Add(new PlanLine(At(t0, WallBand), At(t1, WallBand), style));
                 }
-                else
-                {
-                    float w = t1 - t0;
-                    if (w > MaxSwingDoorWidth)
-                    {
-                        // Garage / sectional / sliding door: no swing, just the door panel along the inside face.
-                        page.lines.Add(new PlanLine(At(t0, -h), At(t1, -h), style));
-                        page.lines.Add(new PlanLine(At(t0, 0), At(t0, -h), style));
-                        page.lines.Add(new PlanLine(At(t1, 0), At(t1, -h), style));
-                    }
-                    else if (w > MaxSingleLeafWidth)
-                    {
-                        AddDoorLeaf(page, At(t0, 0), e.dir, -e.outward, w / 2f, style);   // double door: two leaves
-                        AddDoorLeaf(page, At(t1, 0), -e.dir, -e.outward, w / 2f, style);
-                    }
-                    else AddDoorLeaf(page, At(t0, 0), e.dir, -e.outward, w, style);
-                }
+                else page.lines.Add(new PlanLine(At(t0, h), At(t1, h), style)); // door: one line across the opening
             }
         }
     }
