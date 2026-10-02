@@ -69,11 +69,45 @@ public class WalkThroughMode : MonoBehaviour
         Physics.SyncTransforms();
     }
 
+    /// <summary>
+    /// Jumps to the next story (cyclic, upwards): straight above/below where you stand if that story has floor
+    /// there, else the middle of its largest room. Stories = floor anchor heights more than 1.5 m apart.
+    /// </summary>
+    public string NextFloor()
+    {
+        if (!isOn || walkRooms == null || !TryGetScanWorldPose(out var headScan, out _)) return null;
+        var floors = walkRooms.SelectMany(r => r.FloorAnchors).Where(f => f != null && f.PlaneRect.HasValue).ToList();
+        var levels = new List<float>();
+        foreach (var y in floors.Select(f => f.transform.position.y).OrderBy(y => y))
+            if (levels.Count == 0 || y - levels[levels.Count - 1] > 1.5f) levels.Add(y);
+        if (levels.Count < 2) return "Only one floor in this scan";
+
+        float feetY = headScan.y - (head.position.y - TargetFloorY);
+        int cur = 0;
+        for (int i = 1; i < levels.Count; i++) if (Mathf.Abs(levels[i] - feetY) < Mathf.Abs(levels[cur] - feetY)) cur = i;
+        int next = (cur + 1) % levels.Count;
+        float level = levels[next];
+
+        Vector3 target;
+        var here = DoorCatalog.FindRoomAt(walkRooms, new Vector3(headScan.x, level + 0.05f, headScan.z));
+        var hereFloor = here?.FloorAnchors.FirstOrDefault(f => f != null && Mathf.Abs(f.transform.position.y - level) < 0.5f);
+        if (hereFloor != null) target = new Vector3(headScan.x, hereFloor.transform.position.y, headScan.z);
+        else
+        {
+            var biggest = floors.Where(f => Mathf.Abs(f.transform.position.y - level) < 0.5f)
+                .OrderByDescending(f => f.PlaneRect.Value.width * f.PlaneRect.Value.height).First();
+            target = biggest.transform.position;
+        }
+        Place(Quaternion.Euler(0, yaw, 0) * (target - center), root.transform.rotation);
+        blink = 1f;
+        return $"Floor {next + 1}/{levels.Count}";
+    }
+
     /// <summary>Right trigger while walking: opens/closes the door leaf under the ray. False if none.</summary>
     public bool TryToggleDoor()
     {
         if (!isOn || !rightHand) return false;
-        return Physics.Raycast(rightHand.position, rightHand.forward, out var hit, 6f, WalkMask, QueryTriggerInteraction.Ignore)
+        return Physics.Raycast(rightHand.position, rightHand.forward, out var hit, 6f, WalkMask, QueryTriggerInteraction.Collide)
                && walkDoors.Toggle(hit.collider);
     }
 
@@ -356,7 +390,7 @@ public class WalkThroughMode : MonoBehaviour
         HandleSnapTurn();
         HandleMove(dt);
         FollowFloor(dt);
-        if (walkVisual && walkDoors.Tick(walkVisual.transform.InverseTransformPoint(head.position), dt)) Physics.SyncTransforms();
+        if (walkVisual && walkDoors.Tick(walkVisual.transform.InverseTransformPoint(head.position), dt, EditModeController.AnyOn)) Physics.SyncTransforms();
         UpdateDoors();
         UpdateFade(dt);
     }

@@ -36,6 +36,18 @@ public static class StairGeometry
         }).ToList();
     }
 
+    /// <summary>A drawn hole's two corners in the scan's world frame.</summary>
+    public static bool HoleWorld(HoleEdit h, List<MRUKRoom> rooms, out Vector3 a, out Vector3 b)
+    {
+        a = b = default;
+        if (h == null || h.localA == null || h.localB == null) return false;
+        var room = rooms.FirstOrDefault(r => DoorCatalog.RoomId(r) == h.roomUuid);
+        Vector3 la = new Vector3(h.localA.x, h.localA.y, h.localA.z), lb = new Vector3(h.localB.x, h.localB.y, h.localB.z);
+        a = room != null ? room.transform.TransformPoint(la) : la;
+        b = room != null ? room.transform.TransformPoint(lb) : lb;
+        return true;
+    }
+
     /// <summary>Floor height of the story above 'bottomY' (lowest floor anchor at least 1.5 m higher).</summary>
     public static float TopFloorY(List<MRUKRoom> rooms, float bottomY)
     {
@@ -314,7 +326,7 @@ public class StairsInModel
         }
         originals.Clear();
         DestroyStairs();
-        if (edits == null || edits.stairs == null || edits.stairs.Count == 0) return;
+        if (edits == null || ((edits.stairs?.Count ?? 0) == 0 && (edits.holes?.Count ?? 0) == 0)) return;
 
         Quaternion gRot = Quaternion.Euler(0, yaw, 0);
         var model = new XRHouseModel();
@@ -331,6 +343,17 @@ public class StairsInModel
             // ceiling of the story below and the floor slab of the story above.
             holes.Add((rects, r.bottomY - center.y + 1.0f, r.topY - center.y + 0.3f));
         }
+        // Openings the user drew themselves (Hole tool): square to the walls in model space.
+        if (edits.holes != null)
+            foreach (var h in edits.holes)
+            {
+                if (!StairGeometry.HoleWorld(h, rooms, out var a, out var b)) continue;
+                Vector3 ma = gRot * (a - center), mb = gRot * (b - center);
+                float x0 = Mathf.Min(ma.x, mb.x), x1 = Mathf.Max(ma.x, mb.x), z0 = Mathf.Min(ma.z, mb.z), z1 = Mathf.Max(ma.z, mb.z);
+                var rect = new[] { new Vector2(x0, z0), new Vector2(x1, z0), new Vector2(x1, z1), new Vector2(x0, z1) };
+                float y = (ma.y + mb.y) / 2f;
+                holes.Add((new List<Vector2[]> { rect }, y - 0.6f, y + 0.6f));
+            }
 
         stairsGo = UnityModelLoader.LoadToScene(model, shaded);
         if (stairsGo)

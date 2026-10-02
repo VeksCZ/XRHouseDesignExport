@@ -51,7 +51,7 @@ public class XRMenu : MonoBehaviour
     // site - a toggle can also turn itself off from elsewhere (the floor plan panel's own Close button, or a
     // scan-source change invalidating the scan overlay/minimap), and a per-frame sync can never go stale the
     // way scattered manual updates did.
-    Button dollhouseButton, plansButton, scanOverlayButton, miniMapButton, walkButton, editButton, seatedButton;
+    Button dollhouseButton, plansButton, scanOverlayButton, miniMapButton, walkButton, editButton;
     XRRayInteractor rightRay;
     float flickCooldown;
     float menuYaw;
@@ -83,6 +83,8 @@ public class XRMenu : MonoBehaviour
         doorTool.uiLog = this; doorTool.editMode = editMode; doorTool.walk = walk; doorTool.dollhouse = dollhouse;
         var stairTool = FindAnyObjectByType<StairEditTool>() ?? gameObject.AddComponent<StairEditTool>();
         stairTool.uiLog = this; stairTool.editMode = editMode; stairTool.walk = walk; stairTool.dollhouse = dollhouse;
+        var holeTool = FindAnyObjectByType<HoleEditTool>() ?? gameObject.AddComponent<HoleEditTool>();
+        holeTool.uiLog = this; holeTool.editMode = editMode; holeTool.walk = walk; holeTool.dollhouse = dollhouse;
         var quality = FindAnyObjectByType<RenderQuality>() ?? gameObject.AddComponent<RenderQuality>();
         quality.uiLog = this;
         plansPanel = gameObject.AddComponent<FloorPlanPanel>();
@@ -155,11 +157,10 @@ public class XRMenu : MonoBehaviour
         // A leaves it again.
         walkButton = XRUi.CreateButton(root, "Walk", right, top + 3 * (h + gap), w, h, OnToggleWalk);
         XRUi.SetTint(walkButton, XRUi.ButtonToggleColor);
-        // Edit mode (doors, stairs) - also hold Y; Seated - also left stick click while walking.
+        // Edit mode (doors, stairs) - also hold Y. Floor: jump to the next story while walking (seated/standing is the left stick click).
         editButton = XRUi.CreateButton(root, "Edit", left, top + 4 * (h + gap), w, h, () => editMode?.Toggle());
         XRUi.SetTint(editButton, XRUi.ButtonToggleColor);
-        seatedButton = XRUi.CreateButton(root, "Seated", right, top + 4 * (h + gap), w, h, OnToggleSeated);
-        XRUi.SetTint(seatedButton, XRUi.ButtonToggleColor);
+        XRUi.CreateButton(root, "Next floor", right, top + 4 * (h + gap), w, h, OnNextFloor);
 
         float rowY = top + 5 * (h + gap);
         // "Load scan" is gone - every action here (Export, Dollhouse, Floor plans, Scan overlay, Minimap)
@@ -370,7 +371,6 @@ public class XRMenu : MonoBehaviour
         if (miniMapButton != null) XRUi.SetTint(miniMapButton, miniMap != null && miniMap.IsOn ? XRUi.ButtonOnColor : XRUi.ButtonToggleColor);
         if (walkButton != null) XRUi.SetTint(walkButton, walk != null && walk.IsOn ? XRUi.ButtonOnColor : XRUi.ButtonToggleColor);
         if (editButton != null) XRUi.SetTint(editButton, editMode != null && editMode.IsOn ? XRUi.ButtonOnColor : XRUi.ButtonToggleColor);
-        if (seatedButton != null) XRUi.SetTint(seatedButton, walk != null && walk.IsOn && walk.IsSeated ? XRUi.ButtonOnColor : XRUi.ButtonToggleColor);
     }
 
     /// <summary>Opens/closes the whole wrist menu (bound to B - see the comment where it's read).</summary>
@@ -424,10 +424,11 @@ public class XRMenu : MonoBehaviour
         return true;
     }
 
-    void OnToggleSeated()
+    void OnNextFloor()
     {
-        if (walk == null || !walk.IsOn) { AddLog("Seated: only while walking (Walk)."); return; }
-        walk.ToggleSeated();
+        if (walk == null || !walk.IsOn) { AddLog("Next floor: only while walking (Walk)."); return; }
+        string s = walk.NextFloor();
+        if (s != null) { AddLog(s); SetStatus(s); }
     }
 
     async void TryEnterWalkFromDollhouse()

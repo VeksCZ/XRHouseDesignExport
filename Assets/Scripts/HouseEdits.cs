@@ -18,6 +18,21 @@ public class HouseEdits
     public string modified;
     public List<DoorEdit> doors = new List<DoorEdit>();
     public List<StairEdit> stairs = new List<StairEdit>();
+    public List<HoleEdit> holes = new List<HoleEdit>();
+}
+
+/// <summary>
+/// An opening drawn by the user into a floor/ceiling (typically the stairwell): a rectangle, square to the house's
+/// walls, given by two opposite corners on the surface it was drawn on - the ceiling from below or the floor from
+/// above. It cuts every horizontal surface within ~0.6 m of that height, i.e. both the ceiling of the story below
+/// and the floor slab of the story above. Corners room-local like the other edits.
+/// </summary>
+[Serializable]
+public class HoleEdit
+{
+    public string id;
+    public string roomUuid;
+    public Vector3Data localA, localB;
 }
 
 /// <summary>
@@ -97,7 +112,7 @@ public static class HouseEditsStore
             try
             {
                 var e = JsonUtility.FromJson<HouseEdits>(File.ReadAllText(path));
-                if (e != null) { e.doors ??= new List<DoorEdit>(); e.stairs ??= new List<StairEdit>(); return e; }
+                if (e != null) { e.doors ??= new List<DoorEdit>(); e.stairs ??= new List<StairEdit>(); e.holes ??= new List<HoleEdit>(); return e; }
             }
             catch (Exception ex)
             {

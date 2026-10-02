@@ -74,7 +74,7 @@ public class DoorEditTool : MonoBehaviour
         hovered = PickDoor();
         foreach (var d in doors)
         {
-            var e = DoorCatalog.FindEdit(HouseEditsStore.Current, d.anchor, rooms);
+            var e = DoorCatalog.FindEdit(HouseEditsStore.Current, d, rooms);
             if (e != null) DrawSwing(d, e);
         }
         if (hovered != null && hovered != selected) DrawOutline(hovered, HoverColor);
@@ -248,10 +248,15 @@ public class DoorEditTool : MonoBehaviour
         var d = selected;
         panel = XRUi.CreateWorldCanvas("DoorEditPanel", new Vector2(PW, PH), PScale);
         var t = panel.transform;
-        // In front of you, a bit low, facing you (stays put until the next pick).
-        Vector3 fwd = Vector3.ProjectOnPlane(head.forward, Vector3.up).normalized;
-        Vector3 pos = head.position + fwd * 0.6f - Vector3.up * 0.18f;
-        t.SetPositionAndRotation(pos, Quaternion.LookRotation(pos - head.position, Vector3.up));
+        // Where you last dragged it (grip), else in front of you, a bit low, facing you.
+        if (userPlaced) t.SetPositionAndRotation(userPos, userRot);
+        else
+        {
+            Vector3 fwd = Vector3.ProjectOnPlane(head.forward, Vector3.up).normalized;
+            Vector3 pos = head.position + fwd * 0.6f - Vector3.up * 0.18f;
+            t.SetPositionAndRotation(pos, Quaternion.LookRotation(pos - head.position, Vector3.up));
+        }
+        panelDrag = PanelDrag.Attach(panel, PW, PH);
 
         XRUi.CreatePanel(t, "Background", XRUi.PanelColor, 0, 0, PW, PH);
         string a = RoomLabel(d.roomFront), b = RoomLabel(d.roomBack);
@@ -293,8 +298,12 @@ public class DoorEditTool : MonoBehaviour
         RefreshPanel();
     }
 
+    PanelDrag panelDrag;
+    bool userPlaced; Vector3 userPos; Quaternion userRot;
+
     void ClosePanel()
     {
+        if (panel && panelDrag && panelDrag.Moved) { userPlaced = true; userPos = panel.transform.position; userRot = panel.transform.rotation; }
         if (panel) Destroy(panel.gameObject);
         panel = null;
     }
@@ -304,7 +313,7 @@ public class DoorEditTool : MonoBehaviour
     void RefreshPanel()
     {
         if (!panel || selected == null) return;
-        var e = DoorCatalog.FindEdit(HouseEditsStore.Current, selected.anchor, rooms);
+        var e = DoorCatalog.FindEdit(HouseEditsStore.Current, selected, rooms);
         panelTitle.text = $"Door {RoomLabel(selected.roomFront)} / {RoomLabel(selected.roomBack)}  {selected.width:0.00} m" + (e == null ? "  (not set)" : "");
         for (int i = 0; i < 4; i++) XRUi.SetTint(kindButtons[i], e != null && (int)e.kind == i ? XRUi.ButtonOnColor : XRUi.ButtonToggleColor);
         bool leaf = e == null || e.kind == DoorKind.Single || e.kind == DoorKind.Double || e.kind == DoorKind.Sliding;
@@ -324,7 +333,7 @@ public class DoorEditTool : MonoBehaviour
         string viewerSide = ViewerSideRoomId(d);
         await editMode.Commit(edits =>
         {
-            var e = DoorCatalog.FindEdit(edits, d.anchor, rooms);
+            var e = DoorCatalog.FindEdit(edits, d, rooms);
             if (e == null)
             {
                 e = DoorCatalog.NewEdit(d);
@@ -340,10 +349,10 @@ public class DoorEditTool : MonoBehaviour
     {
         var d = selected;
         if (d == null || editMode == null) return;
-        if (DoorCatalog.FindEdit(HouseEditsStore.Current, d.anchor, rooms) == null) return;
+        if (DoorCatalog.FindEdit(HouseEditsStore.Current, d, rooms) == null) return;
         await editMode.Commit(edits =>
         {
-            var e = DoorCatalog.FindEdit(edits, d.anchor, rooms);
+            var e = DoorCatalog.FindEdit(edits, d, rooms);
             if (e != null) edits.doors.Remove(e);
         });
         RefreshPanel();

@@ -14,7 +14,7 @@ using UnityEngine.UI;
 /// </summary>
 public class EditModeController : MonoBehaviour
 {
-    public enum Tool { None, Doors, Stairs }
+    public enum Tool { None, Doors, Stairs, Holes }
 
     public XRMenu uiLog;
     public MRUKExporter exporter;
@@ -23,11 +23,13 @@ public class EditModeController : MonoBehaviour
 
     Canvas toolbar;
     TMP_Text infoText;
-    Button doorsButton, stairsButton, undoButton, redoButton;
+    Button doorsButton, stairsButton, holesButton, undoButton, redoButton;
     Transform leftHand;
     bool saving;
 
     public bool IsOn { get; private set; }
+    /// <summary>Edit mode is on (e.g. doors in the walk-through then open by themselves).</summary>
+    public static bool AnyOn { get; private set; }
     public Tool CurrentTool { get; private set; } = Tool.None;
     /// <summary>Right trigger pressed while edit mode is on and the ray isn't on any UI - for the active tool.</summary>
     public event Action TriggerPressed;
@@ -38,6 +40,7 @@ public class EditModeController : MonoBehaviour
     public void Toggle()
     {
         IsOn = !IsOn;
+        AnyOn = IsOn;
         if (IsOn) { BuildToolbar(); toolbar.gameObject.SetActive(true); }
         else { CurrentTool = Tool.None; if (toolbar) toolbar.gameObject.SetActive(false); }
         RefreshInfo();
@@ -94,6 +97,7 @@ public class EditModeController : MonoBehaviour
         CurrentTool = CurrentTool == t ? Tool.None : t;
         if (CurrentTool == Tool.Stairs) uiLog?.AddLog("Stairs: trigger on the floor under the first step, each landing's middle, the top end - then Finish.");
         if (CurrentTool == Tool.Doors) uiLog?.AddLog("Doors: point at a door + trigger to pick it, then set it on the panel.");
+        if (CurrentTool == Tool.Holes) uiLog?.AddLog("Opening: two opposite corners on the ceiling (from below) or the floor (from above).");
         RefreshInfo();
     }
 
@@ -110,21 +114,24 @@ public class EditModeController : MonoBehaviour
         head = rig ? rig.centerEyeAnchor : null;
         var t = toolbar.transform;
         FollowHand();
+        // Grip-drag it somewhere and it stays there (stops following the hand).
+        toolbarDrag = PanelDrag.Attach(toolbar, CanvasW, CanvasH);
 
         XRUi.CreatePanel(t, "Background", new Color(0.30f, 0.17f, 0.03f, 0.94f), 0, 0, CanvasW, CanvasH);
         XRUi.CreateText(t, "Title", "EDIT", 26, TextAlignmentOptions.MidlineLeft, 14, 6, 90, 36, new Color(1f, 0.7f, 0.25f), FontStyles.Bold);
         infoText = XRUi.CreateText(t, "Info", "", 20, TextAlignmentOptions.MidlineRight, 100, 6, CanvasW - 114, 36, XRUi.MutedText);
 
         const float y = 52, h = 60, g = 8;
-        float w = (CanvasW - 14 * 2 - g * 4) / 5f;
+        float w = (CanvasW - 14 * 2 - g * 5) / 6f;
         float x = 14;
         doorsButton = XRUi.CreateButton(t, "Doors", x, y, w, h, () => SelectTool(Tool.Doors), 22); x += w + g;
         stairsButton = XRUi.CreateButton(t, "Stairs", x, y, w, h, () => SelectTool(Tool.Stairs), 22); x += w + g;
+        holesButton = XRUi.CreateButton(t, "Opening", x, y, w, h, () => SelectTool(Tool.Holes), 20); x += w + g;
         undoButton = XRUi.CreateButton(t, "Undo", x, y, w, h, OnUndo, 22); x += w + g;
         redoButton = XRUi.CreateButton(t, "Redo", x, y, w, h, OnRedo, 22); x += w + g;
         XRUi.CreateButton(t, "Done", x, y, w, h, Toggle, 22);
 
-        XRUi.CreateText(t, "Hint", "Right trigger = use tool  •  hold Y = leave", 18, TextAlignmentOptions.Center, 14, y + h + 10, CanvasW - 28, 50, XRUi.MutedText);
+        XRUi.CreateText(t, "Hint", "Trigger = use tool  •  grip = move this bar  •  hold Y = leave", 18, TextAlignmentOptions.Center, 14, y + h + 10, CanvasW - 28, 50, XRUi.MutedText);
     }
 
     Transform head;
@@ -142,18 +149,21 @@ public class EditModeController : MonoBehaviour
 
     void LateUpdate()
     {
-        if (IsOn && toolbar && toolbar.gameObject.activeSelf) FollowHand();
+        if (IsOn && toolbar && toolbar.gameObject.activeSelf && !(toolbarDrag && toolbarDrag.Moved)) FollowHand();
     }
+
+    PanelDrag toolbarDrag;
 
     void RefreshInfo()
     {
         if (!toolbar) return;
         XRUi.SetTint(doorsButton, CurrentTool == Tool.Doors ? XRUi.ButtonOnColor : XRUi.ButtonToggleColor);
         XRUi.SetTint(stairsButton, CurrentTool == Tool.Stairs ? XRUi.ButtonOnColor : XRUi.ButtonToggleColor);
+        XRUi.SetTint(holesButton, CurrentTool == Tool.Holes ? XRUi.ButtonOnColor : XRUi.ButtonToggleColor);
         undoButton.interactable = HouseEditsStore.UndoCount > 0;
         redoButton.interactable = HouseEditsStore.RedoCount > 0;
         string scan = HouseEditsStore.CurrentScan ?? "live scan (saved on first edit)";
-        infoText.text = $"{scan}  •  {HouseEditsStore.Current.doors.Count} door(s), {HouseEditsStore.Current.stairs.Count} stair(s)";
+        infoText.text = $"{scan}  •  {HouseEditsStore.Current.doors.Count} door(s), {HouseEditsStore.Current.stairs.Count} stair(s), {HouseEditsStore.Current.holes.Count} opening(s)";
     }
 
     void Haptic(float strength)

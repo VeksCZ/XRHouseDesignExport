@@ -9,6 +9,8 @@ using Meta.XR.MRUtilityKit;
 public class DoorInfo
 {
     public MRUKAnchor anchor;
+    /// <summary>Every anchor of this doorway (one per room that captured it).</summary>
+    public readonly List<MRUKAnchor> anchors = new List<MRUKAnchor>();
     public string uuid;
     public Vector3 center;          // middle of the opening
     public Vector3 right, normal;   // horizontal unit vectors: along the wall / out of the anchor's face
@@ -23,11 +25,25 @@ public class DoorInfo
 /// </summary>
 public static class DoorCatalog
 {
-    const float DuplicateDist = 0.15f;  // same as XRModelFactory's own opening de-duplication
     const float SideProbe = 0.4f;       // how far either side of the door to look for the room it leads into
-    const float EditMatchDist = 0.25f;
+    const float EditMatchDist = 0.4f;
 
     public static string RoomId(MRUKRoom room) => room != null ? room.Anchor.Uuid.ToString() : "";
+
+    /// <summary>
+    /// Whether a door frame at c (facing n) is the same physical doorway as d. A doorway between two scanned rooms
+    /// is usually captured twice - once from each room, on that room's own face of the wall - so the two anchors
+    /// sit a wall's thickness apart (often 20-40 cm), facing opposite ways. Two real doors that close together
+    /// in the same wall line don't exist.
+    /// </summary>
+    public static bool SameDoorway(DoorInfo d, Vector3 c, Vector3 n)
+    {
+        Vector3 delta = c - d.center;
+        return Mathf.Abs(Vector3.Dot(n, d.normal)) > 0.9f
+            && Mathf.Abs(Vector3.Dot(delta, d.normal)) < 0.6f
+            && Mathf.Abs(Vector3.Dot(delta, d.right)) < 0.35f
+            && Mathf.Abs(delta.y) < 0.4f;
+    }
 
     public static List<DoorInfo> Build(List<MRUKRoom> rooms)
     {
@@ -36,17 +52,42 @@ public static class DoorCatalog
             .Where(a => a != null && a.PlaneRect.HasValue && MRUKDataProcessor.IsDoor(a)).ToList();
         foreach (var a in all)
         {
-            if (result.Any(d => Vector3.Distance(d.center, a.transform.position) < DuplicateDist)) continue;
             Frame(a, out var c, out var r, out var n, out float w, out float h);
-            result.Add(new DoorInfo
+            var same = result.FirstOrDefault(d => SameDoorway(d, c, n));
+            if (same != null)
+            {
+                // The other room's view of the same doorway: use the middle of the wall between the two faces.
+                if (!same.anchors.Contains(a))
+                {
+                    same.anchors.Add(a);
+                    same.center = (same.center + c) / 2f;
+                    same.roomFront = FindRoomAt(rooms, same.center + same.normal * SideProbe);
+                    same.roomBack = FindRoomAt(rooms, same.center - same.normal * SideProbe);
+                }
+                continue;
+            }
+            var door = new DoorInfo
             {
                 anchor = a, uuid = a.Anchor.Uuid.ToString(),
                 center = c, right = r, normal = n, width = w, height = h,
                 roomFront = FindRoomAt(rooms, c + n * SideProbe),
                 roomBack = FindRoomAt(rooms, c - n * SideProbe),
-            });
+            };
+            door.anchors.Add(a);
+            result.Add(door);
         }
         return result;
+    }
+
+    /// <summary>The edit of a doorway, whichever of its anchors it was saved for (or by position).</summary>
+    public static DoorEdit FindEdit(HouseEdits edits, DoorInfo d, List<MRUKRoom> rooms)
+    {
+        foreach (var a in d.anchors)
+        {
+            var e = FindEdit(edits, a, rooms);
+            if (e != null) return e;
+        }
+        return null;
     }
 
     /// <summary>A door anchor's centre, horizontal along-wall/normal directions and size.</summary>
