@@ -11,7 +11,7 @@ using UnityEngine.TestTools;
 /// Batch export of a saved scan on the PC, without a headset: loads a MRUK scene JSON (the ".scene.json" that
 /// "Save scan" writes, or an export's 92_Data_Scan.scene.json) and runs the real MRUKExporter pipeline on it.
 /// Only runs when XR_SCAN_JSON points to a file, so it is skipped in normal test runs. Typical use:
-///   set XR_SCAN_JSON=C:\...\Exports\ScanCache\20261002_0848_15rooms.scene.json
+///   set XR_SCAN_JSON=C:\...\Exports\RoomData\Export_20261002_0848_15rooms\92_Data_Scan.scene.json
 ///   Unity.exe -batchmode -projectPath . -runTests -testPlatform PlayMode -testFilter ScanExportTests
 /// Output goes to Exports/Batch (or XR_EXPORT_ROOT); the session folder is logged as "[BatchExport] DONE ...".
 /// </summary>

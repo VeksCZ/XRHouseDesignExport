@@ -1,5 +1,5 @@
 # Runs the real export pipeline on a saved scan (MRUK .scene.json) without a headset or an open Editor.
-# Usage:  .\Tools\BatchExport.ps1 [-Scan <path to .scene.json>]   (default: newest scan in Exports\ScanCache by name)
+# Usage:  .\Tools\BatchExport.ps1 [-Scan <path to .scene.json>]   (default: scan of the newest export in Exports\RoomData)
 # Output: Exports\Batch\Export_<time>_<scan>\  (the Unity log is Exports\Batch\unity.log)
 # The Unity Editor must be closed - batch mode can't open a project that is already open.
 param([string]$Scan, [string]$Unity = "C:\Program Files\Unity\Hub\Editor\6000.3.9f1\Editor\Unity.exe", [int]$TimeoutSec = 600)
@@ -8,9 +8,10 @@ $project = Split-Path -Parent $PSScriptRoot
 $batch = Join-Path $project "Exports\Batch"
 New-Item -ItemType Directory -Force $batch | Out-Null
 if (-not $Scan) {
-    # Scan names start with yyyyMMdd_HHmm, so the name sorts by capture time (file times change on every pull).
-    $Scan = (Get-ChildItem (Join-Path $project "Exports\ScanCache") -Filter *.scene.json |
-             Where-Object Name -match '^\d{8}_\d{4}' | Sort-Object Name -Descending | Select-Object -First 1).FullName
+    # Export folders are Export_yyyyMMdd_HHmmss_<name>, so the folder name sorts by export time.
+    $Scan = (Get-ChildItem (Join-Path $project "Exports\RoomData") -Directory -Filter "Export_*" |
+             Sort-Object Name -Descending | ForEach-Object { Join-Path $_.FullName "92_Data_Scan.scene.json" } |
+             Where-Object { Test-Path $_ } | Select-Object -First 1)
 }
 if (-not $Scan -or -not (Test-Path $Scan)) { Write-Error "Scan not found: $Scan"; exit 1 }
 

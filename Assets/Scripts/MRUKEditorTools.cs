@@ -52,7 +52,7 @@ public static class MRUKEditorTools {
     [MenuItem("MRUK/4. Uninstall App", false, 13)]
     public static void UninstallAPK() { 
         Debug.Log("<color=orange>Uninstalling application...</color>");
-        if (RunAdb("uninstall com.veks.XRHouseDesignExport")) {
+        if (RunAdb("uninstall cz.veks.XRHouseDesignExport")) {
             Debug.Log("<color=green>UNINSTALL COMPLETE.</color>");
         } else {
             Debug.LogError("<color=red>UNINSTALL FAILED.</color>");
@@ -63,22 +63,16 @@ public static class MRUKEditorTools {
     const int KeepExports = 5;   // keep in sync with "(keep 5)" in the menu item name below (attributes can't format an int)
     const string RemoteExportDir = "/sdcard/Download/XRHouseExports";
 
-    /// <summary>Pulls every export session (and the saved scans) from the Quest. Use "7. Delete Old Exports" first
-    /// to trim what's there. Each pulled export's scan JSON is also copied into Exports/ScanCache so it shows up
-    /// as a scan source in the Editor.</summary>
+    /// <summary>Pulls every export session from the Quest. Use "7. Delete Old Exports" first to trim what's there.
+    /// Each export already contains its own scan (92_Data_Scan.scene.json), so the headset's ScanCache is not pulled.</summary>
     [MenuItem("MRUK/5. Pull data from Quest", false, 30)]
     public static void PullFromQuest() {
         string local = Path.GetFullPath("Exports/RoomData");
         Directory.CreateDirectory(local);
         Debug.Log($"<color=cyan>Pulling data from Quest to {local}...</color>");
 
-        // Saved scans live in the app's own storage, not in Downloads.
-        string scanLocal = Path.GetFullPath("Exports/ScanCache");
-        Directory.CreateDirectory(scanLocal);
-        RunAdb($"pull \"/sdcard/Android/data/com.veks.XRHouseDesignExport/files/ScanCache/.\" \"{scanLocal}\"");
         if (RunAdb($"pull \"{RemoteExportDir}/.\" \"{local}\"")) {
             var dirs = Directory.GetDirectories(local, "Export_*");
-            foreach (var d in dirs) CopyExportScanToCache(d, scanLocal);
             if (dirs.Length > 0) {
                 var latest = dirs.OrderByDescending(d => Path.GetFileName(d), StringComparer.Ordinal).First();
                 Debug.Log($"<color=green>DOWNLOADED: Opening {Path.GetFileName(latest)}</color>");
@@ -149,15 +143,6 @@ public static class MRUKEditorTools {
             catch (Exception ex) { Debug.LogWarning($"Could not delete local export '{d}': {ex.Message}"); }
         }
         return removed;
-    }
-
-    /// <summary>Copies an export's scan JSON into the Editor's ScanCache (named after the export), so the exact
-    /// scan behind that export can be picked as a source and re-exported or inspected on the PC.</summary>
-    static void CopyExportScanToCache(string exportDir, string scanCache) {
-        string src = Path.Combine(exportDir, MRUKPathUtility.DATA_SCENE);
-        if (!File.Exists(src)) return;
-        string dst = Path.Combine(scanCache, Path.GetFileName(exportDir) + MRUKSceneCache.EXTENSION);
-        if (!File.Exists(dst)) File.Copy(src, dst);
     }
 
     [MenuItem("MRUK/8. Open Exports Folder", false, 50)]
