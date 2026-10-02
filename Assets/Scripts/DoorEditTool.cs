@@ -142,6 +142,7 @@ public class DoorEditTool : MonoBehaviour
     void OnTrigger()
     {
         if (!Active) return;
+        if (!frameRoot) { uiLog?.AddLog("Doors: open the Dollhouse or Walk first."); return; }
         selected = hovered;
         if (selected == null) { ClosePanel(); return; }
         OpenPanel();

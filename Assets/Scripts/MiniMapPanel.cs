@@ -185,7 +185,7 @@ public class MiniMapPanel : MonoBehaviour
             bool grip = OVRInput.Get(OVRInput.Button.PrimaryHandTrigger, OVRInput.Controller.RTouch);
             if (!grabbed)
             {
-                if (grip && Physics.Raycast(rightHand.position, rightHand.forward, out RaycastHit hit) && hit.collider.gameObject == root)
+                if (GrabLock.GripPressed && Physics.Raycast(rightHand.position, rightHand.forward, out RaycastHit hit) && hit.collider.gameObject == root && GrabLock.TryTake(this))
                 {
                     grabbed = true;
                     OVRInput.SetControllerVibration(0.1f, 0.1f, OVRInput.Controller.RTouch); Invoke(nameof(StopVib), 0.05f);
@@ -193,7 +193,7 @@ public class MiniMapPanel : MonoBehaviour
                     grabRotOff = Quaternion.Inverse(rightHand.rotation) * root.transform.rotation;
                 }
             }
-            else if (!grip) grabbed = false;
+            else if (!grip) { grabbed = false; GrabLock.Release(this); }
             else
             {
                 root.transform.position = rightHand.TransformPoint(grabOff);

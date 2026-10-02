@@ -19,7 +19,7 @@ public class EditModeController : MonoBehaviour
     public XRMenu uiLog;
     public MRUKExporter exporter;
 
-    const float CanvasW = 560f, CanvasH = 190f, CanvasScale = 0.00032f; // ~18 x 6 cm above the left controller
+    const float CanvasW = 560f, CanvasH = 190f, CanvasScale = 0.0004f; // ~22 x 8 cm above the left controller
 
     Canvas toolbar;
     TMP_Text infoText;
@@ -106,12 +106,10 @@ public class EditModeController : MonoBehaviour
         var rig = FindFirstObjectByType<OVRCameraRig>();
         leftHand = rig ? rig.leftHandAnchor : null;
 
-        toolbar = XRUi.CreateWorldCanvas("EditToolbar", new Vector2(CanvasW, CanvasH), CanvasScale, leftHand);
+        toolbar = XRUi.CreateWorldCanvas("EditToolbar", new Vector2(CanvasW, CanvasH), CanvasScale);
+        head = rig ? rig.centerEyeAnchor : null;
         var t = toolbar.transform;
-        // Just above the controller, facing back at you (a world canvas reads from its -Z side, and the hand's
-        // forward points away from you), tipped back a little towards the eyes.
-        t.localPosition = new Vector3(0f, 0.07f, 0.03f);
-        t.localRotation = Quaternion.Euler(-25f, 0f, 0f);
+        FollowHand();
 
         XRUi.CreatePanel(t, "Background", new Color(0.30f, 0.17f, 0.03f, 0.94f), 0, 0, CanvasW, CanvasH);
         XRUi.CreateText(t, "Title", "EDIT", 26, TextAlignmentOptions.MidlineLeft, 14, 6, 90, 36, new Color(1f, 0.7f, 0.25f), FontStyles.Bold);
@@ -127,6 +125,24 @@ public class EditModeController : MonoBehaviour
         XRUi.CreateButton(t, "Done", x, y, w, h, Toggle, 22);
 
         XRUi.CreateText(t, "Hint", "Right trigger = use tool  •  hold Y = leave", 18, TextAlignmentOptions.Center, 14, y + h + 10, CanvasW - 28, 50, XRUi.MutedText);
+    }
+
+    Transform head;
+
+    /// <summary>The toolbar floats just above the left controller and always turns to face you - parenting it
+    /// to the hand made it end up edge-on or out of view depending on how the controller was held.</summary>
+    void FollowHand()
+    {
+        if (!toolbar || !leftHand || !head) return;
+        Vector3 pos = leftHand.position + Vector3.up * 0.13f;
+        Vector3 look = pos - head.position;
+        if (look.sqrMagnitude < 1e-4f) return;
+        toolbar.transform.SetPositionAndRotation(pos, Quaternion.LookRotation(look, Vector3.up));
+    }
+
+    void LateUpdate()
+    {
+        if (IsOn && toolbar && toolbar.gameObject.activeSelf) FollowHand();
     }
 
     void RefreshInfo()

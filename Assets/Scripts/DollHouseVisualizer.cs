@@ -373,14 +373,14 @@ public class DollHouseVisualizer : MonoBehaviour
         bool grip = OVRInput.Get(OVRInput.Button.PrimaryHandTrigger, OVRInput.Controller.RTouch);
         Vector2 s = OVRInput.Get(OVRInput.Axis2D.PrimaryThumbstick, OVRInput.Controller.RTouch);
         if (!grabbed) {
-            if (grip && Physics.Raycast(hand.position, hand.forward, out RaycastHit hit) && hit.collider.gameObject == root) {
+            if (GrabLock.GripPressed && Physics.Raycast(hand.position, hand.forward, out RaycastHit hit) && hit.collider.gameObject == root && GrabLock.TryTake(this)) {
                 grabbed = true;
                 OVRInput.SetControllerVibration(0.1f, 0.1f, OVRInput.Controller.RTouch); Invoke(nameof(StopVib), 0.05f);
                 off = hand.InverseTransformPoint(root.transform.position);
                 rotOff = Quaternion.Inverse(hand.rotation) * root.transform.rotation;
             }
         } else {
-            if (!grip) { grabbed = false; return; }
+            if (!grip) { grabbed = false; GrabLock.Release(this); return; }
             root.transform.position = hand.TransformPoint(off);
             root.transform.rotation = hand.rotation * rotOff;
             if (Mathf.Abs(s.x) > 0.1f) { root.transform.Rotate(Vector3.up, -s.x * 120f * Time.deltaTime, Space.World); rotOff = Quaternion.Inverse(hand.rotation) * root.transform.rotation; }

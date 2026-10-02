@@ -31,7 +31,7 @@ public class XRMenu : MonoBehaviour
 
     // Canvas units; the canvas is scaled to CanvasScale metres per unit (600 units -> 36 cm at 0.75 m from the eyes).
     const float HeaderH = 40f;          // the draggable handle strip at the very top
-    const float CanvasWidth = 600f, CanvasHeight = 776f + HeaderH, CanvasScale = 0.0006f;
+    const float CanvasWidth = 600f, CanvasHeight = 776f + 88f + HeaderH, CanvasScale = 0.0006f;
     const float MenuDistance = 0.75f;   // metres in front of the eyes
     const float MenuDrop = 0.24f;       // metres below eye level, so it doesn't cover what you look at
     const float FollowStart = 30f;      // degrees you must turn away before the menu follows
@@ -51,7 +51,7 @@ public class XRMenu : MonoBehaviour
     // site - a toggle can also turn itself off from elsewhere (the floor plan panel's own Close button, or a
     // scan-source change invalidating the scan overlay/minimap), and a per-frame sync can never go stale the
     // way scattered manual updates did.
-    Button dollhouseButton, plansButton, scanOverlayButton, miniMapButton, walkButton;
+    Button dollhouseButton, plansButton, scanOverlayButton, miniMapButton, walkButton, editButton, seatedButton;
     XRRayInteractor rightRay;
     float flickCooldown;
     float menuYaw;
@@ -83,6 +83,8 @@ public class XRMenu : MonoBehaviour
         doorTool.uiLog = this; doorTool.editMode = editMode; doorTool.walk = walk; doorTool.dollhouse = dollhouse;
         var stairTool = FindAnyObjectByType<StairEditTool>() ?? gameObject.AddComponent<StairEditTool>();
         stairTool.uiLog = this; stairTool.editMode = editMode; stairTool.walk = walk; stairTool.dollhouse = dollhouse;
+        var quality = FindAnyObjectByType<RenderQuality>() ?? gameObject.AddComponent<RenderQuality>();
+        quality.uiLog = this;
         plansPanel = gameObject.AddComponent<FloorPlanPanel>();
 
         BuildMenu();
@@ -153,8 +155,13 @@ public class XRMenu : MonoBehaviour
         // A leaves it again.
         walkButton = XRUi.CreateButton(root, "Walk", right, top + 3 * (h + gap), w, h, OnToggleWalk);
         XRUi.SetTint(walkButton, XRUi.ButtonToggleColor);
+        // Edit mode (doors, stairs) - also hold Y; Seated - also left stick click while walking.
+        editButton = XRUi.CreateButton(root, "Edit", left, top + 4 * (h + gap), w, h, () => editMode?.Toggle());
+        XRUi.SetTint(editButton, XRUi.ButtonToggleColor);
+        seatedButton = XRUi.CreateButton(root, "Seated", right, top + 4 * (h + gap), w, h, OnToggleSeated);
+        XRUi.SetTint(seatedButton, XRUi.ButtonToggleColor);
 
-        float rowY = top + 4 * (h + gap);
+        float rowY = top + 5 * (h + gap);
         // "Load scan" is gone - every action here (Export, Dollhouse, Floor plans, Scan overlay, Minimap)
         // already loads the selected source itself on demand, so a separate standalone "load" step had nothing
         // left to do that pressing the feature you actually wanted wouldn't already do. Clicking the scan name
@@ -362,6 +369,8 @@ public class XRMenu : MonoBehaviour
         if (scanOverlayButton != null) XRUi.SetTint(scanOverlayButton, scanOverlay != null && scanOverlay.IsOn ? XRUi.ButtonOnColor : XRUi.ButtonToggleColor);
         if (miniMapButton != null) XRUi.SetTint(miniMapButton, miniMap != null && miniMap.IsOn ? XRUi.ButtonOnColor : XRUi.ButtonToggleColor);
         if (walkButton != null) XRUi.SetTint(walkButton, walk != null && walk.IsOn ? XRUi.ButtonOnColor : XRUi.ButtonToggleColor);
+        if (editButton != null) XRUi.SetTint(editButton, editMode != null && editMode.IsOn ? XRUi.ButtonOnColor : XRUi.ButtonToggleColor);
+        if (seatedButton != null) XRUi.SetTint(seatedButton, walk != null && walk.IsOn && walk.IsSeated ? XRUi.ButtonOnColor : XRUi.ButtonToggleColor);
     }
 
     /// <summary>Opens/closes the whole wrist menu (bound to B - see the comment where it's read).</summary>
@@ -387,7 +396,7 @@ public class XRMenu : MonoBehaviour
         bool grip = OVRInput.Get(OVRInput.Button.PrimaryHandTrigger, OVRInput.Controller.RTouch);
         if (!menuGrabbed)
         {
-            if (grip && Physics.Raycast(menuHand.position, menuHand.forward, out RaycastHit hit) && hit.collider.gameObject == menuHandle)
+            if (GrabLock.GripPressed && Physics.Raycast(menuHand.position, menuHand.forward, out RaycastHit hit) && hit.collider.gameObject == menuHandle && GrabLock.TryTake(this))
             {
                 menuGrabbed = true;
                 menuManuallyPlaced = true;
@@ -398,7 +407,7 @@ public class XRMenu : MonoBehaviour
         }
         else
         {
-            if (!grip) { menuGrabbed = false; return; }
+            if (!grip) { menuGrabbed = false; GrabLock.Release(this); return; }
             menuCanvas.transform.position = menuHand.TransformPoint(menuGrabOff);
             menuCanvas.transform.rotation = menuHand.rotation * menuGrabRotOff;
         }
@@ -415,11 +424,18 @@ public class XRMenu : MonoBehaviour
         return true;
     }
 
-    void TryEnterWalkFromDollhouse()
+    void OnToggleSeated()
+    {
+        if (walk == null || !walk.IsOn) { AddLog("Seated: only while walking (Walk)."); return; }
+        walk.ToggleSeated();
+    }
+
+    async void TryEnterWalkFromDollhouse()
     {
         if (walk == null || walk.IsOn || dollhouse == null || !dollhouse.IsOn || dollhouse.IsDragging) return;
         if (!dollhouse.TryGetPointedFloor(out Vector3 point)) return;
-        if (walk.Enter(point, dollhouse.FacingYaw))
+        await Busy("Building...");
+        if (await walk.Enter(point, dollhouse.FacingYaw))
         {
             dollhouse.SetHidden(true);
             SetStatus("Walk");
@@ -448,7 +464,7 @@ public class XRMenu : MonoBehaviour
             return;
         }
         await Busy("Building...");
-        if (walk.Enter(null, null))
+        if (await walk.Enter(null, null))
         {
             dollhouse?.SetHidden(true);
             SetStatus("Walk");
@@ -555,8 +571,17 @@ public class XRMenu : MonoBehaviour
 
     /// <summary>Cycles which of the 3 dollhouse tiers (Anchor/Mesh/Raw) is shown - separate from turning the
     /// dollhouse itself on or off, so switching tiers never needs 1-3 extra presses through an off state first.</summary>
-    public void OnCycleDollhouseMode()
+    public async void OnCycleDollhouseMode()
     {
+        // While walking, Mode switches which model you walk through (Anchor / Mesh / Raw) instead.
+        if (walk != null && walk.IsOn)
+        {
+            await Busy("Building...");
+            string wm = await walk.CycleModel();
+            AddLog($"<b>{wm}</b>");
+            SetStatus(wm);
+            return;
+        }
         if (dollhouse == null) return;
         string m = dollhouse.CycleMode();
         AddLog($"Dollhouse mode: <b>{m}</b>");

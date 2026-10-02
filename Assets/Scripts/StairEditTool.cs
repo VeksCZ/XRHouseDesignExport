@@ -148,6 +148,7 @@ public class StairEditTool : MonoBehaviour
     void OnTrigger()
     {
         if (!Active) return;
+        if (!wasActive) { uiLog?.AddLog("Stairs: open the Dollhouse or Walk first."); return; }
         if (state == State.Placing)
         {
             if (!hoverPoint.HasValue) { uiLog?.AddLog("Stairs: point at the floor."); return; }

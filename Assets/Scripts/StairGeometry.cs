@@ -169,8 +169,11 @@ public static class StairGeometry
     {
         var v = mesh.vertices;
         var t = mesh.triangles;
+        var col = mesh.colors; // shaded (walk-through) meshes carry their colour per vertex - keep it
+        bool hasCol = col.Length == v.Length;
         var outV = new List<Vector3>();
         var outT = new List<int>();
+        var outC = new List<Color>();
         bool changed = false;
         for (int i = 0; i + 2 < t.Length; i += 3)
         {
@@ -179,7 +182,13 @@ public static class StairGeometry
             float cy = (a.y + b.y + c.y) / 3f;
             bool candidate = n.sqrMagnitude > 1e-12f && Mathf.Abs(n.normalized.y) > 0.9f && cy > minY && cy < maxY
                              && rects.Any(r => Overlaps(r, a, b, c));
-            if (!candidate) { Emit(outV, outT, a, b, c); continue; }
+            if (!candidate)
+            {
+                Emit(outV, outT, a, b, c);
+                if (hasCol) { outC.Add(col[t[i]]); outC.Add(col[t[i + 1]]); outC.Add(col[t[i + 2]]); }
+                continue;
+            }
+            Color triCol = hasCol ? col[t[i]] : Color.white;
 
             changed = true;
             var pieces = new List<List<Vector2>> { new List<Vector2> { XZ(a), XZ(b), XZ(c) } };
@@ -191,11 +200,15 @@ public static class StairGeometry
             }
             foreach (var p in pieces)
                 for (int k = 1; k + 1 < p.Count; k++)
+                {
                     Emit(outV, outT, Lift(p[0], a, b, c), Lift(p[k], a, b, c), Lift(p[k + 1], a, b, c));
+                    if (hasCol) { outC.Add(triCol); outC.Add(triCol); outC.Add(triCol); }
+                }
         }
         if (!changed) return null;
         var m = new Mesh { name = mesh.name + "_cut", indexFormat = outV.Count > 65535 ? UnityEngine.Rendering.IndexFormat.UInt32 : UnityEngine.Rendering.IndexFormat.UInt16 };
         m.SetVertices(outV);
+        if (outC.Count == outV.Count) m.SetColors(outC);
         m.SetTriangles(outT, 0);
         m.RecalculateNormals();
         m.RecalculateBounds();
@@ -286,7 +299,7 @@ public class StairsInModel
     readonly Dictionary<MeshFilter, Mesh> originals = new Dictionary<MeshFilter, Mesh>();
     GameObject stairsGo;
 
-    public void Apply(GameObject visual, float yaw, Vector3 center, List<MRUKRoom> rooms, HouseEdits edits, bool colliders, int layer)
+    public void Apply(GameObject visual, float yaw, Vector3 center, List<MRUKRoom> rooms, HouseEdits edits, bool colliders, int layer, bool shaded = false)
     {
         if (!visual) return;
         // Undo the previous application.
@@ -319,7 +332,7 @@ public class StairsInModel
             holes.Add((rects, r.bottomY - center.y + 1.0f, r.topY - center.y + 0.3f));
         }
 
-        stairsGo = UnityModelLoader.LoadToScene(model);
+        stairsGo = UnityModelLoader.LoadToScene(model, shaded);
         if (stairsGo)
         {
             stairsGo.name = "Stairs";

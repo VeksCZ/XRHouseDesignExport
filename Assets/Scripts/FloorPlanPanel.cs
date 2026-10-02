@@ -303,7 +303,7 @@ public class FloorPlanPanel : MonoBehaviour
         bool grip = OVRInput.Get(OVRInput.Button.PrimaryHandTrigger, OVRInput.Controller.RTouch);
         if (!grabbed)
         {
-            if (grip && Physics.Raycast(rightHand.position, rightHand.forward, out RaycastHit hit) && hit.collider.gameObject == handle)
+            if (GrabLock.GripPressed && Physics.Raycast(rightHand.position, rightHand.forward, out RaycastHit hit) && hit.collider.gameObject == handle && GrabLock.TryTake(this))
             {
                 grabbed = true;
                 OVRInput.SetControllerVibration(0.1f, 0.1f, OVRInput.Controller.RTouch); Invoke(nameof(StopVib), 0.05f);
@@ -313,7 +313,7 @@ public class FloorPlanPanel : MonoBehaviour
         }
         else
         {
-            if (!grip) { grabbed = false; return; }
+            if (!grip) { grabbed = false; GrabLock.Release(this); return; }
             canvas.transform.position = rightHand.TransformPoint(grabOff);
             canvas.transform.rotation = rightHand.rotation * grabRotOff;
         }

@@ -62,7 +62,9 @@ public class WalkThroughMode : MonoBehaviour
     void ApplyStairs()
     {
         if (!walkVisual || walkRooms == null) return;
-        stairs.Apply(walkVisual, yaw, center, walkRooms, HouseEditsStore.Current, true, WalkLayer);
+        // The scanned-mesh models already contain the real stairs and doorways as scanned.
+        if (walkModel != WalkModel.Anchor) return;
+        stairs.Apply(walkVisual, yaw, center, walkRooms, HouseEditsStore.Current, true, WalkLayer, shaded: true);
         walkDoors.Build(walkVisual, yaw, center, walkRooms, HouseEditsStore.Current, WalkLayer, doors.Select(d => d.r));
         Physics.SyncTransforms();
     }
@@ -90,7 +92,7 @@ public class WalkThroughMode : MonoBehaviour
     /// you were looking at it). Without it the scan's real-world alignment is used if you stand inside the
     /// scanned floor area, otherwise the middle of the largest room.
     /// </summary>
-    public bool Enter(Vector3? modelFloorPoint, Quaternion? modelRotation)
+    public async System.Threading.Tasks.Task<bool> Enter(Vector3? modelFloorPoint, Quaternion? modelRotation)
     {
         if (isOn) Exit();
         if (!ResolveRig()) { uiLog?.AddLog("<color=red>Walk: no camera rig.</color>"); return false; }
@@ -100,20 +102,19 @@ public class WalkThroughMode : MonoBehaviour
 
         center = DollHouseVisualizer.CalculateCenter(rooms);
         yaw = FloorPlanBuilder.CorrectionYaw(MRUKPlanExtractor.Extract(rooms));
-        var model = XRModelFactory.CreateAnchorAnalytical(rooms, yaw, center);
-        XRModelFactory.AddCeilings(model, rooms); // walking inside, a ceiling is what tells you you're indoors
-        var visual = UnityModelLoader.LoadToScene(model);
-        if (visual == null) { uiLog?.AddLog("<color=red>Walk: model build failed.</color>"); return false; }
+        walkRooms = rooms;
 
         root = new GameObject("WalkRoot");
-        visual.transform.SetParent(root.transform, false);
         // Kinematic body: the colliders get moved every frame, which PhysX handles far better for a kinematic
         // rigidbody's children than for "static" colliders.
         var rb = root.AddComponent<Rigidbody>();
         rb.isKinematic = true; rb.useGravity = false;
-        PrepareParts();
-        walkRooms = rooms; walkVisual = visual;
-        ApplyStairs();
+        if (!await BuildVisual())
+        {
+            Destroy(root); root = null; walkRooms = null;
+            uiLog?.AddLog("<color=red>Walk: model build failed.</color>");
+            return false;
+        }
 
         isOn = true; Active = this;
         seated = false; seatedLift = 0f;
@@ -132,6 +133,70 @@ public class WalkThroughMode : MonoBehaviour
         var cam = Camera.main;
         if (cam != null) { prevNearClip = cam.nearClipPlane; cam.nearClipPlane = 0.05f; }
         uiLog?.AddLog("<color=green>Walk ON</color> - L stick move, R stick turn / push forward to teleport, L stick click = seated, A = back");
+        return true;
+    }
+
+    // ---------- which model you walk through ----------
+
+    public enum WalkModel { Anchor, Mesh, Raw }
+    WalkModel walkModel = WalkModel.Anchor;
+    bool rebuilding;
+
+    public string ModelLabel => walkModel switch
+    {
+        WalkModel.Anchor => "Walk: Anchor",
+        WalkModel.Mesh => "Walk: Mesh",
+        _ => "Walk: Raw",
+    };
+
+    /// <summary>Anchor (clean boxes, edits: doors/stairs) -> Mesh (scanned mesh + door/window frames) -> Raw
+    /// (scanned mesh only). Rebuilt in place - you stay exactly where you are.</summary>
+    public async System.Threading.Tasks.Task<string> CycleModel()
+    {
+        if (rebuilding) return ModelLabel;
+        walkModel = (WalkModel)(((int)walkModel + 1) % 3);
+        if (isOn)
+        {
+            rebuilding = true;
+            try { await BuildVisual(); } finally { rebuilding = false; }
+        }
+        return ModelLabel;
+    }
+
+    /// <summary>(Re)builds the model under root for the current WalkModel, replacing any previous one.</summary>
+    async System.Threading.Tasks.Task<bool> BuildVisual()
+    {
+        if (!root || walkRooms == null) return false;
+        stairs.Dispose();
+        walkDoors.Clear();
+        if (walkVisual)
+        {
+            foreach (var mf in walkVisual.GetComponentsInChildren<MeshFilter>(true)) if (mf.sharedMesh) Destroy(mf.sharedMesh);
+            foreach (var mr in walkVisual.GetComponentsInChildren<Renderer>(true)) if (mr.sharedMaterial) Destroy(mr.sharedMaterial);
+            walkVisual.transform.SetParent(null, false); // Destroy is deferred - get it out of the model right now
+            walkVisual.SetActive(false);
+            Destroy(walkVisual);
+            walkVisual = null;
+        }
+        doors.Clear();
+
+        XRHouseModel model;
+        if (walkModel == WalkModel.Anchor)
+        {
+            model = XRModelFactory.CreateAnchorAnalytical(walkRooms, yaw, center);
+            XRModelFactory.AddCeilings(model, walkRooms); // walking inside, a ceiling is what tells you you're indoors
+        }
+        else if (walkModel == WalkModel.Mesh) model = await XRModelFactory.CreateMeshAnalytical(walkRooms, yaw, center, forDollhouse: false);
+        else model = await XRModelFactory.CreateRawScan(walkRooms, yaw, center, forDollhouse: false);
+        if (!root) return false; // left while building
+
+        var visual = UnityModelLoader.LoadToScene(model, shaded: true, classifyByNormal: walkModel != WalkModel.Anchor);
+        if (visual == null) return false;
+        visual.transform.SetParent(root.transform, false);
+        walkVisual = visual;
+        PrepareParts();
+        ApplyStairs();
+        Physics.SyncTransforms();
         return true;
     }
 
@@ -210,7 +275,7 @@ public class WalkThroughMode : MonoBehaviour
     {
         doors.Clear();
         var seeThrough = Shader.Find("Sprites/Default");
-        foreach (var mf in root.GetComponentsInChildren<MeshFilter>())
+        foreach (var mf in walkVisual.GetComponentsInChildren<MeshFilter>())
         {
             mf.gameObject.layer = WalkLayer;
             var mr = mf.GetComponent<MeshRenderer>();
@@ -221,8 +286,9 @@ public class WalkThroughMode : MonoBehaviour
                 {
                     var c = mr.sharedMaterial.color;
                     Destroy(mr.sharedMaterial);
-                    // Sprites/Default multiplies by vertex colour - give the generated mesh explicit white ones.
-                    mf.sharedMesh.colors = WhiteColors(mf.sharedMesh.vertexCount);
+                    // Sprites/Default multiplies by vertex colour - a shaded mesh already has its colour there,
+                    // a plain one gets explicit white ones.
+                    if (mf.sharedMesh.colors.Length == 0) mf.sharedMesh.colors = WhiteColors(mf.sharedMesh.vertexCount);
                     var m = new Material(seeThrough) { name = "DOOR_WALK", color = new Color(c.r, c.g, c.b, DoorAlphaFar) };
                     mr.sharedMaterial = m;
                     doors.Add((mr, m, c));
@@ -263,19 +329,21 @@ public class WalkThroughMode : MonoBehaviour
         return true;
     }
 
-    /// <summary>Middle of the largest floor slab, top surface, in model space (root-local).</summary>
+    /// <summary>Middle of the largest room's floor anchor, in model space - works for every WalkModel (the scanned
+    /// meshes have no separate floor parts to look for).</summary>
     Vector3 LargestRoomPoint()
     {
         float best = -1f; Vector3 point = Vector3.zero;
-        foreach (var mf in root.GetComponentsInChildren<MeshFilter>())
-        {
-            if (mf.name != "FLOOR" || !mf.sharedMesh) continue;
-            var b = mf.sharedMesh.bounds;
-            float area = b.size.x * b.size.z;
-            if (area <= best) continue;
-            best = area;
-            point = root.transform.InverseTransformPoint(mf.transform.TransformPoint(new Vector3(b.center.x, b.max.y, b.center.z)));
-        }
+        Quaternion g = Quaternion.Euler(0, yaw, 0);
+        foreach (var r in walkRooms)
+            foreach (var f in r.FloorAnchors)
+            {
+                if (f == null || !f.PlaneRect.HasValue) continue;
+                float area = f.PlaneRect.Value.width * f.PlaneRect.Value.height;
+                if (area <= best) continue;
+                best = area;
+                point = g * (f.transform.position - center);
+            }
         return point;
     }
 

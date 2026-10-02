@@ -110,7 +110,7 @@ public class WalkDoors
         part.color = LeafColor;
         var model = new XRHouseModel();
         model.rooms.Add(new XRRoomModel { roomName = "Leaf", parts = { part } });
-        var go = UnityModelLoader.LoadToScene(model);
+        var go = UnityModelLoader.LoadToScene(model, shaded: true);
         go.transform.SetParent(pivot.transform, false);
         foreach (var mf in go.GetComponentsInChildren<MeshFilter>())
         {
