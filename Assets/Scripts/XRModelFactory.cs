@@ -133,6 +133,62 @@ public static class XRModelFactory
         return model;
     }
 
+    const float DimLineExportThickness = 0.012f; // metres - a real 1:1 export has no Dollhouse zoom to fight, so a plain small constant reads as a thin line at any normal viewing distance.
+
+    /// <summary>
+    /// The clean anchor-box model plus its own dimension lines (wall lengths/heights, opening width/height/sill)
+    /// baked into real geometry - a dedicated export tier, since OBJ/GLB have no notion of a Dollhouse-only
+    /// LineRenderer overlay. The numbers themselves aren't included (neither format has a practical way to embed
+    /// legible text in a mesh); the coloured lines alone still show, at a glance, which walls/openings were
+    /// measured and whether a measurement is a whole-wall/ceiling figure (green) or an opening's own figure
+    /// (purple) - the same convention as a floor plan's own outer/inner dimension lines.
+    /// </summary>
+    public static XRHouseModel CreateAnchorAnalyticalWithDimensions(List<MRUKRoom> rooms, float rotation, Vector3 center)
+    {
+        var model = CreateAnchorAnalytical(rooms, rotation, center);
+        var dimRoom = new XRRoomModel { roomName = "Dimensions" };
+        foreach (var d in model.dimensions)
+        {
+            string mat = d.outer ? "DIM_OUTER" : "DIM_INNER";
+            Color color = d.outer ? DimensionColors.Outer : DimensionColors.Inner;
+            dimRoom.parts.Add(CreateLineBoxPart(d.lineStart, d.lineEnd, DimLineExportThickness, mat, color));
+        }
+        model.rooms.Add(dimRoom);
+        return model;
+    }
+
+    /// <summary>
+    /// A thin oriented box from a to b, both already in the model's own final local space (as XRDimensionLabel's
+    /// own lineStart/lineEnd are - see AddWallLengthLabel) - unlike CreateBoxPart, this applies no further
+    /// centre/rotation transform of its own, since that was already baked into a/b when they were computed.
+    /// </summary>
+    private static XRMeshPart CreateLineBoxPart(Vector3 a, Vector3 b, float thickness, string mat, Color color)
+    {
+        var part = new XRMeshPart { name = "DimLine", materialName = mat, color = color };
+        Vector3 dir = b - a;
+        float len = dir.magnitude;
+        if (len < 0.001f) return part; // degenerate (e.g. a door sill flush with the floor) - an empty part is harmless.
+        dir /= len;
+        Vector3 up = Mathf.Abs(Vector3.Dot(dir, Vector3.up)) > 0.99f ? Vector3.right : Vector3.up;
+        Vector3 side = Vector3.Cross(dir, up).normalized * (thickness / 2f);
+        Vector3 vert = Vector3.Cross(side, dir).normalized * (thickness / 2f);
+        Vector3[] v = {
+            a - side - vert, a + side - vert, a + side + vert, a - side + vert, // "front" (at a)
+            b - side - vert, b + side - vert, b + side + vert, b - side + vert  // "back" (at b)
+        };
+        int[] t = {
+            0, 3, 2, 0, 2, 1, // Front
+            4,5,6, 4,6,7, // Back
+            1,2,6, 1,6,5, // Right
+            0,4,7, 0,7,3, // Left
+            3,7,6, 3,6,2, // Top
+            0,1,5, 0,5,4  // Bottom
+        };
+        part.vertices.AddRange(v);
+        part.triangles.AddRange(t);
+        return part;
+    }
+
     public static async Task<XRHouseModel> CreateMeshAnalytical(List<MRUKRoom> rooms, float rotation, Vector3 center, bool forDollhouse = false)
     {
         var model = new XRHouseModel { center = center, globalRotation = rotation };
@@ -564,6 +620,7 @@ return model;
             lineStart = gRot * (worldPos - tangent * (wW / 2f) - center),
             lineEnd = gRot * (worldPos + tangent * (wW / 2f) - center),
             text = $"{wW:0.00} m",
+            outer = true,
         });
     }
 
@@ -592,6 +649,7 @@ return model;
                 lineStart = gRot * (bottom - center),
                 lineEnd = gRot * (top - center),
                 text = text,
+                outer = true,
             });
         }
 
@@ -629,6 +687,7 @@ return model;
             lineStart = gRot * (lineStart - center),
             lineEnd = gRot * (lineEnd - center),
             text = text,
+            outer = false,
         });
 
         Vector3 topEdge = facePos + Vector3.up * (oh / 2f);

@@ -12,10 +12,12 @@ public static class MRUKPathUtility
     public const string MODEL_MESH_ANALYTICAL_GLB = "12_Model_Analytical_Mesh.glb";
     public const string MODEL_MESH_GLB = "13_Model_Reconstruction.glb";
     public const string MODEL_RAW_GLB = "14_Model_Raw_Scan.glb";
+    public const string MODEL_DIM_GLB = "15_Model_Analytical_Dimensioned.glb";
     public const string MODEL_CLEAN_OBJ = "21_Model_Analytical_Anchors.obj";
     public const string MODEL_MESH_ANALYTICAL_OBJ = "22_Model_Analytical_Mesh.obj";
     public const string MODEL_MESH_OBJ = "23_Model_Reconstruction.obj";
     public const string MODEL_RAW_OBJ = "24_Model_Raw_Scan.obj";
+    public const string MODEL_DIM_OBJ = "25_Model_Analytical_Dimensioned.obj";
     public const string MODEL_MTL = "00_Materials.mtl";
     
     public const string DATA_JSON = "90_Data_Rooms.json";

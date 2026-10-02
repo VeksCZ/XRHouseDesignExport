@@ -24,8 +24,14 @@ public class DollHouseVisualizer : MonoBehaviour
     private bool grabbed = false;
     private Vector3 off;
     private Quaternion rotOff;
-    private readonly List<(Transform text, Vector3 localLineDir)> dimensionLabels = new List<(Transform, Vector3)>();
+    private readonly List<(Transform text, Vector3 localLineDir, TextMeshPro tmp, LineRenderer line)> dimensionLabels = new List<(Transform, Vector3, TextMeshPro, LineRenderer)>();
     private enum DollhouseMode { AnchorAnalytical, AnchorWithDimensions, MeshAnalytical, RawMesh }
+    // Real-world target sizes for dimension lines/text, held constant regardless of the Dollhouse's own zoom -
+    // see the per-frame rescale in Update(). A fixed LOCAL-space size (the old approach) instead grows or
+    // shrinks along with the model itself as the user zooms, which is exactly why the lines kept looking
+    // "hrozně tlusté" (thick) once the model was scaled up toward its real 1:1 size.
+    const float DimLineWidthMeters = 0.0015f;
+    const float DimTextWorldHeight = 0.07f;
 
     public bool IsOn => isOn;
     public bool ToggleOnOff() { isOn = !isOn; Refresh(); return isOn; }
@@ -127,10 +133,15 @@ public class DollHouseVisualizer : MonoBehaviour
     /// </summary>
     private void AddDimensionLabels(List<XRDimensionLabel> dims) {
         dimensionLabels.Clear();
-        // Same pale yellow as the floor plan's own dimension numbers/lines, for a consistent look between the two.
-        var lineColor = new Color(1f, 0.92f, 0.55f, 0.9f);
-        var lineMat = new Material(Shader.Find("Universal Render Pipeline/Unlit")) { color = lineColor };
-        if (lineMat.HasProperty("_Cull")) lineMat.SetFloat("_Cull", (float)UnityEngine.Rendering.CullMode.Off);
+        // Same green/purple as a floor plan's own outer/inner dimension lines (DimensionColors) - two shared
+        // materials, not one per label, so a rebuild never leaks more than these two unique instances.
+        var outerMat = new Material(Shader.Find("Universal Render Pipeline/Unlit")) { color = DimensionColors.Outer };
+        var innerMat = new Material(Shader.Find("Universal Render Pipeline/Unlit")) { color = DimensionColors.Inner };
+        foreach (var m in new[] { outerMat, innerMat }) if (m.HasProperty("_Cull")) m.SetFloat("_Cull", (float)UnityEngine.Rendering.CullMode.Off);
+        // The number itself stays a single neutral colour regardless of outer/inner, exactly like a floor
+        // plan's own dimension text (dark on paper, white here for contrast against the model) - only the line
+        // it belongs to is colour-coded.
+        var textColor = Color.white;
 
         foreach (var d in dims) {
             // The line sits on its own identity-transform child, separate from the label's own positioned one
@@ -139,16 +150,15 @@ public class DollHouseVisualizer : MonoBehaviour
             var lineGo = new GameObject("DimLine_" + d.text);
             lineGo.transform.SetParent(root.transform, false);
             var lr = lineGo.AddComponent<LineRenderer>();
-            lr.material = lineMat;
+            lr.material = d.outer ? outerMat : innerMat;
             lr.useWorldSpace = false;
             lr.positionCount = 2;
             lr.SetPosition(0, d.lineStart);
             lr.SetPosition(1, d.lineEnd);
-            // Thin - the model-space width used to be 0.02 (2cm), which at the Dollhouse's zoomable scale
-            // range (0.005-1.0) could render anywhere from hairline to a genuinely thick 2cm bar; 0.006 stays
-            // thin across that whole range and reads as a real line, not a slab.
-            lr.startWidth = lr.endWidth = 0.006f;
             lr.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+            // Width is set every frame in Update() (DimLineWidthMeters / current scale) so its real-world
+            // thickness stays constant regardless of Dollhouse zoom - left at 0 here, not a guess, since the
+            // very first Update() tick overwrites it before the frame is ever rendered.
 
             var go = new GameObject("Dim_" + d.text);
             go.transform.SetParent(root.transform, false);
@@ -156,10 +166,9 @@ public class DollHouseVisualizer : MonoBehaviour
             go.transform.localRotation = d.rotation;
             var tmp = go.AddComponent<TextMeshPro>();
             tmp.text = d.text;
-            tmp.fontSize = 1.6f;
             tmp.alignment = TextAlignmentOptions.Center;
             tmp.textWrappingMode = TextWrappingModes.NoWrap;
-            tmp.color = lineColor;
+            tmp.color = textColor;
             var mat = tmp.fontMaterial;
             if (mat.HasProperty("_CullMode")) mat.SetFloat("_CullMode", (float)UnityEngine.Rendering.CullMode.Off);
             else if (mat.HasProperty("_Cull")) mat.SetFloat("_Cull", (float)UnityEngine.Rendering.CullMode.Off);
@@ -169,7 +178,7 @@ public class DollHouseVisualizer : MonoBehaviour
             // in every axis), Update() only ever flips it 180 degrees around the LINE's own axis - it stays
             // visually anchored to the line, and just picks whichever of its two possible readings faces you.
             Vector3 localLineDir = (d.lineEnd - d.lineStart).sqrMagnitude > 1e-6f ? (d.lineEnd - d.lineStart).normalized : Vector3.right;
-            dimensionLabels.Add((go.transform, localLineDir));
+            dimensionLabels.Add((go.transform, localLineDir, tmp, lr));
         }
     }
 
@@ -211,22 +220,28 @@ public class DollHouseVisualizer : MonoBehaviour
         if (!root || !isOn) return;
 
         if (dimensionLabels.Count > 0) {
+            // Lines/text are children of root, so a fixed LOCAL width/font size would grow or shrink right
+            // along with root.transform.localScale as the user zooms the Dollhouse - dividing by the current
+            // scale here cancels that out, so their REAL-WORLD size (DimLineWidthMeters / DimTextWorldHeight)
+            // stays constant whether the model is shrunk to a miniature or blown up to its real 1:1 size.
+            float invScale = 1f / Mathf.Max(scale, 0.0001f);
             var cam = Camera.main;
-            if (cam != null) {
-                Vector3 camPos = cam.transform.position;
-                foreach (var (t, localDir) in dimensionLabels) {
-                    if (!t) continue;
-                    // Stays visually attached to its own line: reading direction (local right) is locked to the
-                    // line's own axis, only the perpendicular-to-that-axis component of "towards the camera" is
-                    // free, so it only ever flips 180 degrees around the line rather than spinning freely.
-                    Vector3 right = root.transform.TransformDirection(localDir).normalized;
-                    Vector3 forward = Vector3.ProjectOnPlane(camPos - t.position, right);
-                    if (forward.sqrMagnitude < 1e-6f) forward = Vector3.ProjectOnPlane(Vector3.up, right);
-                    if (forward.sqrMagnitude < 1e-6f) continue; // camera exactly on the line's own axis - keep last frame's rotation
-                    forward.Normalize();
-                    Vector3 up = Vector3.Cross(forward, right);
-                    t.rotation = Quaternion.LookRotation(forward, up);
-                }
+            Vector3 camPos = cam != null ? cam.transform.position : Vector3.zero;
+            foreach (var (t, localDir, tmp, line) in dimensionLabels) {
+                if (!t) continue;
+                if (line) line.startWidth = line.endWidth = DimLineWidthMeters * invScale;
+                if (tmp) tmp.fontSize = DimTextWorldHeight * invScale;
+                if (cam == null) continue;
+                // Stays visually attached to its own line: reading direction (local right) is locked to the
+                // line's own axis, only the perpendicular-to-that-axis component of "towards the camera" is
+                // free, so it only ever flips 180 degrees around the line rather than spinning freely.
+                Vector3 right = root.transform.TransformDirection(localDir).normalized;
+                Vector3 forward = Vector3.ProjectOnPlane(camPos - t.position, right);
+                if (forward.sqrMagnitude < 1e-6f) forward = Vector3.ProjectOnPlane(Vector3.up, right);
+                if (forward.sqrMagnitude < 1e-6f) continue; // camera exactly on the line's own axis - keep last frame's rotation
+                forward.Normalize();
+                Vector3 up = Vector3.Cross(forward, right);
+                t.rotation = Quaternion.LookRotation(forward, up);
             }
         }
 

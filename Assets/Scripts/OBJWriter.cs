@@ -33,5 +33,6 @@ public static class OBJWriter
         return sb.ToString();
     }
 
-    public static string GenerateMTL() => "newmtl WALL\nKd 0.42 0.42 0.45\nnewmtl FLOOR\nKd 0.75 0.75 0.78\nnewmtl DOOR\nKd 0.55 0.35 0.18\nnewmtl WINDOW\nKd 0.25 0.60 0.92";
+    // DIM_OUTER/DIM_INNER match DimensionColors.Outer/Inner exactly, for the dimensioned export model.
+    public static string GenerateMTL() => "newmtl WALL\nKd 0.42 0.42 0.45\nnewmtl FLOOR\nKd 0.75 0.75 0.78\nnewmtl DOOR\nKd 0.55 0.35 0.18\nnewmtl WINDOW\nKd 0.25 0.60 0.92\nnewmtl DIM_OUTER\nKd 0.184 0.522 0.353\nnewmtl DIM_INNER\nKd 0.502 0.353 0.835";
 }

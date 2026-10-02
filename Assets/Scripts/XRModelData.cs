@@ -31,6 +31,19 @@ public class XRDimensionLabel
     /// space as 'position'.</summary>
     public Vector3 lineStart, lineEnd;
     public string text;
+    /// <summary>Same outer/inner split as a floor plan's own dimension lines: true for a whole wall's length or
+    /// its ceiling height (measured "from outside", drawn green), false for an opening's width/height/sill
+    /// (measured "from inside", drawn purple) - see DimensionColors and MRUKReportBuilder's .dimline CSS.</summary>
+    public bool outer;
+}
+
+/// <summary>The exact green/purple used by a floor plan's own outer/inner dimension lines (MRUKReportBuilder's
+/// .dimline.outer and .dimline CSS rules), reused everywhere else a dimension line is drawn - the 3D Dollhouse
+/// and the dimensioned export model - so the same convention reads the same way in every view.</summary>
+public static class DimensionColors
+{
+    public static readonly Color Outer = new Color32(0x2f, 0x85, 0x5a, 255);
+    public static readonly Color Inner = new Color32(0x80, 0x5a, 0xd5, 255);
 }
 
 [System.Serializable]

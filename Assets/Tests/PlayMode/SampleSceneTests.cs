@@ -342,6 +342,49 @@ public class SampleSceneTests
         UnityEngine.Object.Destroy(rig);
     }
 
+    /// <summary>
+    /// CreateAnchorAnalyticalWithDimensions should turn every dimension label into one real, coloured line part
+    /// (a wall's own length/height green/DIM_OUTER, an opening's width/height/sill purple/DIM_INNER), and both
+    /// colours need a real .mtl entry or an OBJ viewer silently drops them (the exact bug OBJWriter.WriteToString's
+    /// own doc comment already warns about for a stale mtllib name).
+    /// </summary>
+    [UnityTest]
+    public IEnumerator RealApartment_DimensionedExport_HasColouredLinesPerDimension()
+    {
+        var rig = new GameObject("OVRCameraRig_Test");
+        rig.AddComponent<OVRCameraRig>();
+        var go = new GameObject("MRUK_Test");
+        var mruk = go.AddComponent<MRUK>();
+        mruk.SceneSettings = new MRUK.MRUKSettings { LoadSceneOnStartup = false, DataSource = MRUK.SceneDataSource.Json };
+        yield return null;
+
+        string path = Path.Combine(Application.dataPath, "Tests", "PlayMode", "Fixtures", "RealApartment7Rooms.json");
+        var load = mruk.LoadSceneFromJsonString(File.ReadAllText(path));
+        yield return Await(load);
+
+        var rooms = MRUKDataProcessor.GetValidRooms(mruk);
+        float angle = FloorPlanBuilder.CorrectionYaw(MRUKPlanExtractor.Extract(rooms));
+        var model = XRModelFactory.CreateAnchorAnalyticalWithDimensions(rooms, angle, Vector3.zero);
+
+        var dimRoom = model.rooms.Last();
+        Assert.That(dimRoom.roomName, Is.EqualTo("Dimensions"));
+        Assert.That(dimRoom.parts.Count, Is.EqualTo(model.dimensions.Count));
+        Assert.That(model.dimensions.Any(d => d.outer), Is.True, "expected at least one outer (wall length/height) dimension");
+        Assert.That(model.dimensions.Any(d => !d.outer), Is.True, "expected at least one inner (opening) dimension");
+        Assert.That(dimRoom.parts.Any(p => p.materialName == "DIM_OUTER"), Is.True);
+        Assert.That(dimRoom.parts.Any(p => p.materialName == "DIM_INNER"), Is.True);
+
+        string obj = OBJWriter.WriteToString(model);
+        Assert.That(obj, Does.Contain("usemtl DIM_OUTER"));
+        Assert.That(obj, Does.Contain("usemtl DIM_INNER"));
+        string mtl = OBJWriter.GenerateMTL();
+        Assert.That(mtl, Does.Contain("newmtl DIM_OUTER"));
+        Assert.That(mtl, Does.Contain("newmtl DIM_INNER"));
+
+        UnityEngine.Object.Destroy(go);
+        UnityEngine.Object.Destroy(rig);
+    }
+
     static void Finish(Report report, string sample, GameObject go)
     {
         string dir = Path.GetFullPath(Path.Combine(Application.dataPath, "..", "Exports", "Test"));

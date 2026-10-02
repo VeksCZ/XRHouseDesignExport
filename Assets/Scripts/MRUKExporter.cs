@@ -287,7 +287,8 @@ public class MRUKExporter : MonoBehaviour
         SetProgress(45, ui);
 
         ui?.AddLog("<color=cyan>[5/6] Exporting models...</color>");
-        Save(XRModelFactory.CreateAnchorAnalytical(rooms, angle, LastHouseCenter), session, MRUKPathUtility.MODEL_CLEAN_OBJ, MRUKPathUtility.MODEL_CLEAN_GLB); SetProgress(60, ui);
+        Save(XRModelFactory.CreateAnchorAnalytical(rooms, angle, LastHouseCenter), session, MRUKPathUtility.MODEL_CLEAN_OBJ, MRUKPathUtility.MODEL_CLEAN_GLB); SetProgress(55, ui);
+        Save(XRModelFactory.CreateAnchorAnalyticalWithDimensions(rooms, angle, LastHouseCenter), session, MRUKPathUtility.MODEL_DIM_OBJ, MRUKPathUtility.MODEL_DIM_GLB); SetProgress(65, ui);
         Save(await XRModelFactory.CreateMeshAnalytical(rooms, angle, LastHouseCenter), session, MRUKPathUtility.MODEL_MESH_ANALYTICAL_OBJ, MRUKPathUtility.MODEL_MESH_ANALYTICAL_GLB); SetProgress(75, ui);
         Save(XRModelFactory.CreateReconstruction(rooms, angle, LastHouseCenter), session, MRUKPathUtility.MODEL_MESH_OBJ, MRUKPathUtility.MODEL_MESH_GLB); SetProgress(85, ui);
         Save(await XRModelFactory.CreateRawScan(rooms, angle, LastHouseCenter), session, MRUKPathUtility.MODEL_RAW_OBJ, MRUKPathUtility.MODEL_RAW_GLB); SetProgress(95, ui);
@@ -304,6 +305,7 @@ public class MRUKExporter : MonoBehaviour
             var rList = new List<MRUKRoom> { r };
 
             Save(XRModelFactory.CreateAnchorAnalytical(rList, angle, LastHouseCenter), rPath, MRUKPathUtility.MODEL_CLEAN_OBJ, MRUKPathUtility.MODEL_CLEAN_GLB);
+            Save(XRModelFactory.CreateAnchorAnalyticalWithDimensions(rList, angle, LastHouseCenter), rPath, MRUKPathUtility.MODEL_DIM_OBJ, MRUKPathUtility.MODEL_DIM_GLB);
             Save(await XRModelFactory.CreateMeshAnalytical(rList, angle, LastHouseCenter), rPath, MRUKPathUtility.MODEL_MESH_ANALYTICAL_OBJ, MRUKPathUtility.MODEL_MESH_ANALYTICAL_GLB);
             Save(XRModelFactory.CreateReconstruction(rList, angle, LastHouseCenter), rPath, MRUKPathUtility.MODEL_MESH_OBJ, MRUKPathUtility.MODEL_MESH_GLB);
             Save(await XRModelFactory.CreateRawScan(rList, angle, LastHouseCenter), rPath, MRUKPathUtility.MODEL_RAW_OBJ, MRUKPathUtility.MODEL_RAW_GLB);
