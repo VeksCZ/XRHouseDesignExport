@@ -52,14 +52,28 @@ public static class MRUKPlanExtractor
                     if (!door && !MRUKDataProcessor.IsWindow(a)) continue;
 
                     float h = a.PlaneRect.Value.height;
-                    outline.openings.Add(new PlanOpening
+                    var opening = new PlanOpening
                     {
                         kind = door ? OpeningKind.Door : OpeningKind.Window,
                         center = new Vector2(a.transform.position.x, a.transform.position.z),
                         width = a.PlaneRect.Value.width,
                         height = h,
                         sill = Mathf.Max(0f, a.transform.position.y - h / 2f - outline.floorY),
-                    });
+                    };
+                    // The user's hinge/swing for this door (edit mode), if set.
+                    var edit = door ? DoorCatalog.FindEdit(HouseEditsStore.Current, a, rooms) : null;
+                    if (edit != null)
+                    {
+                        DoorCatalog.Frame(a, out var c, out var r, out var nrm, out float w, out _);
+                        var front = DoorCatalog.FindRoomAt(rooms, c + nrm * 0.4f);
+                        var back = DoorCatalog.FindRoomAt(rooms, c - nrm * 0.4f);
+                        DoorCatalog.Swing(c, r, nrm, w, h, edit, front, back, out var hinge, out var swing, out _);
+                        opening.hasSwing = true;
+                        opening.doorKind = edit.kind;
+                        opening.hinge = new Vector2(hinge.x, hinge.z);
+                        opening.swingDir = new Vector2(swing.x, swing.z).normalized;
+                    }
+                    outline.openings.Add(opening);
                 }
                 result.Add(outline);
             }
@@ -110,11 +124,9 @@ public static class MRUKPlanExtractor
                     // Same wall line in plan, but another story (or an opening that can't fit into this room's walls).
                     if (worldSillY < dst.floorY - verticalTolerance) continue;
                     if (worldTopY > dst.floorY + dst.ceilingMax + verticalTolerance) continue;
-                    dst.openings.Add(new PlanOpening
-                    {
-                        kind = op.kind, center = op.center, width = op.width, height = op.height, mirrored = true,
-                        sill = Mathf.Max(0f, worldSillY - dst.floorY),
-                    });
+                    var copy = op.Copy(mirroredOverride: true); // keeps the door swing too
+                    copy.sill = Mathf.Max(0f, worldSillY - dst.floorY);
+                    dst.openings.Add(copy);
                 }
             }
     }

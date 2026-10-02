@@ -32,6 +32,19 @@ public class MRUKExporter : MonoBehaviour
 
     public async void OnExportButton() { await ExportAllRooms(uiLog); }
 
+    /// <summary>
+    /// Makes a just-saved copy of the live scan the selected AND active source without reloading it - MRUK already
+    /// holds exactly that data. Used when the first edit is made on the live scan: from then on the edits belong
+    /// to this saved scan.
+    /// </summary>
+    public void AdoptSavedLiveScan(string savedName)
+    {
+        if (string.IsNullOrEmpty(savedName)) return;
+        SelectedSource = savedName;
+        ActiveSource = savedName;
+        HouseEditsStore.Bind(savedName);
+    }
+
     /// <summary>Moves the selection by +1/-1 through the available sources and returns the new one.</summary>
     public string CycleSource(int direction, XRMenu ui = null)
     {
@@ -94,6 +107,8 @@ public class MRUKExporter : MonoBehaviour
             }
         }
         ActiveSource = SelectedSource;
+        // Edits belong to a saved scan; the live scan has none until its first edit saves it (EditModeController).
+        HouseEditsStore.Bind(ActiveSource == LiveSource ? null : ActiveSource);
         return true;
     #else
         await Task.CompletedTask;
@@ -153,6 +168,7 @@ public class MRUKExporter : MonoBehaviour
         }
         string name = SelectedSource;
         bool ok = MRUKSceneCache.DeleteCachedScan(name);
+        if (ok) HouseEditsStore.DeleteFor(name); // its edits mean nothing without the scan
         ui?.AddLog(ok ? $"<color=green>Deleted cached scan '{name}'.</color>" : $"<color=red>Could not delete '{name}'.</color>");
         if (ok)
         {

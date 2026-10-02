@@ -103,7 +103,7 @@ public static class FloorPlanBuilder
                 cornerCeilingHeights = new List<float>(r.cornerCeilingHeights), // same vertex order, unaffected by yaw
             };
             foreach (var o in r.openings)
-                n.openings.Add(new PlanOpening { kind = o.kind, width = o.width, sill = o.sill, height = o.height, mirrored = o.mirrored, center = Rotate(o.center, yawDeg) });
+                n.openings.Add(o.Copy(p => Rotate(p, yawDeg)));
             result.Add(n);
         }
         return result;
@@ -133,7 +133,7 @@ public static class FloorPlanBuilder
                 cornerCeilingHeights = new List<float>(r.cornerCeilingHeights), // RectifiedPolygon keeps the same vertex order/count
             };
             foreach (var o in r.openings)
-                n.openings.Add(new PlanOpening { kind = o.kind, width = o.width, sill = o.sill, height = o.height, mirrored = o.mirrored, center = o.center });
+                n.openings.Add(o.Copy());
             result.Add(n);
         }
         return result;
@@ -445,8 +445,60 @@ public static class FloorPlanBuilder
                     page.lines.Add(new PlanLine(At(t0, h), At(t1, h), style));
                     page.lines.Add(new PlanLine(At(t0, WallBand), At(t1, WallBand), style));
                 }
+                else if (o.hasSwing) AddDoorLeaf(page, e, t0, t1, o, style);
                 else page.lines.Add(new PlanLine(At(t0, h), At(t1, h), style)); // door: one line across the opening
             }
+        }
+    }
+
+    /// <summary>
+    /// A door whose hinge/swing the user has set (edit mode): leaf drawn open at 90 degrees from its hinge jamb
+    /// into the room it opens into, plus the quarter-circle swing back to the closed position - the usual plan
+    /// symbol. Double doors get two half-width leaves, a sliding door two offset lines in the wall, a plain
+    /// opening (no leaf) nothing but its jambs.
+    /// </summary>
+    static void AddDoorLeaf(FloorPlanPage page, Edge e, float t0, float t1, PlanOpening o, PlanStyle style)
+    {
+        Vector2 At(float t, float off) => e.a + e.dir * t + e.outward * off;
+        bool intoThisRoom = Vector2.Dot(o.swingDir, -e.outward) > 0f;
+        float face = intoThisRoom ? 0f : WallBand;            // the wall face on the side the leaf swings to
+        Vector2 side = intoThisRoom ? -e.outward : e.outward;
+        float tHinge = Vector2.Dot(o.hinge - e.a, e.dir);
+        bool hingeAtT0 = Mathf.Abs(tHinge - t0) <= Mathf.Abs(tHinge - t1);
+
+        void Leaf(float th, float tOther)
+        {
+            float r = Mathf.Abs(tOther - th);
+            if (r < 0.05f) return;
+            Vector2 p = At(th, face), along = e.dir * Mathf.Sign(tOther - th);
+            page.lines.Add(new PlanLine(p, p + side * r, style)); // the open leaf
+            const int seg = 10;
+            Vector2 prev = p + side * r;
+            for (int k = 1; k <= seg; k++)
+            {
+                float a = k / (float)seg * Mathf.PI / 2f;
+                Vector2 q = p + side * (Mathf.Cos(a) * r) + along * (Mathf.Sin(a) * r);
+                page.lines.Add(new PlanLine(prev, q, style));
+                prev = q;
+            }
+        }
+
+        switch (o.doorKind)
+        {
+            case DoorKind.Single:
+                if (hingeAtT0) Leaf(t0, t1); else Leaf(t1, t0);
+                break;
+            case DoorKind.Double:
+                float mid = (t0 + t1) / 2f;
+                Leaf(t0, mid); Leaf(t1, mid);
+                break;
+            case DoorKind.Sliding:
+                float h = WallBand / 2f;
+                page.lines.Add(new PlanLine(At(t0, h * 0.6f), At(t1, h * 0.6f), style));
+                page.lines.Add(new PlanLine(At(t0, h * 1.4f), At(t1, h * 1.4f), style));
+                break;
+            case DoorKind.Opening:
+                break; // just the jambs
         }
     }
 

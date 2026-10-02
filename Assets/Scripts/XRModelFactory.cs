@@ -140,6 +140,35 @@ public static class XRModelFactory
 
 
     /// <summary>
+    /// Adds a ceiling surface per floor anchor (the floor outline lifted to the real sampled ceiling height at each
+    /// corner, so sloped ceilings are followed) as an extra "Ceilings" group. Only for the 1:1 walk-through - the
+    /// Dollhouse/export leave ceilings out so the house can be looked into from above. Single surface facing down,
+    /// lighter than the walls so up/down reads at a glance.
+    /// </summary>
+    public static void AddCeilings(XRHouseModel model, List<MRUKRoom> rooms)
+    {
+        Quaternion gRot = Quaternion.Euler(0, model.globalRotation, 0);
+        var group = new XRRoomModel { roomName = "Ceilings" };
+        foreach (var room in rooms) {
+            foreach (var floor in room.FloorAnchors) {
+                if (floor == null || floor.PlaneBoundary2D == null || floor.PlaneBoundary2D.Count < 3) continue;
+                float fallbackH = room.CeilingAnchors.Count > 0
+                    ? Mathf.Abs(room.CeilingAnchors[0].transform.position.y - floor.transform.position.y)
+                    : 2.5f;
+                var part = new XRMeshPart { name = "CEILING", materialName = "CEILING", color = new Color(0.86f, 0.86f, 0.88f) };
+                foreach (var p in floor.PlaneBoundary2D) {
+                    Vector3 w = floor.transform.position + floor.transform.rotation * new Vector3(p.x, p.y, 0);
+                    float y = SampleCeilingHeight(room.CeilingAnchors, w, w.y + fallbackH);
+                    part.vertices.Add(gRot * (new Vector3(w.x, y, w.z) - model.center));
+                }
+                part.triangles.AddRange(PolygonTriangulator.TriangulateHorizontal(part.vertices, false));
+                group.parts.Add(part);
+            }
+        }
+        if (group.parts.Count > 0) model.rooms.Add(group);
+    }
+
+    /// <summary>
     /// The clean anchor-box model plus its own dimension lines (wall lengths/heights, opening width/height/sill)
     /// baked into real geometry (see DimensionGeometry): thin lines with end ticks, green for whole walls/
     /// ceiling heights and purple for openings and the segments between them (the floor plan's convention), and
@@ -715,7 +744,7 @@ return model;
         }
     }
 
-    private static XRMeshPart CreateBoxPart(string name, Vector3 pos, Quaternion rot, Vector3 size, string mat, Vector3 center, float globalRot, Vector3 localOff = default)
+    internal static XRMeshPart CreateBoxPart(string name, Vector3 pos, Quaternion rot, Vector3 size, string mat, Vector3 center, float globalRot, Vector3 localOff = default)
     {
         var part = new XRMeshPart { name = name, materialName = mat, color = GetColorForMaterial(mat) };
         Quaternion gRot = Quaternion.Euler(0, globalRot, 0);

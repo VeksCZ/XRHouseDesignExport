@@ -23,6 +23,11 @@ public class XRMenu : MonoBehaviour
     public DollHouseVisualizer dollhouse;
     public LiveScanOverlay scanOverlay;
     public MiniMapPanel miniMap;
+    public WalkThroughMode walk;
+    public EditModeController editMode;
+    const float EditHoldSeconds = 1f;   // hold Y this long to toggle edit mode (a short tap still saves the log)
+    float yDownTime;
+    bool yHoldFired;
 
     // Canvas units; the canvas is scaled to CanvasScale metres per unit (600 units -> 36 cm at 0.75 m from the eyes).
     const float HeaderH = 40f;          // the draggable handle strip at the very top
@@ -46,7 +51,7 @@ public class XRMenu : MonoBehaviour
     // site - a toggle can also turn itself off from elsewhere (the floor plan panel's own Close button, or a
     // scan-source change invalidating the scan overlay/minimap), and a per-frame sync can never go stale the
     // way scattered manual updates did.
-    Button dollhouseButton, plansButton, scanOverlayButton, miniMapButton;
+    Button dollhouseButton, plansButton, scanOverlayButton, miniMapButton, walkButton;
     XRRayInteractor rightRay;
     float flickCooldown;
     float menuYaw;
@@ -69,6 +74,15 @@ public class XRMenu : MonoBehaviour
         scanOverlay.uiLog = this;
         miniMap ??= FindAnyObjectByType<MiniMapPanel>() ?? gameObject.AddComponent<MiniMapPanel>();
         miniMap.uiLog = this;
+        walk ??= FindAnyObjectByType<WalkThroughMode>() ?? gameObject.AddComponent<WalkThroughMode>();
+        walk.uiLog = this;
+        editMode ??= FindAnyObjectByType<EditModeController>() ?? gameObject.AddComponent<EditModeController>();
+        editMode.uiLog = this;
+        editMode.exporter = exporter;
+        var doorTool = FindAnyObjectByType<DoorEditTool>() ?? gameObject.AddComponent<DoorEditTool>();
+        doorTool.uiLog = this; doorTool.editMode = editMode; doorTool.walk = walk; doorTool.dollhouse = dollhouse;
+        var stairTool = FindAnyObjectByType<StairEditTool>() ?? gameObject.AddComponent<StairEditTool>();
+        stairTool.uiLog = this; stairTool.editMode = editMode; stairTool.walk = walk; stairTool.dollhouse = dollhouse;
         plansPanel = gameObject.AddComponent<FloorPlanPanel>();
 
         BuildMenu();
@@ -135,6 +149,10 @@ public class XRMenu : MonoBehaviour
         // the little preview Quest's own Room Setup shows.
         miniMapButton = XRUi.CreateButton(root, "Minimap", left, top + 3 * (h + gap), w, h, OnToggleMiniMap);
         XRUi.SetTint(miniMapButton, XRUi.ButtonToggleColor);
+        // 1:1 walk-through. Also entered by pointing at the Dollhouse floor + trigger (enters right there);
+        // A leaves it again.
+        walkButton = XRUi.CreateButton(root, "Walk", right, top + 3 * (h + gap), w, h, OnToggleWalk);
+        XRUi.SetTint(walkButton, XRUi.ButtonToggleColor);
 
         float rowY = top + 4 * (h + gap);
         // "Load scan" is gone - every action here (Export, Dollhouse, Floor plans, Scan overlay, Minimap)
@@ -274,7 +292,16 @@ public class XRMenu : MonoBehaviour
         // Right trigger clicks whatever button the ray points at. The XR UI module only handles hover here
         // (the scene never enables the Input System actions that would deliver "press"), and the rest of the
         // app already reads the controllers through OVRInput.
-        if (OVRInput.GetDown(OVRInput.Button.PrimaryIndexTrigger, OVRInput.Controller.RTouch)) ClickUnderRay();
+        // Not on a button: in edit mode the trigger belongs to the active edit tool; otherwise, pointing at the
+        // Dollhouse floor, it walks into the model right there.
+        if (OVRInput.GetDown(OVRInput.Button.PrimaryIndexTrigger, OVRInput.Controller.RTouch) && !ClickUnderRay())
+        {
+            if (editMode != null && editMode.IsOn) editMode.OnTrigger();
+            else if (walk != null && walk.IsOn) walk.TryToggleDoor(); // open/close the door leaf you point at
+            else TryEnterWalkFromDollhouse();
+        }
+
+        bool walking = walk != null && walk.IsOn;
 
         // Right hand: B = open/close the whole menu, A = dollhouse on/off, stick left/right = dollhouse mode
         // (only while it's on and floor plans are closed - otherwise the stick pages floor plans instead).
@@ -282,13 +309,24 @@ public class XRMenu : MonoBehaviour
         // shortcut for Export, at the cost of one for closing the menu, not worth it - Export is still one
         // click away on the menu itself.
         if (OVRInput.GetDown(OVRInput.Button.Two, OVRInput.Controller.RTouch)) OnToggleMenu();
-        if (OVRInput.GetDown(OVRInput.Button.One, OVRInput.Controller.RTouch)) OnToggleHouseView();
+        // While walking, A leaves the walk-through (back to the Dollhouse, if it was up) instead.
+        if (OVRInput.GetDown(OVRInput.Button.One, OVRInput.Controller.RTouch)) { if (walking) OnToggleWalk(); else OnToggleHouseView(); }
         HandleMenuDrag();
 
-        // Left hand: Y = save log, X = save scan, stick click = floor plans, stick left/right = scan source.
-        if (OVRInput.GetDown(OVRInput.Button.Two, OVRInput.Controller.LTouch)) SaveLogToFile();
+        // Left hand: Y tap = save log, Y hold (1 s) = edit mode on/off, X = save scan, stick click = floor plans
+        // (seated/standing while walking), stick left/right = scan source.
+        if (OVRInput.GetDown(OVRInput.Button.Two, OVRInput.Controller.LTouch)) { yDownTime = Time.time; yHoldFired = false; }
+        if (OVRInput.Get(OVRInput.Button.Two, OVRInput.Controller.LTouch) && !yHoldFired && Time.time - yDownTime >= EditHoldSeconds)
+        {
+            yHoldFired = true;
+            editMode?.Toggle();
+        }
+        if (OVRInput.GetUp(OVRInput.Button.Two, OVRInput.Controller.LTouch) && !yHoldFired) SaveLogToFile();
         if (OVRInput.GetDown(OVRInput.Button.One, OVRInput.Controller.LTouch)) OnSaveScan();
-        if (OVRInput.GetDown(OVRInput.Button.PrimaryThumbstick, OVRInput.Controller.LTouch)) OnShowPlans();
+        if (OVRInput.GetDown(OVRInput.Button.PrimaryThumbstick, OVRInput.Controller.LTouch)) { if (walking) walk.ToggleSeated(); else OnShowPlans(); }
+
+        // Both sticks belong to the walk-through (move / turn / teleport) - no flick shortcuts while walking.
+        if (walking) return;
 
         flickCooldown -= Time.deltaTime;
         if (flickCooldown > 0f) return;
@@ -323,6 +361,7 @@ public class XRMenu : MonoBehaviour
         if (dollhouseButton != null) XRUi.SetTint(dollhouseButton, dollhouse != null && dollhouse.IsOn ? XRUi.ButtonOnColor : XRUi.ButtonToggleColor);
         if (scanOverlayButton != null) XRUi.SetTint(scanOverlayButton, scanOverlay != null && scanOverlay.IsOn ? XRUi.ButtonOnColor : XRUi.ButtonToggleColor);
         if (miniMapButton != null) XRUi.SetTint(miniMapButton, miniMap != null && miniMap.IsOn ? XRUi.ButtonOnColor : XRUi.ButtonToggleColor);
+        if (walkButton != null) XRUi.SetTint(walkButton, walk != null && walk.IsOn ? XRUi.ButtonOnColor : XRUi.ButtonToggleColor);
     }
 
     /// <summary>Opens/closes the whole wrist menu (bound to B - see the comment where it's read).</summary>
@@ -366,12 +405,59 @@ public class XRMenu : MonoBehaviour
     }
     void StopMenuVib() => OVRInput.SetControllerVibration(0, 0, OVRInput.Controller.RTouch);
 
-    void ClickUnderRay()
+    /// <summary>Clicks the UI button under the ray. True if the ray was on any UI at all (so the trigger press is
+    /// "used up" and must not also act on something behind the panel).</summary>
+    bool ClickUnderRay()
     {
-        if (rightRay == null || !rightRay.TryGetCurrentUIRaycastResult(out RaycastResult hit) || hit.gameObject == null) return;
+        if (rightRay == null || !rightRay.TryGetCurrentUIRaycastResult(out RaycastResult hit) || hit.gameObject == null) return false;
         var button = hit.gameObject.GetComponentInParent<Button>();
         if (button != null && button.IsInteractable()) button.onClick.Invoke();
+        return true;
     }
+
+    void TryEnterWalkFromDollhouse()
+    {
+        if (walk == null || walk.IsOn || dollhouse == null || !dollhouse.IsOn || dollhouse.IsDragging) return;
+        if (!dollhouse.TryGetPointedFloor(out Vector3 point)) return;
+        if (walk.Enter(point, dollhouse.FacingYaw))
+        {
+            dollhouse.SetHidden(true);
+            SetStatus("Walk");
+        }
+    }
+
+    /// <summary>Walk on/off. Entered from here (not from a Dollhouse point) it uses the scan's own real-world
+    /// alignment when you're standing inside the scanned area, else the middle of the largest room.</summary>
+    public async void OnToggleWalk()
+    {
+        if (walk == null) return;
+        if (walk.IsOn)
+        {
+            walk.Exit();
+            dollhouse?.SetHidden(false);
+            SetStatus(dollhouse != null && dollhouse.IsOn ? $"Dollhouse: {dollhouse.ModeLabel}" : "Ready");
+            return;
+        }
+        if (!RequireExporter()) return;
+        await Busy("Loading...");
+        if (!await exporter.EnsureSelectedSourceLoaded(this)) { SetStatus("ERROR"); return; }
+        if (!exporter.HasValidRooms())
+        {
+            AddLog("<color=red>No rooms in this scan.</color>");
+            SetStatus("No rooms");
+            return;
+        }
+        await Busy("Building...");
+        if (walk.Enter(null, null))
+        {
+            dollhouse?.SetHidden(true);
+            SetStatus("Walk");
+        }
+        else SetStatus("ERROR");
+    }
+
+    /// <summary>For other components that change the selected scan (e.g. edit mode saving the live scan).</summary>
+    public void RefreshSourceLabel() => RefreshScanLabel();
 
     void RefreshScanLabel()
     {
@@ -389,6 +475,8 @@ public class XRMenu : MonoBehaviour
     async void OnCycleSource(int direction)
     {
         if (!RequireExporter()) return;
+        // The walk-through model belongs to the scan it was built from - leave it before switching.
+        if (walk != null && walk.IsOn) OnToggleWalk();
         exporter.CycleSource(direction, this);
         RefreshScanLabel();
 

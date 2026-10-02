@@ -36,6 +36,120 @@ public class DollHouseVisualizer : MonoBehaviour
     public bool IsOn => isOn;
     public bool ToggleOnOff() { isOn = !isOn; Refresh(); return isOn; }
 
+    // Walk-through support: while walking the Dollhouse stays built but hidden, and pointing at its floor shows
+    // a little figure where you'd enter (right trigger enters there - see XRMenu).
+    private bool hidden;
+    private GameObject enterMarker;
+    private Mesh enterMarkerMesh;
+    private List<(Transform t, Vector3[] v, int[] tri)> floorCache;
+    const float MarkerHeight = 1.7f, MarkerWidth = 0.4f; // model metres - a person-sized figure at any zoom
+
+    private float modelYaw; private Vector3 modelCenter;
+
+    // Stairs from the user's edits (Anchor modes - the Mesh/Raw tiers show the scanned geometry as it is).
+    private readonly StairsInModel stairs = new StairsInModel();
+    private GameObject visualGo;
+    private List<MRUKRoom> lastRooms;
+    void OnEnable() { HouseEditsStore.Changed += ApplyStairs; }
+    void OnDisable() { HouseEditsStore.Changed -= ApplyStairs; }
+    void ApplyStairs() {
+        if (!isOn || !root || !visualGo || lastRooms == null) return;
+        if (mode != DollhouseMode.AnchorAnalytical && mode != DollhouseMode.AnchorWithDimensions) return;
+        stairs.Apply(visualGo, modelYaw, modelCenter, lastRooms, HouseEditsStore.Current, false, 0);
+        floorCache = null; // floor meshes may have just been re-cut
+    }
+
+    /// <summary>Root and build frame of the visible Dollhouse (see WalkThroughMode.TryGetModelFrame).</summary>
+    public bool TryGetModelFrame(out Transform modelRoot, out float yaw, out Vector3 center) {
+        modelRoot = root ? root.transform : null; yaw = modelYaw; center = modelCenter;
+        return root && isOn && !hidden && root.activeSelf;
+    }
+
+    /// <summary>Hides/shows the built Dollhouse without rebuilding it (used while walking through the model).</summary>
+    public void SetHidden(bool h) {
+        hidden = h;
+        if (root) root.SetActive(!h);
+    }
+
+    /// <summary>The Dollhouse's own heading, yaw only - entering the walk-through with it keeps the house turned
+    /// the same way you were just looking at it.</summary>
+    public Quaternion FacingYaw {
+        get {
+            if (!root) return Quaternion.identity;
+            Vector3 f = Vector3.ProjectOnPlane(root.transform.forward, Vector3.up);
+            if (f.sqrMagnitude < 1e-4f) f = Vector3.ProjectOnPlane(root.transform.up, Vector3.up);
+            return f.sqrMagnitude < 1e-4f ? Quaternion.identity : Quaternion.LookRotation(f.normalized, Vector3.up);
+        }
+    }
+
+    /// <summary>The floor point (model space) the right controller points at, if any.</summary>
+    public bool TryGetPointedFloor(out Vector3 modelPoint) {
+        modelPoint = default;
+        if (!root || !isOn || hidden || !root.activeSelf || !rightHand) return false;
+        return TryRaycastFloor(new Ray(rightHand.position, rightHand.forward), out modelPoint);
+    }
+
+    /// <summary>Exact ray-vs-triangle test against the FLOOR meshes only (the Dollhouse's own collider is just its
+    /// bounding box, for grabbing), returned in root-local = model space.</summary>
+    bool TryRaycastFloor(Ray ray, out Vector3 modelPoint) {
+        modelPoint = default;
+        if (floorCache == null) {
+            floorCache = new List<(Transform, Vector3[], int[])>();
+            foreach (var mf in root.GetComponentsInChildren<MeshFilter>(true))
+                if (mf.name == "FLOOR" && mf.sharedMesh) floorCache.Add((mf.transform, mf.sharedMesh.vertices, mf.sharedMesh.triangles));
+        }
+        float best = float.MaxValue; bool found = false; Vector3 bestWorld = default;
+        foreach (var (t, v, tri) in floorCache) {
+            if (!t) continue;
+            // Mapping two points (not a direction) keeps the ray parameter identical to world distance along the ray.
+            Vector3 o = t.InverseTransformPoint(ray.origin);
+            Vector3 d = t.InverseTransformPoint(ray.origin + ray.direction) - o;
+            for (int i = 0; i + 2 < tri.Length; i += 3) {
+                if (RayTriangle(o, d, v[tri[i]], v[tri[i + 1]], v[tri[i + 2]], out float dist) && dist < best) {
+                    best = dist; found = true; bestWorld = ray.origin + ray.direction * dist;
+                }
+            }
+        }
+        if (found) modelPoint = root.transform.InverseTransformPoint(bestWorld);
+        return found;
+    }
+
+    static bool RayTriangle(Vector3 o, Vector3 d, Vector3 a, Vector3 b, Vector3 c, out float t) {
+        t = 0;
+        Vector3 e1 = b - a, e2 = c - a, p = Vector3.Cross(d, e2);
+        float det = Vector3.Dot(e1, p);
+        if (Mathf.Abs(det) < 1e-9f) return false;
+        float inv = 1f / det;
+        Vector3 s = o - a;
+        float u = Vector3.Dot(s, p) * inv;
+        if (u < 0 || u > 1) return false;
+        Vector3 q = Vector3.Cross(s, e1);
+        float w = Vector3.Dot(d, q) * inv;
+        if (w < 0 || u + w > 1) return false;
+        t = Vector3.Dot(e2, q) * inv;
+        return t > 0;
+    }
+
+    void UpdateEnterMarker() {
+        Vector3 p = default;
+        if (grabbed || !TryGetPointedFloor(out p)) { if (enterMarker) enterMarker.SetActive(false); return; }
+        if (!enterMarker) {
+            enterMarker = GameObject.CreatePrimitive(PrimitiveType.Capsule);
+            enterMarker.name = "WalkEnterMarker";
+            Destroy(enterMarker.GetComponent<Collider>());
+            var mf = enterMarker.GetComponent<MeshFilter>();
+            enterMarkerMesh = Instantiate(mf.sharedMesh); // own copy: Cleanup() destroys every mesh under root
+            mf.sharedMesh = enterMarkerMesh;
+            var shader = Shader.Find("Universal Render Pipeline/Unlit") ?? Shader.Find("Unlit/Color");
+            enterMarker.GetComponent<MeshRenderer>().sharedMaterial = new Material(shader) { color = new Color(1f, 0.55f, 0.1f) };
+            enterMarker.transform.SetParent(root.transform, false);
+            enterMarker.transform.localScale = new Vector3(MarkerWidth, MarkerHeight / 2f, MarkerWidth); // capsule primitive is 2 units tall
+        }
+        enterMarker.SetActive(true);
+        enterMarker.transform.localPosition = p + Vector3.up * (MarkerHeight / 2f);
+        enterMarker.transform.localRotation = Quaternion.identity;
+    }
+
     /// <summary>Cycles Anchor -&gt; Anchor+Dimensions -&gt; Mesh -&gt; Raw -&gt; Anchor. Rebuilds immediately if the dollhouse is on.</summary>
     public string CycleMode() {
         mode = (DollhouseMode)(((int)mode + 1) % 4);
@@ -99,6 +213,7 @@ public class DollHouseVisualizer : MonoBehaviour
         Vector3 c = CalculateCenter(rooms);
         // Same wall alignment as the export, so the preview is oriented like the exported model.
         float yaw = FloorPlanBuilder.CorrectionYaw(MRUKPlanExtractor.Extract(rooms));
+        modelYaw = yaw; modelCenter = c;
         XRHouseModel m = null;
 
         try {
@@ -114,12 +229,15 @@ public class DollHouseVisualizer : MonoBehaviour
                 if (visual != null) {
                     visual.transform.SetParent(root.transform, false);
                     AddCol(visual);
+                    visualGo = visual; lastRooms = rooms;
+                    ApplyStairs();
                     // Registers it with the XR Interaction Toolkit purely so the ray hovers it as a valid
                     // target (turns green and clips at its surface - see XRMenu.StyleRay); the actual grab is
                     // still the same custom grip+raycast logic in Update() below.
                     root.AddComponent<UnityEngine.XR.Interaction.Toolkit.Interactables.XRSimpleInteractable>();
                     if (mode == DollhouseMode.AnchorWithDimensions) AddDimensionLabels(m.dimensions);
                     uiLog?.AddLog("<color=green>Dollhouse: Model Loaded</color>");
+                    if (hidden) root.SetActive(false); // rebuilt while walking - stays out of the way
                 }
             }
         } catch (Exception ex) {
@@ -168,7 +286,9 @@ public class DollHouseVisualizer : MonoBehaviour
         }
     }
 
-    private Vector3 CalculateCenter(List<MRUKRoom> rooms) {
+    /// <summary>The model's build origin - shared with WalkThroughMode, so a point picked on the Dollhouse is the
+    /// same model-space point in the walk-through model.</summary>
+    public static Vector3 CalculateCenter(List<MRUKRoom> rooms) {
         Vector3 c = Vector3.zero; int n = 0;
         foreach (var r in rooms) {
             var f = r.FloorAnchors.FirstOrDefault(a => a != null);
@@ -178,15 +298,20 @@ public class DollHouseVisualizer : MonoBehaviour
     }
 
     private void Cleanup() {
+        stairs.Dispose();
+        visualGo = null;
         if (root) {
-            foreach(var mf in root.GetComponentsInChildren<MeshFilter>()) if(mf.sharedMesh) Destroy(mf.sharedMesh);
+            // includeInactive: the root itself is inactive while hidden for the walk-through, and so can be the
+            // enter marker - skipping inactive children would leak all of their meshes/materials.
+            foreach(var mf in root.GetComponentsInChildren<MeshFilter>(true)) if(mf.sharedMesh) Destroy(mf.sharedMesh);
             // Renderer (not just MeshRenderer) also catches the dimension lines' LineRenderers and the
             // dimension text's own TextMeshPro renderer, whose materials are every bit as uniquely created
             // here as a MeshRenderer's and would otherwise leak one set per Dollhouse rebuild.
-            foreach(var mr in root.GetComponentsInChildren<Renderer>()) if(mr.sharedMaterial) Destroy(mr.sharedMaterial);
+            foreach(var mr in root.GetComponentsInChildren<Renderer>(true)) if(mr.sharedMaterial) Destroy(mr.sharedMaterial);
             Destroy(root);
         }
         dimensionLabels.Clear();
+        floorCache = null; enterMarker = null; enterMarkerMesh = null;
         var camera = Camera.main;
         if (camera != null) camera.nearClipPlane = 0.1f;
     }
@@ -203,7 +328,7 @@ public class DollHouseVisualizer : MonoBehaviour
     }
 
     void Update() {
-        if (!root || !isOn) return;
+        if (!root || !isOn || !root.activeSelf) return;
 
         if (dimensionLabels.Count > 0) {
             // Lines/text are children of root, so a fixed LOCAL width/font size would grow or shrink right
@@ -243,6 +368,7 @@ public class DollHouseVisualizer : MonoBehaviour
             rightHand = rig ? rig.rightHandAnchor : null;
             if (!rightHand) return;
         }
+        UpdateEnterMarker();
         var hand = rightHand;
         bool grip = OVRInput.Get(OVRInput.Button.PrimaryHandTrigger, OVRInput.Controller.RTouch);
         Vector2 s = OVRInput.Get(OVRInput.Axis2D.PrimaryThumbstick, OVRInput.Controller.RTouch);

@@ -60,6 +60,26 @@ public class PlanOpening
     /// scan). A story overview cuts the wall gap for it but leaves the symbol to the room that owns the opening,
     /// so a shared doorway isn't drawn twice.</summary>
     public bool mirrored;
+
+    // Door leaf/swing, known only once the user has set it in edit mode (HouseEdits) - MRUK doesn't capture it.
+    // World plan coordinates like 'center' (rotated along with it by FloorPlanBuilder.Aligned).
+    public bool hasSwing;
+    public DoorKind doorKind;
+    public Vector2 hinge;      // hinge jamb, on the plan
+    public Vector2 swingDir;   // unit vector into the room the leaf opens into
+
+    /// <summary>A copy with center/hinge/swing transformed by 'map' (identity when null).</summary>
+    public PlanOpening Copy(System.Func<Vector2, Vector2> map = null, bool? mirroredOverride = null)
+    {
+        map ??= p => p;
+        Vector2 origin = map(Vector2.zero);
+        return new PlanOpening
+        {
+            kind = kind, width = width, sill = sill, height = height, mirrored = mirroredOverride ?? mirrored,
+            center = map(center), hasSwing = hasSwing, doorKind = doorKind, hinge = map(hinge),
+            swingDir = (map(swingDir) - origin).normalized,
+        };
+    }
 }
 
 /// <summary>One room's floor outline in world XZ, with its openings. No dependency on MRUK types.</summary>

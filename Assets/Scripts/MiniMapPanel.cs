@@ -210,9 +210,12 @@ public class MiniMapPanel : MonoBehaviour
             // anchors' own height - unaffected by gRot, a yaw-only rotation) rather than derived from the
             // camera's height, so its feet land on the floor instead of hanging down from head height.
             Quaternion gRot = Quaternion.Euler(0, modelYaw, 0);
-            Vector3 localCam = gRot * (cam.transform.position - modelCenter);
+            // While walking through the 1:1 model, show where you are in THAT model, not in the real room.
+            Vector3 headPos = cam.transform.position, headFwd = cam.transform.forward;
+            if (WalkThroughMode.Active != null && WalkThroughMode.Active.TryGetScanWorldPose(out var wp, out var wf)) { headPos = wp; headFwd = wf; }
+            Vector3 localCam = gRot * (headPos - modelCenter);
             avatarBody.transform.localPosition = new Vector3(localCam.x, AvatarHeight / 2f, localCam.z);
-            Vector3 facing = Vector3.ProjectOnPlane(cam.transform.forward, Vector3.up);
+            Vector3 facing = Vector3.ProjectOnPlane(headFwd, Vector3.up);
             if (facing.sqrMagnitude > 0.0001f) avatarBody.transform.localRotation = Quaternion.LookRotation(gRot * facing.normalized, Vector3.up);
         }
     }

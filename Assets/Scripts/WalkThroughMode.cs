@@ -1,0 +1,526 @@
+using System.Collections.Generic;
+using System.Linq;
+using UnityEngine;
+#if META_XR_SDK_INSTALLED
+using Meta.XR.MRUtilityKit;
+#endif
+
+/// <summary>
+/// 1:1 walk-through of the scanned house ("Walk"). The headset rig itself never moves - the MODEL is moved around
+/// you instead (left stick = walk, right stick left/right = snap turn, right stick forward = teleport arc, floors
+/// and steps followed up/down automatically). Moving the rig would drag MRUK's anchors out of line with the real
+/// room for the scan overlay/minimap; moving the model leaves everything else exactly where it was.
+///
+/// Collisions use the model's own meshes on the built-in "Ignore Raycast" layer, queried explicitly with that
+/// mask - so none of the existing default-mask grab raycasts (Dollhouse, Minimap, menu handle) can ever hit them.
+/// Doors get no collider and a see-through material that fades out as you get close, so you just walk through.
+/// Walking physically into a wall fades the view to black (you can't be stopped in the real world).
+/// </summary>
+public class WalkThroughMode : MonoBehaviour
+{
+    public XRMenu uiLog;
+    public float moveSpeed = 1.4f;          // m/s at full left-stick deflection
+    public float snapTurnDeg = 45f;
+    public float seatedEyeHeight = 1.65f;   // virtual eye height while seated mode is on
+
+    const int WalkLayer = 2;                // built-in "Ignore Raycast"
+    const int WalkMask = 1 << WalkLayer;
+    const float BodyRadius = 0.2f;
+    const float Skin = 0.03f;
+    const float StepUp = 0.35f;             // highest step/threshold you walk onto without teleporting
+    const float StepDown = 0.6f;            // a bigger drop is treated as a gap (e.g. under a doorway between two
+                                            // rooms' floor slabs, or the stairwell edge), not as a fall
+    const float HeightFollow = 14f;         // 1/s - how fast the floor height catches up when stepping up/down
+    const float DoorAlphaFar = 0.35f, DoorFadeNear = 0.5f, DoorFadeFar = 2.0f;
+    const float TeleportSpeed = 7f;
+
+    GameObject root;
+    float yaw; Vector3 center;              // the model's own build frame, same as the Dollhouse (XRModelFactory)
+    readonly List<(Renderer r, Material m, Color c)> doors = new List<(Renderer, Material, Color)>();
+    Transform head, trackingSpace, rightHand;
+    bool isOn, seated, turnArmed = true, aiming, teleportValid;
+    float seatedLift;
+    Vector3 teleportPoint;
+    LineRenderer arc; GameObject reticle; Material arcMat, reticleMat; Mesh reticleMesh;
+    GameObject fadeQuad; Material fadeMat; Mesh fadeMesh; float fade, blink;
+    float prevNearClip = -1f;
+    readonly List<Vector3> arcPoints = new List<Vector3>();
+
+    // Stairs from the user's edits (walkable, with the stairwell cut out of the floor/ceiling above).
+    readonly StairsInModel stairs = new StairsInModel();
+    List<MRUKRoom> walkRooms;
+    GameObject walkVisual;
+
+    void OnEnable() { HouseEditsStore.Changed += OnEditsChanged; }
+    void OnDisable() { HouseEditsStore.Changed -= OnEditsChanged; }
+    void OnEditsChanged() { if (isOn) ApplyStairs(); }
+
+    // Real door leaves for doors set up in edit mode (see WalkDoors).
+    readonly WalkDoors walkDoors = new WalkDoors();
+
+    /// <summary>(Re)builds everything that comes from the user's edits: stairs and door leaves.</summary>
+    void ApplyStairs()
+    {
+        if (!walkVisual || walkRooms == null) return;
+        stairs.Apply(walkVisual, yaw, center, walkRooms, HouseEditsStore.Current, true, WalkLayer);
+        walkDoors.Build(walkVisual, yaw, center, walkRooms, HouseEditsStore.Current, WalkLayer, doors.Select(d => d.r));
+        Physics.SyncTransforms();
+    }
+
+    /// <summary>Right trigger while walking: opens/closes the door leaf under the ray. False if none.</summary>
+    public bool TryToggleDoor()
+    {
+        if (!isOn || !rightHand) return false;
+        return Physics.Raycast(rightHand.position, rightHand.forward, out var hit, 6f, WalkMask, QueryTriggerInteraction.Ignore)
+               && walkDoors.Toggle(hit.collider);
+    }
+
+    /// <summary>The running walk-through, if any - lets the minimap show where you are in the model.</summary>
+    public static WalkThroughMode Active { get; private set; }
+    public bool IsOn => isOn;
+    public bool IsSeated => seated;
+
+    /// <summary>World Y the model's floor under you should sit at: the real floor (FloorLevel tracking origin),
+    /// or lower by seatedLift in seated mode so your eyes end up at seatedEyeHeight above the model's floor.</summary>
+    float TargetFloorY => trackingSpace.position.y - seatedLift;
+
+    /// <summary>
+    /// Starts walking. With modelFloorPoint (model space, e.g. picked on the Dollhouse floor) that point is placed
+    /// under your feet and the model gets modelRotation (e.g. the Dollhouse's own yaw, so you keep facing the way
+    /// you were looking at it). Without it the scan's real-world alignment is used if you stand inside the
+    /// scanned floor area, otherwise the middle of the largest room.
+    /// </summary>
+    public bool Enter(Vector3? modelFloorPoint, Quaternion? modelRotation)
+    {
+        if (isOn) Exit();
+        if (!ResolveRig()) { uiLog?.AddLog("<color=red>Walk: no camera rig.</color>"); return false; }
+        if (MRUK.Instance == null) { uiLog?.AddLog("<color=red>Walk: no MRUK instance.</color>"); return false; }
+        var rooms = MRUKDataProcessor.GetValidRooms(MRUK.Instance);
+        if (rooms.Count == 0) { uiLog?.AddLog("<color=red>Walk: no valid rooms.</color>"); return false; }
+
+        center = DollHouseVisualizer.CalculateCenter(rooms);
+        yaw = FloorPlanBuilder.CorrectionYaw(MRUKPlanExtractor.Extract(rooms));
+        var model = XRModelFactory.CreateAnchorAnalytical(rooms, yaw, center);
+        XRModelFactory.AddCeilings(model, rooms); // walking inside, a ceiling is what tells you you're indoors
+        var visual = UnityModelLoader.LoadToScene(model);
+        if (visual == null) { uiLog?.AddLog("<color=red>Walk: model build failed.</color>"); return false; }
+
+        root = new GameObject("WalkRoot");
+        visual.transform.SetParent(root.transform, false);
+        // Kinematic body: the colliders get moved every frame, which PhysX handles far better for a kinematic
+        // rigidbody's children than for "static" colliders.
+        var rb = root.AddComponent<Rigidbody>();
+        rb.isKinematic = true; rb.useGravity = false;
+        PrepareParts();
+        walkRooms = rooms; walkVisual = visual;
+        ApplyStairs();
+
+        isOn = true; Active = this;
+        seated = false; seatedLift = 0f;
+
+        Quaternion scanToModelInv = Quaternion.Inverse(Quaternion.Euler(0, yaw, 0));
+        if (modelFloorPoint.HasValue) Place(modelFloorPoint.Value, modelRotation ?? scanToModelInv);
+        else
+        {
+            // Model vertices are gRot * (world - center), so this puts every wall back where it was scanned.
+            root.transform.SetPositionAndRotation(center, scanToModelInv);
+            Physics.SyncTransforms();
+            if (!SnapToFloorWide()) Place(LargestRoomPoint(), scanToModelInv);
+        }
+
+        BuildHelpers();
+        var cam = Camera.main;
+        if (cam != null) { prevNearClip = cam.nearClipPlane; cam.nearClipPlane = 0.05f; }
+        uiLog?.AddLog("<color=green>Walk ON</color> - L stick move, R stick turn / push forward to teleport, L stick click = seated, A = back");
+        return true;
+    }
+
+    public void Exit()
+    {
+        if (!isOn && !root) return;
+        isOn = false; aiming = false;
+        if (Active == this) Active = null;
+        stairs.Dispose();
+        walkDoors.Clear();
+        walkVisual = null; walkRooms = null;
+        if (root)
+        {
+            // Every mesh/material under root was generated by UnityModelLoader or here - never a shared asset.
+            foreach (var mf in root.GetComponentsInChildren<MeshFilter>()) if (mf.sharedMesh) Destroy(mf.sharedMesh);
+            foreach (var mr in root.GetComponentsInChildren<Renderer>()) if (mr.sharedMaterial) Destroy(mr.sharedMaterial);
+            Destroy(root);
+        }
+        root = null;
+        doors.Clear();
+        DestroyHelpers();
+        var cam = Camera.main;
+        if (cam != null && prevNearClip > 0f) cam.nearClipPlane = prevNearClip;
+        prevNearClip = -1f;
+        uiLog?.AddLog("Walk OFF");
+    }
+
+    /// <summary>Seated mode: virtual eye height fixed at seatedEyeHeight whatever your real head height is.</summary>
+    public void ToggleSeated()
+    {
+        if (!isOn || !root) return;
+        float oldTarget = TargetFloorY;
+        seated = !seated;
+        float eye = head.position.y - trackingSpace.position.y;
+        seatedLift = seated ? Mathf.Max(0f, seatedEyeHeight - eye) : 0f;
+        // Jump straight to the new height - the per-frame floor probe starts just above the target floor, so it
+        // would otherwise begin inside/under the old floor slab and lose it.
+        root.transform.position += Vector3.up * (TargetFloorY - oldTarget);
+        Physics.SyncTransforms();
+        uiLog?.AddLog(seated ? $"Walk: seated (eyes at {seatedEyeHeight:0.00} m)" : "Walk: standing");
+    }
+
+    /// <summary>The model root and its build frame: model point v = Euler(0,yaw,0) * (scanWorld - center),
+    /// world = root.TransformPoint(v). Lets edit tools work in the scan's frame whatever the model is doing.</summary>
+    public bool TryGetModelFrame(out Transform modelRoot, out float modelYaw, out Vector3 modelCenter)
+    {
+        modelRoot = root ? root.transform : null; modelYaw = yaw; modelCenter = center;
+        return isOn && root;
+    }
+
+    /// <summary>Physics hit against the walk-through's own walls/floors (for occlusion checks by edit tools).</summary>
+    public bool RaycastModel(Ray ray, out RaycastHit hit, float maxDistance = 50f) =>
+        Physics.Raycast(ray, out hit, maxDistance, WalkMask, QueryTriggerInteraction.Ignore);
+
+    /// <summary>Your virtual head in the scan's own world frame (where MRUK's anchors are) - for the minimap.</summary>
+    public bool TryGetScanWorldPose(out Vector3 pos, out Vector3 forward)
+    {
+        pos = forward = default;
+        if (!isOn || !root || !head) return false;
+        Quaternion gInv = Quaternion.Inverse(Quaternion.Euler(0, yaw, 0));
+        pos = gInv * root.transform.InverseTransformPoint(head.position) + center;
+        forward = gInv * root.transform.InverseTransformDirection(head.forward);
+        return true;
+    }
+
+    bool ResolveRig()
+    {
+        var rig = FindFirstObjectByType<OVRCameraRig>();
+        if (!rig) return false;
+        head = rig.centerEyeAnchor; trackingSpace = rig.trackingSpace; rightHand = rig.rightHandAnchor;
+        return head && trackingSpace && rightHand;
+    }
+
+    /// <summary>Colliders for everything except doors; doors become see-through.</summary>
+    void PrepareParts()
+    {
+        doors.Clear();
+        var seeThrough = Shader.Find("Sprites/Default");
+        foreach (var mf in root.GetComponentsInChildren<MeshFilter>())
+        {
+            mf.gameObject.layer = WalkLayer;
+            var mr = mf.GetComponent<MeshRenderer>();
+            bool isDoor = mr && mr.sharedMaterial && mr.sharedMaterial.name == "DOOR";
+            if (isDoor)
+            {
+                if (seeThrough != null && mf.sharedMesh)
+                {
+                    var c = mr.sharedMaterial.color;
+                    Destroy(mr.sharedMaterial);
+                    // Sprites/Default multiplies by vertex colour - give the generated mesh explicit white ones.
+                    mf.sharedMesh.colors = WhiteColors(mf.sharedMesh.vertexCount);
+                    var m = new Material(seeThrough) { name = "DOOR_WALK", color = new Color(c.r, c.g, c.b, DoorAlphaFar) };
+                    mr.sharedMaterial = m;
+                    doors.Add((mr, m, c));
+                }
+                continue; // no collider: walk straight through
+            }
+            if (!mf.sharedMesh) continue;
+            var col = mf.gameObject.AddComponent<MeshCollider>();
+            col.sharedMesh = mf.sharedMesh;
+        }
+        Physics.SyncTransforms();
+    }
+
+    static Color[] WhiteColors(int n)
+    {
+        var a = new Color[n];
+        for (int i = 0; i < n; i++) a[i] = Color.white;
+        return a;
+    }
+
+    /// <summary>Puts a model-space floor point right under your feet, with the model rotated to rot.</summary>
+    void Place(Vector3 modelPoint, Quaternion rot)
+    {
+        Vector3 feet = new Vector3(head.position.x, TargetFloorY, head.position.z);
+        root.transform.SetPositionAndRotation(feet - rot * modelPoint, rot);
+        Physics.SyncTransforms();
+    }
+
+    /// <summary>Real-world alignment: snaps the model's floor under you to the real floor, if there is one within
+    /// reach (a small offset between scan and tracking floor is normal; above ~1.2 m it's likely another story).</summary>
+    bool SnapToFloorWide()
+    {
+        Vector3 origin = new Vector3(head.position.x, TargetFloorY + 1.2f, head.position.z);
+        if (!Physics.Raycast(origin, Vector3.down, out var hit, 50f, WalkMask, QueryTriggerInteraction.Ignore) || hit.normal.y < 0.5f)
+            return false;
+        root.transform.position += Vector3.up * (TargetFloorY - hit.point.y);
+        Physics.SyncTransforms();
+        return true;
+    }
+
+    /// <summary>Middle of the largest floor slab, top surface, in model space (root-local).</summary>
+    Vector3 LargestRoomPoint()
+    {
+        float best = -1f; Vector3 point = Vector3.zero;
+        foreach (var mf in root.GetComponentsInChildren<MeshFilter>())
+        {
+            if (mf.name != "FLOOR" || !mf.sharedMesh) continue;
+            var b = mf.sharedMesh.bounds;
+            float area = b.size.x * b.size.z;
+            if (area <= best) continue;
+            best = area;
+            point = root.transform.InverseTransformPoint(mf.transform.TransformPoint(new Vector3(b.center.x, b.max.y, b.center.z)));
+        }
+        return point;
+    }
+
+    void Update()
+    {
+        if (!isOn) return;
+        if (!root || !head || !trackingSpace) { Exit(); return; }
+        float dt = Time.deltaTime;
+        HandleTeleport();
+        HandleSnapTurn();
+        HandleMove(dt);
+        FollowFloor(dt);
+        if (walkVisual && walkDoors.Tick(walkVisual.transform.InverseTransformPoint(head.position), dt)) Physics.SyncTransforms();
+        UpdateDoors();
+        UpdateFade(dt);
+    }
+
+    void HandleMove(float dt)
+    {
+        Vector2 s = OVRInput.Get(OVRInput.Axis2D.PrimaryThumbstick, OVRInput.Controller.LTouch);
+        if (s.sqrMagnitude < 0.04f) return;
+        Vector3 fwd = Vector3.ProjectOnPlane(head.forward, Vector3.up);
+        if (fwd.sqrMagnitude < 1e-4f) fwd = Vector3.ProjectOnPlane(head.up, Vector3.up); // looking straight down
+        fwd.Normalize();
+        Vector3 right = Vector3.Cross(Vector3.up, fwd);
+        Vector3 move = Vector3.ClampMagnitude(fwd * s.y + right * s.x, 1f) * moveSpeed * dt;
+        move = Collide(move);
+        if (move.sqrMagnitude < 1e-8f) return;
+        root.transform.position -= move; // moving the world back == you moving forward
+        Physics.SyncTransforms();
+    }
+
+    /// <summary>Capsule from just above step height up to your head - steps/thresholds below it never block,
+    /// walls/windows do. Slides along whatever it hits instead of stopping dead.</summary>
+    Vector3 Collide(Vector3 move)
+    {
+        Vector3 hp = head.position;
+        Vector3 p1 = new Vector3(hp.x, TargetFloorY + StepUp + BodyRadius, hp.z);
+        Vector3 p2 = new Vector3(hp.x, Mathf.Max(p1.y, hp.y - 0.15f), hp.z);
+        for (int i = 0; i < 3; i++)
+        {
+            float dist = move.magnitude;
+            if (dist < 1e-5f) return Vector3.zero;
+            Vector3 dir = move / dist;
+            if (!Physics.CapsuleCast(p1, p2, BodyRadius, dir, out var hit, dist + Skin, WalkMask, QueryTriggerInteraction.Ignore))
+                return move;
+            Vector3 n = hit.normal; n.y = 0f;
+            if (i == 2 || n.sqrMagnitude < 1e-4f) return dir * Mathf.Max(0f, hit.distance - Skin);
+            move = Vector3.ProjectOnPlane(move, n.normalized);
+        }
+        return move;
+    }
+
+    /// <summary>Keeps the model's floor under you at TargetFloorY - walking onto a step/stair raises you, off
+    /// one lowers you. Big drops are ignored (gap between slabs, stairwell edge) - see StepDown.</summary>
+    void FollowFloor(float dt)
+    {
+        if (!ProbeFloor(out float floorY)) return;
+        float delta = TargetFloorY - floorY;
+        if (Mathf.Abs(delta) < 0.0005f) return;
+        root.transform.position += Vector3.up * (delta * (1f - Mathf.Exp(-HeightFollow * dt)));
+        Physics.SyncTransforms();
+    }
+
+    bool ProbeFloor(out float y)
+    {
+        y = 0f;
+        Vector3 hp = head.position;
+        Vector3 origin = new Vector3(hp.x, TargetFloorY + StepUp + 0.1f, hp.z);
+        float dist = StepUp + 0.1f + StepDown;
+        if (Physics.Raycast(origin, Vector3.down, out var hit, dist, WalkMask, QueryTriggerInteraction.Ignore) && hit.normal.y > 0.5f)
+        { y = hit.point.y; return true; }
+        // A thin ray can slip through the narrow gap under a doorway between two rooms' floor slabs - a small
+        // sphere bridges it.
+        if (Physics.SphereCast(origin, 0.12f, Vector3.down, out hit, dist, WalkMask, QueryTriggerInteraction.Ignore) && hit.normal.y > 0.5f)
+        { y = hit.point.y; return true; }
+        return false;
+    }
+
+    void HandleSnapTurn()
+    {
+        if (aiming) return;
+        float x = OVRInput.Get(OVRInput.Axis2D.PrimaryThumbstick, OVRInput.Controller.RTouch).x;
+        if (turnArmed && Mathf.Abs(x) > 0.7f)
+        {
+            // Rotating the world by -angle around your head == you turning by +angle.
+            root.transform.RotateAround(head.position, Vector3.up, -Mathf.Sign(x) * snapTurnDeg);
+            Physics.SyncTransforms();
+            turnArmed = false;
+        }
+        else if (Mathf.Abs(x) < 0.3f) turnArmed = true;
+    }
+
+    void HandleTeleport()
+    {
+        Vector2 r = OVRInput.Get(OVRInput.Axis2D.PrimaryThumbstick, OVRInput.Controller.RTouch);
+        if (!aiming)
+        {
+            if (r.y > 0.7f && Mathf.Abs(r.x) < 0.5f) aiming = true;
+            else return;
+        }
+        if (r.y < 0.25f)
+        {
+            aiming = false;
+            ShowArc(false);
+            if (teleportValid) DoTeleport();
+            teleportValid = false;
+            return;
+        }
+        ComputeArc();
+    }
+
+    void ComputeArc()
+    {
+        arcPoints.Clear();
+        teleportValid = false;
+        bool hitAny = false;
+        Vector3 p = rightHand.position, v = rightHand.forward * TeleportSpeed;
+        arcPoints.Add(p);
+        const float stepT = 0.03f;
+        for (int i = 0; i < 90; i++)
+        {
+            Vector3 next = p + v * stepT;
+            v += Vector3.down * (9.81f * stepT);
+            if (Physics.Linecast(p, next, out var hit, WalkMask, QueryTriggerInteraction.Ignore))
+            {
+                arcPoints.Add(hit.point);
+                hitAny = true;
+                teleportPoint = hit.point;
+                teleportValid = hit.normal.y > 0.7f && HasHeadroom(hit.point);
+                break;
+            }
+            arcPoints.Add(next);
+            p = next;
+        }
+        ShowArc(true);
+        arc.positionCount = arcPoints.Count;
+        arc.SetPositions(arcPoints.ToArray());
+        Color c = teleportValid ? new Color(0.3f, 0.95f, 0.45f, 0.9f) : new Color(1f, 0.35f, 0.3f, 0.9f);
+        arc.startColor = arc.endColor = c;
+        reticle.SetActive(hitAny);
+        if (hitAny)
+        {
+            reticle.transform.position = teleportPoint + Vector3.up * 0.01f;
+            reticleMat.color = new Color(c.r, c.g, c.b, 0.6f);
+        }
+    }
+
+    static bool HasHeadroom(Vector3 floorPoint) =>
+        !Physics.CheckCapsule(floorPoint + Vector3.up * 0.45f, floorPoint + Vector3.up * 1.6f, 0.12f, WalkMask, QueryTriggerInteraction.Ignore);
+
+    void DoTeleport()
+    {
+        Vector3 feet = new Vector3(head.position.x, TargetFloorY, head.position.z);
+        root.transform.position += feet - teleportPoint;
+        Physics.SyncTransforms();
+        blink = 1f; // short black blink - a hard cut without it is disorienting
+    }
+
+    void UpdateDoors()
+    {
+        Vector3 hp = head.position;
+        foreach (var (r, m, c) in doors)
+        {
+            if (!r) continue;
+            if (walkDoors.Suppressed.Contains(r)) { r.enabled = false; continue; } // replaced by a real leaf
+            float d = Vector3.Distance(hp, r.bounds.ClosestPoint(hp));
+            float a = DoorAlphaFar * Mathf.InverseLerp(DoorFadeNear, DoorFadeFar, d);
+            m.color = new Color(c.r, c.g, c.b, a);
+            r.enabled = a > 0.01f;
+        }
+    }
+
+    void UpdateFade(float dt)
+    {
+        bool inWall = Physics.CheckSphere(head.position, 0.08f, WalkMask, QueryTriggerInteraction.Ignore);
+        fade = Mathf.MoveTowards(fade, inWall ? 0.95f : 0f, dt * 4f);
+        blink = Mathf.MoveTowards(blink, 0f, dt * 5f);
+        float a = Mathf.Max(fade, blink);
+        if (fadeQuad == null) return;
+        fadeQuad.SetActive(a > 0.001f);
+        fadeMat.color = new Color(0, 0, 0, a);
+    }
+
+    void ShowArc(bool on)
+    {
+        if (arc) arc.enabled = on;
+        if (!on && reticle) reticle.SetActive(false);
+    }
+
+    void BuildHelpers()
+    {
+        var shader = Shader.Find("Sprites/Default");
+        if (shader == null) { uiLog?.AddLog("<color=orange>Walk: Sprites/Default shader missing - no teleport arc/fade visuals.</color>"); return; }
+
+        var arcGo = new GameObject("WalkTeleportArc");
+        arc = arcGo.AddComponent<LineRenderer>();
+        arcMat = new Material(shader);
+        arc.sharedMaterial = arcMat;
+        arc.widthMultiplier = 0.012f;
+        arc.numCapVertices = 4;
+        arc.useWorldSpace = true;
+        arc.enabled = false;
+
+        reticle = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
+        reticle.name = "WalkTeleportReticle";
+        Destroy(reticle.GetComponent<Collider>());
+        var rmf = reticle.GetComponent<MeshFilter>();
+        reticleMesh = Instantiate(rmf.sharedMesh); // own copy - the primitive's mesh is a shared engine asset
+        reticleMesh.colors = WhiteColors(reticleMesh.vertexCount);
+        rmf.sharedMesh = reticleMesh;
+        reticleMat = new Material(shader);
+        reticle.GetComponent<MeshRenderer>().sharedMaterial = reticleMat;
+        reticle.transform.localScale = new Vector3(0.45f, 0.004f, 0.45f);
+        reticle.SetActive(false);
+
+        fadeQuad = GameObject.CreatePrimitive(PrimitiveType.Quad);
+        fadeQuad.name = "WalkFade";
+        Destroy(fadeQuad.GetComponent<Collider>());
+        var fmf = fadeQuad.GetComponent<MeshFilter>();
+        fadeMesh = Instantiate(fmf.sharedMesh);
+        fadeMesh.colors = WhiteColors(fadeMesh.vertexCount);
+        fmf.sharedMesh = fadeMesh;
+        fadeMat = new Material(shader) { renderQueue = 4000, color = new Color(0, 0, 0, 0) };
+        fadeQuad.GetComponent<MeshRenderer>().sharedMaterial = fadeMat;
+        fadeQuad.transform.SetParent(head, false);
+        fadeQuad.transform.localPosition = new Vector3(0, 0, 0.07f);
+        fadeQuad.transform.localRotation = Quaternion.identity;
+        fadeQuad.transform.localScale = Vector3.one * 0.6f;
+        fadeQuad.SetActive(false);
+        fade = blink = 0f;
+    }
+
+    void DestroyHelpers()
+    {
+        if (arc) Destroy(arc.gameObject);
+        if (reticle) Destroy(reticle);
+        if (fadeQuad) Destroy(fadeQuad);
+        if (arcMat) Destroy(arcMat);
+        if (reticleMat) Destroy(reticleMat);
+        if (fadeMat) Destroy(fadeMat);
+        if (reticleMesh) Destroy(reticleMesh);
+        if (fadeMesh) Destroy(fadeMesh);
+        arc = null; reticle = null; fadeQuad = null;
+    }
+
+    void OnDestroy() { if (isOn) Exit(); }
+}
