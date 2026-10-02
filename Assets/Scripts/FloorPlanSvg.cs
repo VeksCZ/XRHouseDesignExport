@@ -17,6 +17,8 @@ public static class FloorPlanSvg
             case PlanStyle.Wall: return "wall";
             case PlanStyle.Door: return "door";
             case PlanStyle.Window: return "window";
+            case PlanStyle.DoorSymbol: return "door sym";
+            case PlanStyle.WindowSymbol: return "window sym";
             case PlanStyle.Extension: return "ext";
             case PlanStyle.Tick: return "tick";
             case PlanStyle.OuterExtension: return "ext outer";

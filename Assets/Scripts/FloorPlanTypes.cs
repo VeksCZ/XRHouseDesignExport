@@ -2,7 +2,9 @@ using System.Collections.Generic;
 using UnityEngine;
 
 // Dimension* = short segments measured on the inside (corner-opening, opening widths); Outer* = whole wall lengths measured from outside.
-public enum PlanStyle { Wall, Door, Window, Dimension, Extension, Tick, Label, OuterDimension, OuterExtension, OuterTick }
+// DoorSymbol/WindowSymbol = thin plan symbols drawn in a gap of the wall (door leaf + swing, window panes);
+// Door/Window = the thick opening outlines of the elevation sheets.
+public enum PlanStyle { Wall, Door, Window, Dimension, Extension, Tick, Label, OuterDimension, OuterExtension, OuterTick, DoorSymbol, WindowSymbol }
 public enum OpeningKind { Door, Window }
 
 public struct PlanLine
@@ -54,6 +56,10 @@ public class PlanOpening
     public float width;
     public float sill;    // bottom edge above the floor
     public float height;
+    /// <summary>Copied over from the neighbouring room by MirrorSharedOpenings (not captured by this room's own
+    /// scan). A story overview cuts the wall gap for it but leaves the symbol to the room that owns the opening,
+    /// so a shared doorway isn't drawn twice.</summary>
+    public bool mirrored;
 }
 
 /// <summary>One room's floor outline in world XZ, with its openings. No dependency on MRUK types.</summary>

@@ -112,7 +112,7 @@ public static class MRUKPlanExtractor
                     if (worldTopY > dst.floorY + dst.ceilingMax + verticalTolerance) continue;
                     dst.openings.Add(new PlanOpening
                     {
-                        kind = op.kind, center = op.center, width = op.width, height = op.height,
+                        kind = op.kind, center = op.center, width = op.width, height = op.height, mirrored = true,
                         sill = Mathf.Max(0f, worldSillY - dst.floorY),
                     });
                 }

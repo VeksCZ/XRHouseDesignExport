@@ -24,6 +24,7 @@ public static class MRUKReportBuilder
         .wall{stroke:#2d3748;stroke-width:0.12;stroke-linecap:square}
         .door{stroke:#b7791f;stroke-width:0.14}
         .window{stroke:#3182ce;stroke-width:0.14}
+        .sym{stroke-width:0.02;stroke-linecap:round}
         /* Guide/extension lines and ticks stay red on both inner and outer dimensions (no .outer override needed
            since they're already red) - only the dimension line itself (where the number sits) tells the two
            apart: purple inside, green outside. */

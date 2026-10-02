@@ -103,7 +103,7 @@ public static class FloorPlanBuilder
                 cornerCeilingHeights = new List<float>(r.cornerCeilingHeights), // same vertex order, unaffected by yaw
             };
             foreach (var o in r.openings)
-                n.openings.Add(new PlanOpening { kind = o.kind, width = o.width, sill = o.sill, height = o.height, center = Rotate(o.center, yawDeg) });
+                n.openings.Add(new PlanOpening { kind = o.kind, width = o.width, sill = o.sill, height = o.height, mirrored = o.mirrored, center = Rotate(o.center, yawDeg) });
             result.Add(n);
         }
         return result;
@@ -133,7 +133,7 @@ public static class FloorPlanBuilder
                 cornerCeilingHeights = new List<float>(r.cornerCeilingHeights), // RectifiedPolygon keeps the same vertex order/count
             };
             foreach (var o in r.openings)
-                n.openings.Add(new PlanOpening { kind = o.kind, width = o.width, sill = o.sill, height = o.height, center = o.center });
+                n.openings.Add(new PlanOpening { kind = o.kind, width = o.width, sill = o.sill, height = o.height, mirrored = o.mirrored, center = o.center });
             result.Add(n);
         }
         return result;
@@ -369,13 +369,120 @@ public static class FloorPlanBuilder
         if (e.len - cursor > 0.02f) AddDimension(page, e.a + e.dir * cursor, e.b, inward * offset, Fmt(e.len - cursor), textSize, gapSize);
     }
 
-    static void AddWallsAndOpenings(FloorPlanPage page, List<Edge> edges, List<List<(float t0, float t1, PlanOpening o)>> perEdge)
+    /// <summary>Drawn wall thickness. The scan only knows each room's inside wall faces, so every wall is drawn as a
+    /// band of this width just outside its room's outline; two neighbouring rooms' bands then sit back to back
+    /// in the real wall between them.</summary>
+    public const float WallBand = 0.12f;
+    const int DoorArcSegments = 10;
+    const float MaxSingleLeafWidth = 1.25f; // wider: a double door (two leaves)
+    const float MaxSwingDoorWidth = 2.2f;   // wider: a garage/sectional/sliding door, drawn without a swing
+
+    /// <summary>A door leaf hinged at 'hinge', opened 90 degrees towards 'into', with its quarter-circle swing
+    /// back to the closed position along 'along'.</summary>
+    static void AddDoorLeaf(FloorPlanPage page, Vector2 hinge, Vector2 along, Vector2 into, float w, PlanStyle style)
     {
-        foreach (var e in edges) page.lines.Add(new PlanLine(e.a, e.b, PlanStyle.Wall));
-        for (int i = 0; i < edges.Count; i++)
+        Vector2 prev = hinge + into * w;
+        page.lines.Add(new PlanLine(hinge, prev, style));
+        for (int k = 1; k <= DoorArcSegments; k++)
+        {
+            float ang = k / (float)DoorArcSegments * Mathf.PI / 2f;
+            Vector2 p = hinge + (into * Mathf.Cos(ang) + along * Mathf.Sin(ang)) * w;
+            page.lines.Add(new PlanLine(prev, p, style));
+            prev = p;
+        }
+    }
+
+    /// <summary>
+    /// Walls as a band just outside the room outline, interrupted wherever a door or window sits, with the
+    /// usual plan symbols in the gap: a window as three thin lines along the wall (both faces and the glass)
+    /// with its jambs, a door as its jambs, the leaf opened 90 degrees into the room and the quarter-circle
+    /// swing. MRUK doesn't report hinge side or swing direction, so every door is drawn hinged at its
+    /// start-of-wall end, opening into the room it belongs to. 'skipMirroredSymbols' (story overviews) still
+    /// cuts the gap for an opening copied in from the neighbour but leaves its symbol to the owning room.
+    /// </summary>
+    static void AddWallsAndOpenings(FloorPlanPage page, List<Edge> edges, List<List<(float t0, float t1, PlanOpening o)>> perEdge, bool skipMirroredSymbols = false)
+    {
+        int n = edges.Count;
+        if (n == 0) return;
+        float h = WallBand / 2f;
+
+        // Mitred corners of the band's centre line, so neighbouring walls meet cleanly at both convex and
+        // concave corners (the renderers draw walls with square caps, i.e. extended by h at each end).
+        var startCorner = new Vector2[n];
+        var endCorner = new Vector2[n];
+        for (int i = 0; i < n; i++)
+        {
+            Edge prev = edges[(i - 1 + n) % n], cur = edges[i];
+            float d = 1f + Vector2.Dot(prev.outward, cur.outward);
+            Vector2 offset = d > 0.2f ? (prev.outward + cur.outward) / d * h : cur.outward * h;
+            if (Vector2.Distance(prev.b, cur.a) > 0.05f) offset = cur.outward * h; // edges not actually joined
+            startCorner[i] = cur.a + offset;
+            endCorner[(i - 1 + n) % n] = Vector2.Distance(prev.b, cur.a) > 0.05f ? prev.b + prev.outward * h : prev.b + offset;
+        }
+
+        for (int i = 0; i < n; i++)
+        {
+            Edge e = edges[i];
+            Vector2 At(float t, float off) => e.a + e.dir * t + e.outward * off;
+
+            // Merge overlapping openings into gaps.
+            var gaps = new List<(float t0, float t1)>();
+            foreach (var (t0, t1, _) in perEdge[i])
+            {
+                if (gaps.Count > 0 && t0 <= gaps[gaps.Count - 1].t1) gaps[gaps.Count - 1] = (gaps[gaps.Count - 1].t0, Mathf.Max(t1, gaps[gaps.Count - 1].t1));
+                else gaps.Add((t0, t1));
+            }
+
+            // Wall pieces between the gaps. A piece ending at a gap is shortened by h so its square cap stops
+            // exactly at the opening; a piece ending at a corner goes to the mitred corner point.
+            float cursor = 0f;
+            bool atCorner = true;
+            foreach (var (g0, g1) in gaps)
+            {
+                if (g0 - cursor > 0.01f)
+                {
+                    Vector2 a = atCorner ? startCorner[i] : At(cursor + h, h);
+                    Vector2 b = At(g0 - h, h);
+                    if (atCorner || g0 - cursor > 2 * h) page.lines.Add(new PlanLine(a, b, PlanStyle.Wall));
+                }
+                cursor = g1;
+                atCorner = false;
+            }
+            if (e.len - cursor > 0.01f || atCorner)
+                page.lines.Add(new PlanLine(atCorner ? startCorner[i] : At(cursor + h, h), endCorner[i], PlanStyle.Wall));
+
+            // Symbols in the gaps.
             foreach (var (t0, t1, o) in perEdge[i])
-                page.lines.Add(new PlanLine(edges[i].a + edges[i].dir * t0, edges[i].a + edges[i].dir * t1,
-                    o.kind == OpeningKind.Door ? PlanStyle.Door : PlanStyle.Window));
+            {
+                if (skipMirroredSymbols && o.mirrored) continue;
+                var style = o.kind == OpeningKind.Door ? PlanStyle.DoorSymbol : PlanStyle.WindowSymbol;
+                page.lines.Add(new PlanLine(At(t0, 0), At(t0, WallBand), style)); // jambs
+                page.lines.Add(new PlanLine(At(t1, 0), At(t1, WallBand), style));
+                if (o.kind == OpeningKind.Window)
+                {
+                    page.lines.Add(new PlanLine(At(t0, 0), At(t1, 0), style));
+                    page.lines.Add(new PlanLine(At(t0, h), At(t1, h), style));
+                    page.lines.Add(new PlanLine(At(t0, WallBand), At(t1, WallBand), style));
+                }
+                else
+                {
+                    float w = t1 - t0;
+                    if (w > MaxSwingDoorWidth)
+                    {
+                        // Garage / sectional / sliding door: no swing, just the door panel along the inside face.
+                        page.lines.Add(new PlanLine(At(t0, -h), At(t1, -h), style));
+                        page.lines.Add(new PlanLine(At(t0, 0), At(t0, -h), style));
+                        page.lines.Add(new PlanLine(At(t1, 0), At(t1, -h), style));
+                    }
+                    else if (w > MaxSingleLeafWidth)
+                    {
+                        AddDoorLeaf(page, At(t0, 0), e.dir, -e.outward, w / 2f, style);   // double door: two leaves
+                        AddDoorLeaf(page, At(t1, 0), -e.dir, -e.outward, w / 2f, style);
+                    }
+                    else AddDoorLeaf(page, At(t0, 0), e.dir, -e.outward, w, style);
+                }
+            }
+        }
     }
 
     /// <summary>One room: walls and openings. The whole length of every wall is dimensioned from the outside (green), the short
@@ -517,7 +624,7 @@ public static class FloorPlanBuilder
         {
             var edges = edgeCache[r];
             var openings = AssignOpenings(r, edges);
-            AddWallsAndOpenings(page, edges, openings);
+            AddWallsAndOpenings(page, edges, openings, skipMirroredSymbols: true);
         }
 
         foreach (var r in level)

@@ -48,6 +48,8 @@ public class PlanGraphic : MaskableGraphic
             case PlanStyle.Wall: return (0.12f, 3f, new Color32(235, 235, 240, 255));
             case PlanStyle.Door: return (0.14f, 4f, new Color32(240, 165, 70, 255));
             case PlanStyle.Window: return (0.14f, 4f, new Color32(90, 190, 255, 255));
+            case PlanStyle.DoorSymbol: return (0.02f, 1.5f, new Color32(240, 165, 70, 255));
+            case PlanStyle.WindowSymbol: return (0.02f, 1.5f, new Color32(90, 190, 255, 255));
             case PlanStyle.Tick: return (0.03f, 2f, new Color32(255, 110, 110, 255));
             case PlanStyle.Extension: return (0.01f, 1f, new Color32(255, 110, 110, 160));
             case PlanStyle.OuterTick: return (0.03f, 2f, new Color32(255, 110, 110, 255));
