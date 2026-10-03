@@ -32,11 +32,50 @@ public static class MRUKPathUtility
     public const string DATA_REPORT = "99_Report_House.html";
     public const string DATA_REPORT_ROOM = "99_Report_Room.html";
 
+    /// <summary>Editor or the Windows desktop app: scans live as folders in one local data folder (see MRUKSceneCache),
+    /// not in the headset's app storage.</summary>
+    public static bool IsDesktop => Application.isEditor || Application.platform == RuntimePlatform.WindowsPlayer;
+
+    /// <summary>File next to the desktop exe holding the data folder's path (written by the Windows build, see
+    /// DesktopBuildTools) - so the exe reads the very same Exports/RoomData the Editor pulls the Quest's data into.</summary>
+    public const string DesktopDataFolderFile = "DataFolder.txt";
+
+    static string desktopRoot;
+
+    /// <summary>Overrides the desktop app's data folder at runtime (e.g. picked in its menu).</summary>
+    public static string DesktopDataRoot
+    {
+        get => desktopRoot ??= ResolveDesktopDataRoot();
+        set => desktopRoot = value;
+    }
+
+    /// <summary>"-data &lt;folder&gt;" on the command line, else the path in DataFolder.txt next to the exe, else
+    /// RoomData next to the exe.</summary>
+    static string ResolveDesktopDataRoot()
+    {
+        var args = Environment.GetCommandLineArgs();
+        for (int i = 0; i + 1 < args.Length; i++)
+            if (args[i] == "-data" && !string.IsNullOrWhiteSpace(args[i + 1])) return args[i + 1].Trim('"');
+        // dataPath is <exe dir>/<name>_Data in a Windows player.
+        string exeDir = Path.GetDirectoryName(Application.dataPath);
+        try
+        {
+            string file = Path.Combine(exeDir, DesktopDataFolderFile);
+            if (File.Exists(file))
+            {
+                string p = File.ReadAllText(file).Trim().Trim('"');
+                if (!string.IsNullOrEmpty(p)) return p;
+            }
+        }
+        catch (Exception ex) { Debug.LogWarning($"[MRUKPathUtility] Could not read {DesktopDataFolderFile}: {ex.Message}"); }
+        return Path.Combine(exeDir, "RoomData");
+    }
+
     public static string GetExportRoot()
     {
-        return Application.isEditor 
-            ? "Exports/RoomData" 
-            : "/sdcard/Download/XRHouseExports";
+        if (Application.isEditor) return "Exports/RoomData";
+        if (IsDesktop) return DesktopDataRoot;
+        return "/sdcard/Download/XRHouseExports";
     }
 
     /// <summary>Export_{date_time}_{scan name}, so exports of different scans/houses sort and read clearly.</summary>

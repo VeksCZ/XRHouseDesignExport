@@ -30,7 +30,7 @@ public static class MRUKSceneCache
     /// <summary>Folder prefix of a saved headset scan pulled to the PC (Editor), as opposed to an Export_ session.</summary>
     public const string ScanFolderPrefix = "Scan_";
 
-    static bool FolderMode => Application.isEditor;
+    static bool FolderMode => MRUKPathUtility.IsDesktop; // Editor and the Windows desktop app
 
     /// <summary>Headset: persistentDataPath/ScanCache. Editor: the export root (Exports/RoomData).</summary>
     public static string GetCacheRoot()

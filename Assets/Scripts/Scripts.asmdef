@@ -6,6 +6,7 @@
         "Oculus.VR",
         "Unity.XR.CoreUtils",
         "Unity.XR.Interaction.Toolkit",
+        "Unity.XR.Management",
         "Unity.TextMeshPro",
         "Unity.InputSystem",
         "Unity.RenderPipelines.Universal.Runtime",

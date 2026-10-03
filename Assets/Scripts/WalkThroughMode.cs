@@ -183,7 +183,7 @@ public class WalkThroughMode : MonoBehaviour
         BuildHelpers();
         var cam = Camera.main;
         if (cam != null) { prevNearClip = cam.nearClipPlane; cam.nearClipPlane = 0.05f; }
-        uiLog?.AddLog("<color=green>Walk ON</color> - L stick move, R stick turn / push forward to teleport, L stick click = seated, A = back");
+        if (!desktop) uiLog?.AddLog("<color=green>Walk ON</color> - L stick move, R stick turn / push forward to teleport, L stick click = seated, A = back");
         return true;
     }
 
@@ -313,12 +313,24 @@ public class WalkThroughMode : MonoBehaviour
         return true;
     }
 
+    /// <summary>Set when walking on the Windows desktop app: keyboard/mouse instead of controllers. The camera is the
+    /// head, the rig root sits at floor level (tracking space), the "hand" ray is the view ray (doors are clicked).</summary>
+    DesktopWalkRig desktop;
+    public bool IsDesktop => desktop;
+
     bool ResolveRig()
     {
         var rig = FindFirstObjectByType<OVRCameraRig>();
-        if (!rig) return false;
-        head = rig.centerEyeAnchor; trackingSpace = rig.trackingSpace; rightHand = rig.rightHandAnchor;
-        return head && trackingSpace && rightHand;
+        if (rig)
+        {
+            desktop = null;
+            head = rig.centerEyeAnchor; trackingSpace = rig.trackingSpace; rightHand = rig.rightHandAnchor;
+            return head && trackingSpace && rightHand;
+        }
+        desktop = FindFirstObjectByType<DesktopWalkRig>();
+        if (!desktop || !desktop.Head) return false;
+        head = desktop.Head; trackingSpace = desktop.transform; rightHand = desktop.Head;
+        return true;
     }
 
     /// <summary>Colliders for everything except doors; doors become see-through.</summary>
@@ -416,13 +428,14 @@ public class WalkThroughMode : MonoBehaviour
 
     void HandleMove(float dt)
     {
-        Vector2 s = OVRInput.Get(OVRInput.Axis2D.PrimaryThumbstick, OVRInput.Controller.LTouch);
+        Vector2 s = desktop ? desktop.Move : OVRInput.Get(OVRInput.Axis2D.PrimaryThumbstick, OVRInput.Controller.LTouch);
         if (s.sqrMagnitude < 0.04f) return;
+        float speed = moveSpeed * (desktop ? desktop.SpeedMultiplier : 1f);
         Vector3 fwd = Vector3.ProjectOnPlane(head.forward, Vector3.up);
         if (fwd.sqrMagnitude < 1e-4f) fwd = Vector3.ProjectOnPlane(head.up, Vector3.up); // looking straight down
         fwd.Normalize();
         Vector3 right = Vector3.Cross(Vector3.up, fwd);
-        Vector3 move = Vector3.ClampMagnitude(fwd * s.y + right * s.x, 1f) * moveSpeed * dt;
+        Vector3 move = Vector3.ClampMagnitude(fwd * s.y + right * s.x, 1f) * speed * dt;
         move = Collide(move);
         if (move.sqrMagnitude < 1e-8f) return;
         root.transform.position -= move; // moving the world back == you moving forward
@@ -478,7 +491,7 @@ public class WalkThroughMode : MonoBehaviour
 
     void HandleSnapTurn()
     {
-        if (aiming) return;
+        if (aiming || desktop) return; // desktop: the mouse turns the rig itself
         float x = OVRInput.Get(OVRInput.Axis2D.PrimaryThumbstick, OVRInput.Controller.RTouch).x;
         if (turnArmed && Mathf.Abs(x) > 0.7f)
         {
@@ -492,6 +505,7 @@ public class WalkThroughMode : MonoBehaviour
 
     void HandleTeleport()
     {
+        if (desktop) return;
         Vector2 r = OVRInput.Get(OVRInput.Axis2D.PrimaryThumbstick, OVRInput.Controller.RTouch);
         if (!aiming)
         {
