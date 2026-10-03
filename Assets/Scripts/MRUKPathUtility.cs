@@ -40,6 +40,9 @@ public static class MRUKPathUtility
     /// DesktopBuildTools) - so the exe reads the very same Exports/RoomData the Editor pulls the Quest's data into.</summary>
     public const string DesktopDataFolderFile = "DataFolder.txt";
 
+    /// <summary>Exists in Builds/Windows while a Windows build runs (see DesktopBuildTools); the Quest build waits for it.</summary>
+    public const string DesktopBuildMarker = ".building";
+
     static string desktopRoot;
 
     /// <summary>Overrides the desktop app's data folder at runtime (e.g. picked in its menu).</summary>

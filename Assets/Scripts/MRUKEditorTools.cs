@@ -6,32 +6,48 @@ using System.IO.Compression;
 using UnityEditor;
 using UnityEngine;
 
+/// <summary>
+/// The one Quest build path (menu MRUK, MRUKExporter.EditorFastBuildAndInstall, and BuildQuest for batch mode):
+/// build -> adb install -> start the app on the headset.
+/// </summary>
 public static class MRUKEditorTools {
+    /// <summary>The Android package id from Player Settings - nothing else hardcodes it.</summary>
+    public static string PackageId => PlayerSettings.GetApplicationIdentifier(UnityEditor.Build.NamedBuildTarget.Android);
+    static string RemoteAppFiles => $"/sdcard/Android/data/{PackageId}/files";
+
     [MenuItem("MRUK/1. Full Build and Install APK", false, 10)]
-    public static void BuildAndInstallFull() { 
+    public static void BuildAndInstallFullMenu() => BuildAndInstallFull();
+
+    public static bool BuildAndInstallFull() { 
         string apk = BuildInternal(BuildOptions.None); 
-        if(apk != null) {
-            if (InstallAPK(apk)) {
-                Debug.Log("<color=green>ALL DONE: Build and Installation successful.</color>");
-            } else {
-                Debug.LogWarning("<color=orange>PARTIAL SUCCESS: Build successful, but Installation failed (is Quest connected?).</color>");
-            }
-        } else {
+        if(apk == null) {
             Debug.LogError("<color=red>ERROR: Build failed, installation cancelled.</color>");
+            return false;
         }
+        if (InstallAPK(apk) && LaunchApp()) {
+            Debug.Log("<color=green>ALL DONE: Build and Installation successful.</color>");
+            return true;
+        }
+        Debug.LogWarning("<color=orange>PARTIAL SUCCESS: Build successful, but Installation failed (is Quest connected?).</color>");
+        return false;
     }
 
     [MenuItem("MRUK/2. Fast Build and Install APK", false, 11)]
-    public static void BuildAPKFast() { 
+    public static void BuildAPKFastMenu() => BuildAPKFast();
+
+    public static bool BuildAPKFast() { 
         string apk = BuildInternal(BuildOptions.Development, fast: true); 
-        if(apk != null) {
-            if (InstallAPK(apk)) {
-                Debug.Log("<color=green>FAST BUILD AND INSTALL DONE.</color>");
-            } else {
-                Debug.LogWarning("<color=orange>FAST BUILD DONE, but Installation failed.</color>");
-            }
+        if(apk == null) return false;
+        if (InstallAPK(apk) && LaunchApp()) {
+            Debug.Log("<color=green>FAST BUILD AND INSTALL DONE.</color>");
+            return true;
         }
+        Debug.LogWarning("<color=orange>FAST BUILD DONE, but Installation failed.</color>");
+        return false;
     }
+
+    /// <summary>Starts the installed app on the headset (its launcher activity).</summary>
+    public static bool LaunchApp() => RunAdb($"shell monkey -p {PackageId} -c android.intent.category.LAUNCHER 1");
 
     [MenuItem("MRUK/3. Install APK Only", false, 12)]
     public static void InstallOnly() { 
@@ -52,7 +68,7 @@ public static class MRUKEditorTools {
     [MenuItem("MRUK/4. Uninstall App", false, 13)]
     public static void UninstallAPK() { 
         Debug.Log("<color=orange>Uninstalling application...</color>");
-        if (RunAdb("uninstall com.veks.XRHouseDesignExport")) {
+        if (RunAdb($"uninstall {PackageId}")) {
             Debug.Log("<color=green>UNINSTALL COMPLETE.</color>");
         } else {
             Debug.LogError("<color=red>UNINSTALL FAILED.</color>");
@@ -62,8 +78,6 @@ public static class MRUKEditorTools {
     /// <summary>How many export sessions "Delete Old Exports" keeps - on the Quest and in Exports/RoomData.</summary>
     const int KeepExports = 5;   // keep in sync with "(keep 5)" in the menu item name below (attributes can't format an int)
     const string RemoteExportDir = "/sdcard/Download/XRHouseExports";
-
-    const string RemoteAppFiles = "/sdcard/Android/data/com.veks.XRHouseDesignExport/files";
 
     /// <summary>Pulls every export session and the saved scans from the Quest into Exports/RoomData - the one local
     /// folder; every export there (it carries its scan JSON, edits and room names) is a scan source in the Editor.
@@ -231,6 +245,13 @@ public static class MRUKEditorTools {
     /// (Diagnostics Data needs at least a symbol table, so turning symbols off completely would warn on every build).
     /// </param>
     public static string BuildInternal(BuildOptions o, bool fast = false) {
+        // Never alongside the Windows build (shared Assets - see DesktopBuildTools); a marker older than 30 min is
+        // a leftover from a killed build and is ignored.
+        var marker = new FileInfo(Path.Combine("Builds/Windows", MRUKPathUtility.DesktopBuildMarker));
+        if (marker.Exists && (DateTime.Now - marker.LastWriteTime).TotalMinutes < 30) {
+            Debug.LogError("<color=red>BUILD FAILED: a Windows desktop build is running - wait for it to finish.</color>");
+            return null;
+        }
         Debug.Log($"<color=cyan>Starting APK Build ({(fast ? "fast" : "full")})...</color>");
 
         SetDebugSymbols(fast ? "SymbolTable" : "Full");

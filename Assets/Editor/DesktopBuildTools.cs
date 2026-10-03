@@ -134,6 +134,17 @@ public static class DesktopBuildTools
     /// DataFolder.txt next to the exe so the app reads the given data folder (the project's Exports/RoomData).</summary>
     public static bool BuildWindows(string exe, string dataFolder)
     {
+        // Marker for the Quest build (MRUKEditorTools.BuildInternal refuses to start meanwhile): both builds share
+        // Assets, and this one briefly rewrites the XR settings while AR Foundation moves assets to Assets/XR/Temp.
+        string marker = Path.Combine(Path.GetDirectoryName(exe), MRUKPathUtility.DesktopBuildMarker);
+        Directory.CreateDirectory(Path.GetDirectoryName(exe));
+        File.WriteAllText(marker, DateTime.Now.ToString("s"));
+        try { return BuildWindowsInner(exe, dataFolder); }
+        finally { File.Delete(marker); }
+    }
+
+    static bool BuildWindowsInner(string exe, string dataFolder)
+    {
         if (!File.Exists(ScenePath)) CreateScene();
         PlayerSettings.SetScriptingBackend(NamedBuildTarget.Standalone, ScriptingImplementation.Mono2x);
         Directory.CreateDirectory(Path.GetDirectoryName(exe));
