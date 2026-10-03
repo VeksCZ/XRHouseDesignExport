@@ -217,6 +217,83 @@ public static class DoorCatalog
         Swing(d, tmp, out left, out swingDir, out toRight);
     }
 
+    // ---------- first guess for a door/window nobody has set yet ----------
+
+    static float FloorArea(MRUKRoom room)
+    {
+        if (room == null) return 0f;
+        float sum = 0f;
+        foreach (var f in room.FloorAnchors)
+        {
+            if (f == null || f.PlaneBoundary2D == null) continue;
+            var p = f.PlaneBoundary2D;
+            float a = 0f;
+            for (int i = 0, j = p.Count - 1; i < p.Count; j = i++) a += p[j].x * p[i].y - p[i].x * p[j].y;
+            sum += Mathf.Abs(a) / 2f;
+        }
+        return sum;
+    }
+
+    /// <summary>How far the wall runs on from a jamb (inside 'room', just off the wall) before the room ends.</summary>
+    static float WallRun(List<MRUKRoom> rooms, MRUKRoom room, Vector3 jamb, Vector3 outward, Vector3 into)
+    {
+        if (room == null) return float.MaxValue;
+        Vector3 p0 = jamb + into * 0.15f + Vector3.up * 0.5f;
+        for (float t = 0.05f; t < 4f; t += 0.05f)
+            if (FindRoomAt(rooms, p0 + outward * t) != room) return t;
+        return 4f;
+    }
+
+    /// <summary>Hinge on the jamb nearer the room's corner, so the open leaf lies against the wall.</summary>
+    static HingeSide GuessHinge(DoorInfo d, DoorEdit e, List<MRUKRoom> rooms)
+    {
+        var into = rooms.FirstOrDefault(r => RoomId(r) == e.opensIntoRoomUuid);
+        var tmp = new DoorEdit { opensIntoRoomUuid = e.opensIntoRoomUuid, hinge = HingeSide.Left };
+        Swing(d, tmp, out var left, out var swing, out var toRight);
+        Vector3 right = left + toRight * d.width;
+        float runL = WallRun(rooms, into, left, -toRight, swing), runR = WallRun(rooms, into, right, toRight, swing);
+        return runR < runL - 0.05f ? HingeSide.Right : HingeSide.Left;
+    }
+
+    static SectionEdit Part(DoorKind k, HingeSide h = HingeSide.Left) => new SectionEdit { kind = k, hinge = h };
+
+    /// <summary>
+    /// A sensible starting point for an unset door or window. Doors: into the larger room (so a WC or a small
+    /// store room opens out to the hall, a room off the hall opens into the room), front doors inwards, wide outside
+    /// openings as garage doors; hinge on the side nearer the corner. Windows: into the room, split by size -
+    /// small high ones tilt, narrow ones are one tilt-turn sash, wider ones two, very wide ones get a fixed middle,
+    /// and floor-to-ceiling ones become balcony doors or, when wide, an HS portal with a fixed part.
+    /// </summary>
+    public static void Guess(DoorInfo d, DoorEdit e, List<MRUKRoom> rooms, string viewerRoomId)
+    {
+        string front = RoomId(d.roomFront), back = RoomId(d.roomBack);
+        bool exterior = d.roomFront == null || d.roomBack == null;
+        if (exterior) e.opensIntoRoomUuid = d.roomFront != null ? front : back;
+        else if (d.isWindow) e.opensIntoRoomUuid = string.IsNullOrEmpty(viewerRoomId) ? front : viewerRoomId;
+        else e.opensIntoRoomUuid = FloorArea(d.roomFront) >= FloorArea(d.roomBack) ? front : back;
+
+        float w = d.width, h = d.height;
+        if (!d.isWindow)
+        {
+            e.kind = exterior && w >= 2.0f ? DoorKind.Garage : w >= 1.4f ? DoorKind.Double : DoorKind.Single;
+            e.hinge = GuessHinge(d, e, rooms);
+            return;
+        }
+
+        e.kind = DoorKind.Single; // a window made of parts
+        e.hinge = GuessHinge(d, e, rooms);
+        if (h > 1.8f)
+        {
+            if (w >= 2.4f) e.sections = new List<SectionEdit> { Part(DoorKind.Sliding, HingeSide.Right), Part(DoorKind.Fixed) };
+            else if (w >= 1.4f) e.sections = new List<SectionEdit> { Part(DoorKind.Single, HingeSide.Left), Part(DoorKind.TiltTurn, HingeSide.Right) };
+            else e.sections = new List<SectionEdit> { Part(DoorKind.TiltTurn, e.hinge) };
+        }
+        else if (h < 0.7f && w < 1.2f) e.sections = new List<SectionEdit> { Part(DoorKind.Tilt) };
+        else if (w < 1.0f) e.sections = new List<SectionEdit> { Part(DoorKind.TiltTurn, e.hinge) };
+        else if (w < 1.8f) e.sections = new List<SectionEdit> { Part(DoorKind.TiltTurn, HingeSide.Left), Part(DoorKind.TiltTurn, HingeSide.Right) };
+        else e.sections = new List<SectionEdit> { Part(DoorKind.TiltTurn, HingeSide.Left), Part(DoorKind.Fixed), Part(DoorKind.TiltTurn, HingeSide.Right) };
+    }
+
     public static void Swing(DoorInfo d, DoorEdit e, out Vector3 hinge, out Vector3 swingDir, out Vector3 toOther) =>
         Swing(d.center, d.right, d.normal, d.width, d.height, e, d.roomFront, d.roomBack, out hinge, out swingDir, out toOther);
 }

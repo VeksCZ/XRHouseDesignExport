@@ -148,7 +148,26 @@ public class DoorEditTool : MonoBehaviour
         if (!frameRoot) { uiLog?.AddLog("Doors: open the Dollhouse or Walk first."); return; }
         selected = hovered;
         if (selected == null) { ClosePanel(); return; }
-        OpenPanel();
+        if (DoorCatalog.FindEdit(HouseEditsStore.Current, selected, rooms) == null) GuessAndOpen(selected);
+        else OpenPanel();
+    }
+
+    /// <summary>First pick of an unset door/window: save a guess straight away (one undo step), then adjust.</summary>
+    async void GuessAndOpen(DoorInfo d)
+    {
+        await editMode.Commit(edits =>
+        {
+            if (DoorCatalog.FindEdit(edits, d, rooms) == null) edits.doors.Add(GuessedEdit(d));
+        });
+        if (selected == d) OpenPanel();
+        uiLog?.AddLog($"{(d.isWindow ? "Window" : "Door")}: guessed - adjust if it's different.");
+    }
+
+    DoorEdit GuessedEdit(DoorInfo d)
+    {
+        var e = DoorCatalog.NewEdit(d);
+        DoorCatalog.Guess(d, e, rooms, ViewerSideRoomId(d));
+        return e;
     }
 
     // ---------- drawing ----------
@@ -348,19 +367,10 @@ public class DoorEditTool : MonoBehaviour
     {
         var d = selected;
         if (d == null || editMode == null) return;
-        string viewerSide = ViewerSideRoomId(d);
-        if (string.IsNullOrEmpty(viewerSide))
-            viewerSide = d.roomFront != null ? DoorCatalog.RoomId(d.roomFront) : DoorCatalog.RoomId(d.roomBack);
         await editMode.Commit(edits =>
         {
             var e = DoorCatalog.FindEdit(edits, d, rooms);
-            if (e == null)
-            {
-                e = DoorCatalog.NewEdit(d);
-                e.opensIntoRoomUuid = viewerSide;
-                e.kind = DoorKind.Fixed;
-                edits.doors.Add(e);
-            }
+            if (e == null) { e = GuessedEdit(d); edits.doors.Add(e); }
             if (e.sections == null || e.sections.Count == 0)
                 e.sections = e.kind == DoorKind.Wall ? new List<SectionEdit> { new SectionEdit() }
                     : DoorCatalog.Sections(e).Select(x => new SectionEdit { kind = x.s.kind, hinge = x.s.hinge }).ToList();
@@ -574,19 +584,10 @@ public class DoorEditTool : MonoBehaviour
     {
         var d = selected;
         if (d == null || editMode == null) return;
-        string viewerSide = ViewerSideRoomId(d);
-        // A window opens into the room, never "outside".
-        if (d.isWindow && string.IsNullOrEmpty(viewerSide))
-            viewerSide = d.roomFront != null ? DoorCatalog.RoomId(d.roomFront) : DoorCatalog.RoomId(d.roomBack);
         await editMode.Commit(edits =>
         {
             var e = DoorCatalog.FindEdit(edits, d, rooms);
-            if (e == null)
-            {
-                e = DoorCatalog.NewEdit(d);
-                e.opensIntoRoomUuid = viewerSide;
-                edits.doors.Add(e);
-            }
+            if (e == null) { e = GuessedEdit(d); edits.doors.Add(e); }
             mutate(e);
         });
         RefreshPanel();
