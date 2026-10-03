@@ -123,3 +123,33 @@ Assets/AiFamiliarData/Settings/
 # excludes '~'-suffixed folders from the asset pipeline.
 /Assets/XR/APILayers~/
 /Assets/Resources/BuildInfo.txt.meta
+
+# Unity editor crash recovery scenes and Test Runner temp scenes
+/[Aa]ssets/_Recovery/
+/[Aa]ssets/_Recovery.meta
+/[Aa]ssets/InitTestScene*.unity
+/[Aa]ssets/InitTestScene*.unity.meta
+
+# Meta XR SDK per-machine/session ids
+/[Aa]ssets/#Meta/
+/[Aa]ssets/#Meta.meta
+
+# Android native (CMake/Ninja) build cache
+/.utmp/
+
+# Local project backups
+/Backups/
+
+# Other Unity generated / local data
+/[Mm]emoryCaptures/
+/[Rr]ecordings/
+/[Aa]ssets/[Ss]treamingAssets/aa.meta
+/[Aa]ssets/[Ss]treamingAssets/aa/*
+sysinfo.txt
+crashlytics-build.properties
+*.apk
+*.aab
+
+# Claude Code: local settings and the Meta XR Operator skills it installs per machine
+/.claude/settings.local.json
+/.claude/skills/meta-xr-operator*/
