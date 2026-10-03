@@ -36,7 +36,7 @@ public class DesktopWalkApp : MonoBehaviour
         walk ??= FindAnyObjectByType<WalkThroughMode>() ?? gameObject.AddComponent<WalkThroughMode>();
         rig ??= FindAnyObjectByType<DesktopWalkRig>();
         Application.targetFrameRate = -1;
-        QualitySettings.vSyncCount = 1;
+        QualitySettings.vSyncCount = Array.IndexOf(Environment.GetCommandLineArgs(), "-novsync") >= 0 ? 0 : 1;
         // Big flat-coloured surfaces: edges stair-step badly without MSAA. Not in the Editor (it'd be saved to the asset).
         if (!Application.isEditor && UnityEngine.Rendering.GraphicsSettings.currentRenderPipeline is UnityEngine.Rendering.Universal.UniversalRenderPipelineAsset urp)
         {
@@ -47,6 +47,7 @@ public class DesktopWalkApp : MonoBehaviour
 
     async void Start()
     {
+        if (Arg("-shot") != null) Application.runInBackground = true; // a test window may never get focus
         RefreshScans();
         string last = Arg("-scan") ?? PlayerPrefs.GetString(PrefLastScan, "");
         selected = Mathf.Max(0, scans.IndexOf(last));
@@ -57,9 +58,21 @@ public class DesktopWalkApp : MonoBehaviour
         string shot = Arg("-shot");
         if (shot != null)
         {
-            for (int i = 0; i < 30; i++) await Task.Yield();
+            int f0 = Time.frameCount; float t0 = Time.realtimeSinceStartup;
+            var frameMs = new List<string>();
+            int lastFrame = f0; float lastT = t0;
+            while (Time.frameCount - f0 < 30)
+            {
+                await Task.Yield();
+                if (Time.frameCount == lastFrame) continue;
+                frameMs.Add(((Time.realtimeSinceStartup - lastT) * 1000f).ToString("0"));
+                lastFrame = Time.frameCount; lastT = Time.realtimeSinceStartup;
+            }
+            Debug.Log($"TIMING 30 frames after load: {(Time.realtimeSinceStartup - t0) * 1000f:0} ms [{string.Join(" ", frameMs)}] " +
+                      $"focus={Application.isFocused} vsync={QualitySettings.vSyncCount} {SystemInfo.graphicsDeviceType} {Screen.width}x{Screen.height}");
             ScreenCapture.CaptureScreenshot(shot);
-            for (int i = 0; i < 10; i++) await Task.Yield();
+            f0 = Time.frameCount;
+            while (Time.frameCount - f0 < 3) await Task.Yield();
             Debug.Log($"[DesktopWalkApp] shot {shot}, walk on: {walk.IsOn}, status: {status}");
             Application.Quit(walk.IsOn ? 0 : 2);
         }
@@ -102,12 +115,15 @@ public class DesktopWalkApp : MonoBehaviour
         try
         {
             if (MRUK.Instance == null) { status = "MRUK missing in the scene."; return; }
+            var sw = System.Diagnostics.Stopwatch.StartNew();
             walk.Exit(); // it holds the old scan's rooms - MRUK is about to replace them
             if (!await MRUKSceneCache.LoadCachedScene(MRUK.Instance, scan)) { status = $"Could not load {scan}."; return; }
+            long tScan = sw.ElapsedMilliseconds;
             HouseEditsStore.Bind(scan);
             RoomNames.FilePath = MRUKSceneCache.RoomNamesPath(scan);
             rig?.ResetView();
             if (!await walk.Enter(null, null)) { status = $"{scan}: no walkable rooms."; return; }
+            Debug.Log($"TIMING load '{scan}': scan json {tScan} ms, walk model {sw.ElapsedMilliseconds - tScan} ms, total {sw.ElapsedMilliseconds} ms (t={Time.realtimeSinceStartup:0.00}s)");
             loadedScan = scan;
             floorInfo = "";
             PlayerPrefs.SetString(PrefLastScan, scan);

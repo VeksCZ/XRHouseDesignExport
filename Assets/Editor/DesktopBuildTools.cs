@@ -137,9 +137,13 @@ public static class DesktopBuildTools
         if (!File.Exists(ScenePath)) CreateScene();
         PlayerSettings.SetScriptingBackend(NamedBuildTarget.Standalone, ScriptingImplementation.Mono2x);
         Directory.CreateDirectory(Path.GetDirectoryName(exe));
+        // Native plugins left over from an earlier build would otherwise stay next to the exe.
+        string plugins = Path.Combine(Path.GetDirectoryName(exe), Path.GetFileNameWithoutExtension(exe) + "_Data", "Plugins");
+        if (Directory.Exists(plugins)) Directory.Delete(plugins, true);
 
         var xr = XRGeneralSettingsPerBuildTarget.XRGeneralSettingsForBuildTarget(BuildTargetGroup.Standalone);
         bool xrInit = xr != null && xr.InitManagerOnStart;
+        var excluded = ExcludeNativePlugins();
         BuildReport report;
         try
         {
@@ -157,6 +161,7 @@ public static class DesktopBuildTools
         finally
         {
             if (xr != null) { xr.InitManagerOnStart = xrInit; EditorUtility.SetDirty(xr); AssetDatabase.SaveAssets(); }
+            foreach (var imp in excluded) imp.SetIncludeInBuildDelegate(null);
         }
 
         var s = report.summary;
@@ -165,6 +170,29 @@ public static class DesktopBuildTools
         File.WriteAllText(Path.Combine(Path.GetDirectoryName(exe), MRUKPathUtility.DesktopDataFolderFile), dataFolder);
         Debug.Log($"WINDOWS BUILD COMPLETED SUCCESSFULLY - data folder: {dataFolder}");
         return true;
+    }
+
+    /// <summary>Meta native plugins the desktop app has no use for, left out of the Windows build only (the Quest
+    /// build and the packages are untouched). Each telemetry library blocks startup for ~5 s on Windows: its init
+    /// starts an ADB server to look for a headset. Their managed callers catch DllNotFoundException.</summary>
+    static readonly string[] DesktopExcludedPlugins =
+    {
+        "ISDKEngineTelemetry.dll",          // Interaction SDK telemetry, initialised unconditionally before scene load
+        "RuntimeOptimizer_Plugin_dll.dll",  // Meta Runtime Optimizer (profiling tool)
+        "XrApiLayer_METAX_operator.dll",    // OpenXR API layer for the Meta XR AI tooling
+    };
+
+    static System.Collections.Generic.List<PluginImporter> ExcludeNativePlugins()
+    {
+        var list = new System.Collections.Generic.List<PluginImporter>();
+        foreach (var imp in PluginImporter.GetAllImporters())
+        {
+            if (Array.IndexOf(DesktopExcludedPlugins, Path.GetFileName(imp.assetPath)) < 0) continue;
+            imp.SetIncludeInBuildDelegate(_ => false);
+            list.Add(imp);
+            Debug.Log($"[DesktopBuildTools] Not in the Windows build: {imp.assetPath}");
+        }
+        return list;
     }
 
     static string Arg(string name)

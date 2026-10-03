@@ -231,6 +231,7 @@ public class WalkThroughMode : MonoBehaviour
         }
         doors.Clear();
 
+        var sw = System.Diagnostics.Stopwatch.StartNew();
         XRHouseModel model;
         if (walkModel == WalkModel.Anchor)
         {
@@ -240,14 +241,19 @@ public class WalkThroughMode : MonoBehaviour
         else if (walkModel == WalkModel.Mesh) model = await XRModelFactory.CreateMeshAnalytical(walkRooms, yaw, center, forDollhouse: false);
         else model = await XRModelFactory.CreateRawScan(walkRooms, yaw, center, forDollhouse: false);
         if (!root) return false; // left while building
+        long tModel = sw.ElapsedMilliseconds;
 
         var visual = UnityModelLoader.LoadToScene(model, shaded: true, classifyByNormal: walkModel != WalkModel.Anchor);
         if (visual == null) return false;
+        long tMeshes = sw.ElapsedMilliseconds;
         visual.transform.SetParent(root.transform, false);
         walkVisual = visual;
         PrepareParts();
+        long tColliders = sw.ElapsedMilliseconds;
         ApplyStairs();
         Physics.SyncTransforms();
+        Debug.Log($"TIMING walk {walkModel}: model {tModel} ms, meshes {tMeshes - tModel} ms, colliders {tColliders - tMeshes} ms, " +
+                  $"stairs+doors {sw.ElapsedMilliseconds - tColliders} ms");
         return true;
     }
 
