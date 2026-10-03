@@ -26,10 +26,12 @@ public static class RoomNames
     static Dictionary<string, string> map;
     static string path;
 
-    /// <summary>Where the names are kept; defaults to room_names.json in the scan cache folder.</summary>
+    /// <summary>Where the names are kept; defaults to room_names.json in the headset's scan cache folder. In the Editor
+    /// each loaded scan uses its own 94_Data_RoomNames.json (see MRUKExporter); the default there is a scratch file in
+    /// Library, used only for the live/sample scene. Setting null goes back to the default.</summary>
     public static string FilePath
     {
-        get => path ?? Path.Combine(MRUKSceneCache.GetCacheRoot(), "room_names.json");
+        get => path ?? (Application.isEditor ? "Library/XRHouse_room_names.json" : Path.Combine(MRUKSceneCache.GetCacheRoot(), "room_names.json"));
         set { path = value; map = null; }
     }
 
@@ -55,6 +57,20 @@ public static class RoomNames
             File.WriteAllText(FilePath, JsonUtility.ToJson(store, true));
         }
         catch (Exception ex) { Debug.LogWarning("[RoomNames] Could not save: " + ex.Message); }
+    }
+
+    /// <summary>Writes the names of the given rooms (all if null) to 'file' in the same format, e.g. into an export.
+    /// Returns false (and writes nothing) if none of them has a name.</summary>
+    public static bool WriteTo(string file, IEnumerable<string> roomKeys = null)
+    {
+        EnsureLoaded();
+        var keys = roomKeys == null ? null : new HashSet<string>(roomKeys);
+        var store = new Store();
+        foreach (var kv in map)
+            if (keys == null || keys.Contains(kv.Key)) { store.keys.Add(kv.Key); store.values.Add(kv.Value); }
+        if (store.keys.Count == 0) return false;
+        File.WriteAllText(file, JsonUtility.ToJson(store, true));
+        return true;
     }
 
     public static bool TryGet(string roomKey, out string name)

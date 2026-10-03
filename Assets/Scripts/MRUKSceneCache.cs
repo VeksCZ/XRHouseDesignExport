@@ -15,39 +15,76 @@ using Meta.XR.MRUtilityKit;
 /// scene populates ordinary MRUKRoom/MRUKAnchor components just like a live device scan, so the
 /// rest of the export pipeline (MRUKDataProcessor, XRModelFactory, OBJWriter, GLBExporter) doesn't
 /// need to know or care whether the data came from the headset or a previously saved cache.
+///
+/// Where a saved scan lives:
+/// - Headset: the app's own storage (Android/data/&lt;package&gt;/files/ScanCache) as Name.scene.json + Name.edits.json.
+///   Unlike Downloads, scoped storage lets the app read/delete every file there across reinstalls, with no permission.
+/// - Editor: there is no separate cache. Every folder in the export root (Exports/RoomData) that holds a
+///   92_Data_Scan.scene.json is a scan source, named after its folder; its edits are 93_Data_Edits.json and its room
+///   names 94_Data_RoomNames.json in the same folder. Exports are self-contained, so a pulled or batch export can be
+///   reloaded, edited and re-exported on the PC as is. Scans pulled from the headset's ScanCache become Scan_&lt;name&gt;.
 /// </summary>
 public static class MRUKSceneCache
 {
     public const string EXTENSION = ".scene.json";
+    /// <summary>Folder prefix of a saved headset scan pulled to the PC (Editor), as opposed to an Export_ session.</summary>
+    public const string ScanFolderPrefix = "Scan_";
 
-    /// <summary>
-    /// The app's own storage on the headset (Android/data/&lt;package&gt;/files/ScanCache). Unlike the Downloads
-    /// folder, scoped storage lets the app read every file there - including scans copied in over ADB - and
-    /// it needs no permission. In the Editor it is a project-relative folder.
-    /// </summary>
+    static bool FolderMode => Application.isEditor;
+
+    /// <summary>Headset: persistentDataPath/ScanCache. Editor: the export root (Exports/RoomData).</summary>
     public static string GetCacheRoot()
     {
-        string root = Application.isEditor ? "Exports/ScanCache" : Path.Combine(Application.persistentDataPath, "ScanCache");
+        string root = FolderMode ? MRUKPathUtility.GetExportRoot() : Path.Combine(Application.persistentDataPath, "ScanCache");
         Directory.CreateDirectory(root);
         return root;
     }
 
-    /// <summary>Cached scan names (no extension), most recently saved first.</summary>
+    /// <summary>The scene JSON of a saved scan.</summary>
+    public static string ScanPath(string name) => FolderMode
+        ? Path.Combine(GetCacheRoot(), name, MRUKPathUtility.DATA_SCENE)
+        : Path.Combine(GetCacheRoot(), name + EXTENSION);
+
+    /// <summary>The user's edits (HouseEdits) of a saved scan.</summary>
+    public static string EditsPath(string name) => FolderMode
+        ? Path.Combine(GetCacheRoot(), name, MRUKPathUtility.DATA_EDITS)
+        : Path.Combine(GetCacheRoot(), name + HouseEditsStore.EXTENSION);
+
+    /// <summary>Room names file to use while this scan is active: its own file in the Editor; null (= the shared
+    /// default file) on the headset, where room UUIDs stay the same across re-saves of one house.</summary>
+    public static string RoomNamesPath(string name) => FolderMode && !string.IsNullOrEmpty(name)
+        ? Path.Combine(GetCacheRoot(), name, MRUKPathUtility.DATA_ROOM_NAMES)
+        : null;
+
+    /// <summary>Cached scan names, most recently saved first.</summary>
     public static List<string> ListCachedScans()
     {
         string root = GetCacheRoot();
         if (!Directory.Exists(root)) return new List<string>();
+        if (FolderMode)
+            return Directory.GetDirectories(root)
+                .Where(d => File.Exists(Path.Combine(d, MRUKPathUtility.DATA_SCENE)))
+                .OrderByDescending(d => File.GetLastWriteTime(Path.Combine(d, MRUKPathUtility.DATA_SCENE)))
+                .Select(Path.GetFileName)
+                .ToList();
         return Directory.GetFiles(root, "*" + EXTENSION)
             .OrderByDescending(File.GetLastWriteTime)
             .Select(f => Path.GetFileName(f).Substring(0, Path.GetFileName(f).Length - EXTENSION.Length))
             .ToList();
     }
 
-    /// <summary>Deletes a previously cached scan by name. Returns true if a file was actually removed.</summary>
+    /// <summary>Deletes a cached scan by name (in the Editor: its whole export/scan folder). True if something was removed.</summary>
     public static bool DeleteCachedScan(string name)
     {
         if (string.IsNullOrEmpty(name)) return false;
-        string path = Path.Combine(GetCacheRoot(), name + EXTENSION);
+        if (FolderMode)
+        {
+            string dir = Path.Combine(GetCacheRoot(), name);
+            if (!File.Exists(Path.Combine(dir, MRUKPathUtility.DATA_SCENE))) return false;
+            Directory.Delete(dir, true);
+            return true;
+        }
+        string path = ScanPath(name);
         if (!File.Exists(path)) return false;
         File.Delete(path);
         return true;
@@ -69,7 +106,10 @@ public static class MRUKSceneCache
         if (string.IsNullOrEmpty(json)) return null;
 
         name = string.IsNullOrEmpty(name) ? "Scan_" + DateTime.Now.ToString("yyyyMMdd_HHmmss") : name;
-        File.WriteAllText(Path.Combine(GetCacheRoot(), name + EXTENSION), json);
+        if (FolderMode && !name.StartsWith(ScanFolderPrefix)) name = ScanFolderPrefix + name;
+        string path = ScanPath(name);
+        Directory.CreateDirectory(Path.GetDirectoryName(path));
+        File.WriteAllText(path, json);
         return name;
     }
 
@@ -77,7 +117,7 @@ public static class MRUKSceneCache
     public static async Task<bool> LoadCachedScene(MRUK mruk, string name)
     {
         if (mruk == null || string.IsNullOrEmpty(name)) return false;
-        string path = Path.Combine(GetCacheRoot(), name + EXTENSION);
+        string path = ScanPath(name);
         if (!File.Exists(path)) return false;
 
         string json = File.ReadAllText(path);

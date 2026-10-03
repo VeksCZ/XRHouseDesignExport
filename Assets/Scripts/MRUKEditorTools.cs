@@ -63,22 +63,24 @@ public static class MRUKEditorTools {
     const int KeepExports = 5;   // keep in sync with "(keep 5)" in the menu item name below (attributes can't format an int)
     const string RemoteExportDir = "/sdcard/Download/XRHouseExports";
 
-    /// <summary>Pulls every export session (and the saved scans) from the Quest. Use "7. Delete Old Exports" first
-    /// to trim what's there. Each pulled export's scan JSON is also copied into Exports/ScanCache so it shows up
-    /// as a scan source in the Editor.</summary>
+    const string RemoteAppFiles = "/sdcard/Android/data/com.veks.XRHouseDesignExport/files";
+
+    /// <summary>Pulls every export session and the saved scans from the Quest into Exports/RoomData - the one local
+    /// folder; every export there (it carries its scan JSON, edits and room names) is a scan source in the Editor.
+    /// Saved scans (the app's own ScanCache) arrive as Scan_&lt;name&gt; folders in the same layout. Use "7. Delete Old
+    /// Exports" first to trim what's there.</summary>
     [MenuItem("MRUK/5. Pull data from Quest", false, 30)]
     public static void PullFromQuest() {
-        string local = Path.GetFullPath("Exports/RoomData");
+        string local = Path.GetFullPath(MRUKPathUtility.GetExportRoot());
         Directory.CreateDirectory(local);
         Debug.Log($"<color=cyan>Pulling data from Quest to {local}...</color>");
 
-        // Saved scans live in the app's own storage, not in Downloads.
-        string scanLocal = Path.GetFullPath("Exports/ScanCache");
-        Directory.CreateDirectory(scanLocal);
-        RunAdb($"pull \"/sdcard/Android/data/com.veks.XRHouseDesignExport/files/ScanCache/.\" \"{scanLocal}\"");
+        // Session logs used to be written into the export folder (and got pulled with it, hundreds of MB); builds
+        // now keep them in the app's storage - remove what older builds left there before pulling.
+        RunAdb($"shell rm -rf \"{RemoteExportDir}/Logs\" \"{RemoteExportDir}/session_debug_log.txt\"");
+        PullSavedScans(local);
         if (RunAdb($"pull \"{RemoteExportDir}/.\" \"{local}\"")) {
             var dirs = Directory.GetDirectories(local, "Export_*");
-            foreach (var d in dirs) CopyExportScanToCache(d, scanLocal);
             if (dirs.Length > 0) {
                 var latest = dirs.OrderByDescending(d => Path.GetFileName(d), StringComparer.Ordinal).First();
                 Debug.Log($"<color=green>DOWNLOADED: Opening {Path.GetFileName(latest)}</color>");

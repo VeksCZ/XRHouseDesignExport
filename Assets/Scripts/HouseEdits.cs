@@ -59,7 +59,17 @@ public class StairEdit
 /// Both: Wall = there is nothing here at all (a false detection) - the opening is walled up.
 /// Values are stored as numbers in the edits file - only ever append.
 /// </summary>
-public enum DoorKind { Single, Double, Sliding, Opening, Wall, Garage, Fixed, Tilt }
+public enum DoorKind { Single, Double, Sliding, Opening, Wall, Garage, Fixed, Tilt, TiltTurn }
+
+/// <summary>One part of a window divided into parts side by side (left to right as seen from the room the window
+/// opens into): Fixed, TiltTurn (otvíravě-sklopné), Single (casement), Tilt, Sliding (HS portal - slides in front
+/// of its neighbour). hinge: which side it's hinged on - or, for Sliding, which way it slides.</summary>
+[Serializable]
+public class SectionEdit
+{
+    public DoorKind kind = DoorKind.Fixed;
+    public HingeSide hinge = HingeSide.Left;
+}
 public enum HingeSide { Left, Right }
 
 /// <summary>One door's user-defined properties. Matched to its door by anchorUuid first; roomUuid + localPos is
@@ -75,6 +85,8 @@ public class DoorEdit
     public HingeSide hinge = HingeSide.Left;
     /// <summary>The room the leaf swings into.</summary>
     public string opensIntoRoomUuid;
+    /// <summary>Windows: the parts it's divided into, equal widths, left to right. Empty = one part of 'kind'.</summary>
+    public List<SectionEdit> sections = new List<SectionEdit>();
 }
 
 /// <summary>
@@ -98,21 +110,29 @@ public static class HouseEditsStore
     public static int RedoCount => redo.Count;
     public static event Action Changed;
 
-    public static string PathFor(string scanName) => Path.Combine(MRUKSceneCache.GetCacheRoot(), scanName + EXTENSION);
+    public static string PathFor(string scanName) => MRUKSceneCache.EditsPath(scanName);
 
-    /// <summary>Switches to the edits of the given saved scan (null = live scan, no edits). Clears undo history.</summary>
-    public static void Bind(string scanName)
+    /// <summary>File the current edits are read from / saved to (null while the live scan is active).</summary>
+    static string currentPath;
+
+    /// <summary>Switches to the edits of the given saved scan (null = live scan, no edits). Clears undo history.
+    /// 'path' overrides where its edits file is (e.g. the batch export binding an arbitrary scan's 93_Data_Edits.json).</summary>
+    public static void Bind(string scanName, string path = null)
     {
-        if (scanName == CurrentScan) return;
+        path = scanName == null ? null : path ?? PathFor(scanName);
+        if (scanName == CurrentScan && path == currentPath) return;
         CurrentScan = scanName;
+        currentPath = path;
         undo.Clear(); redo.Clear();
-        Current = scanName == null ? new HouseEdits() : Load(scanName);
+        Current = scanName == null ? new HouseEdits() : Load(scanName, path);
         Changed?.Invoke();
     }
 
-    static HouseEdits Load(string scanName)
+    /// <summary>True if the current edits hold anything worth writing out.</summary>
+    public static bool HasAny => Current.doors.Count + Current.stairs.Count + Current.holes.Count > 0;
+
+    static HouseEdits Load(string scanName, string path)
     {
-        string path = PathFor(scanName);
         if (File.Exists(path))
         {
             try
@@ -159,7 +179,7 @@ public static class HouseEditsStore
     {
         Current.scanName = CurrentScan;
         Current.modified = DateTime.Now.ToString("s");
-        try { File.WriteAllText(PathFor(CurrentScan), JsonUtility.ToJson(Current, true)); }
+        try { File.WriteAllText(currentPath ?? PathFor(CurrentScan), JsonUtility.ToJson(Current, true)); }
         catch (Exception ex) { Debug.LogException(ex); }
         Changed?.Invoke();
     }
@@ -173,6 +193,7 @@ public static class HouseEditsStore
         if (scanName == CurrentScan)
         {
             CurrentScan = null;
+            currentPath = null;
             undo.Clear(); redo.Clear();
             Current = new HouseEdits();
             Changed?.Invoke();

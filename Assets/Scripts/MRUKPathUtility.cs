@@ -25,6 +25,10 @@ public static class MRUKPathUtility
     /// <summary>MRUK's own full scene JSON (all rooms, anchors, global mesh) - the same format "Save scan" writes
     /// to the ScanCache, so the export can be reloaded as a scan source later (see MRUKSceneCache).</summary>
     public const string DATA_SCENE = "92_Data_Scan" + MRUKSceneCache.EXTENSION;
+    /// <summary>The user's edits of the exported scan (doors, stairs, openings - HouseEdits), so an export is self-contained.</summary>
+    public const string DATA_EDITS = "93_Data_Edits.json";
+    /// <summary>Room names picked in the app (RoomNames format, keyed by room UUID).</summary>
+    public const string DATA_ROOM_NAMES = "94_Data_RoomNames.json";
     public const string DATA_REPORT = "99_Report_House.html";
     public const string DATA_REPORT_ROOM = "99_Report_Room.html";
 
@@ -38,16 +42,37 @@ public static class MRUKPathUtility
     /// <summary>Export_{date_time}_{scan name}, so exports of different scans/houses sort and read clearly.</summary>
     public static string CreateSessionFolder(string root, string sourceName)
     {
-        string session = Path.Combine(root, $"Export_{DateTime.Now:yyyyMMdd_HHmmss}_{MRUKDataProcessor.GetSafeName(sourceName)}");
+        string session = Path.Combine(root, $"Export_{DateTime.Now:yyyyMMdd_HHmmss}_{MRUKDataProcessor.GetSafeName(ScanNameFromFolder(sourceName))}");
         Directory.CreateDirectory(session);
         return session;
     }
 
+    static readonly System.Text.RegularExpressions.Regex ExportPrefix = new System.Text.RegularExpressions.Regex(@"^Export_\d{8}_\d{6}_");
+
+    /// <summary>The scan's own name from an export/scan folder name ("Export_20261002_105316_20261002_0848_15rooms" or
+    /// "Scan_20261002_0848_15rooms" -> "20261002_0848_15rooms"), so re-exporting an export doesn't nest the prefixes.
+    /// Anything else is returned unchanged.</summary>
+    public static string ScanNameFromFolder(string name)
+    {
+        if (string.IsNullOrEmpty(name)) return name;
+        var m = ExportPrefix.Match(name);
+        if (m.Success && name.Length > m.Length) return name.Substring(m.Length);
+        if (name.StartsWith(MRUKSceneCache.ScanFolderPrefix) && name.Length > MRUKSceneCache.ScanFolderPrefix.Length)
+            return name.Substring(MRUKSceneCache.ScanFolderPrefix.Length);
+        return name;
+    }
+
+    /// <summary>
+    /// Session logs. On the headset they live in the app's own storage, not in the export folder: there they were
+    /// pulled to the PC with every export (hundreds of MB), and logs written by an earlier install could never be
+    /// deleted by the app (scoped storage). MRUK menu "Pull logs from Quest" fetches them when needed. In the Editor:
+    /// the project's (git-ignored) Logs folder.
+    /// </summary>
     public static string GetLogRoot()
     {
         return Application.isEditor
-            ? "Exports/Logs"
-            : "/sdcard/Download/XRHouseExports/Logs";
+            ? "Logs"
+            : Path.Combine(Application.persistentDataPath, "Logs");
     }
 
     /// <summary>

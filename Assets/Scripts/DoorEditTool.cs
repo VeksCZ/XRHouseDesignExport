@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using System.Linq;
 using TMPro;
 using UnityEngine;
 using UnityEngine.UI;
@@ -76,7 +77,8 @@ public class DoorEditTool : MonoBehaviour
         foreach (var d in doors)
         {
             var e = DoorCatalog.FindEdit(HouseEditsStore.Current, d, rooms);
-            if (e != null) DrawSwing(d, e);
+            if (e != null && d.isWindow && e.kind != DoorKind.Wall) DrawWindow(d, e);
+            else if (e != null) DrawSwing(d, e);
         }
         if (hovered != null && hovered != selected) DrawOutline(hovered, HoverColor);
         if (selected != null) DrawOutline(selected, SelectColor);
@@ -288,10 +290,187 @@ public class DoorEditTool : MonoBehaviour
     };
     readonly DoorKind[] kindValues = new DoorKind[6];
 
+    // ---------- windows: parts ----------
+
+    static readonly DoorKind[] PartCycle = { DoorKind.Fixed, DoorKind.TiltTurn, DoorKind.Single, DoorKind.Tilt, DoorKind.Sliding };
+
+    static string PartLabel(DoorKind k) => k switch
+    {
+        DoorKind.Fixed => "Fixed",
+        DoorKind.TiltTurn => "Tilt-turn",
+        DoorKind.Single => "Casement",
+        DoorKind.Tilt => "Tilt",
+        DoorKind.Sliding => "Sliding (HS)",
+        _ => k.ToString(),
+    };
+
+    /// <summary>Window elevation symbols per part, drawn just in front of the window on your side: the usual
+    /// triangle pointing at the hinge side (casement), at the bottom (tilt), both (tilt-turn), an arrow for sliding.</summary>
+    void DrawWindow(DoorInfo d, DoorEdit e)
+    {
+        DoorCatalog.LeftFrame(d, e, out var left, out var toRight, out _);
+        Vector3 eye = WorldToScan(head.position);
+        Vector3 off = d.normal * (Vector3.Dot(eye - d.center, d.normal) >= 0f ? 0.1f : -0.1f);
+        float W = d.width, h = d.height;
+        Vector3 up = Vector3.up * h;
+        foreach (var (s, f0, f1) in DoorCatalog.Sections(e))
+        {
+            Vector3 a = left + toRight * (W * f0) + off, b = left + toRight * (W * f1) + off;
+            Rect3(a, b, h, SwingColor);
+            bool hl = s.hinge == HingeSide.Left;
+            Vector3 hingeMid = (hl ? a : b) + up * 0.5f, latchBot = hl ? b : a, latchTop = latchBot + up;
+            Vector3 botMid = (a + b) / 2f;
+            switch (s.kind)
+            {
+                case DoorKind.Single:
+                case DoorKind.TiltTurn:
+                    pts.Clear(); pts.Add(latchTop); pts.Add(hingeMid); pts.Add(latchBot); Emit(SwingColor, false);
+                    if (s.kind == DoorKind.TiltTurn) { pts.Clear(); pts.Add(a + up); pts.Add(botMid); pts.Add(b + up); Emit(SwingColor, false); }
+                    break;
+                case DoorKind.Tilt:
+                    pts.Clear(); pts.Add(a + up); pts.Add(botMid); pts.Add(b + up); Emit(SwingColor, false);
+                    break;
+                case DoorKind.Sliding:
+                {
+                    Vector3 mid = (a + b) / 2f + up * 0.5f, dir = (hl ? -toRight : toRight) * (W * (f1 - f0) * 0.35f);
+                    pts.Clear(); pts.Add(mid - dir); pts.Add(mid + dir); Emit(SwingColor, false);
+                    Vector3 tip = mid + dir, back = -dir.normalized * 0.12f;
+                    pts.Clear(); pts.Add(tip + back + Vector3.up * 0.08f); pts.Add(tip); pts.Add(tip + back - Vector3.up * 0.08f); Emit(SwingColor, false);
+                    break;
+                }
+            }
+        }
+    }
+
+    /// <summary>Applies a change to a window's parts (creating its edit / turning old single-kind settings into
+    /// parts first), saves, and rebuilds the panel (its rows depend on the parts).</summary>
+    async void ChangeParts(System.Action<List<SectionEdit>> mutate)
+    {
+        var d = selected;
+        if (d == null || editMode == null) return;
+        string viewerSide = ViewerSideRoomId(d);
+        if (string.IsNullOrEmpty(viewerSide))
+            viewerSide = d.roomFront != null ? DoorCatalog.RoomId(d.roomFront) : DoorCatalog.RoomId(d.roomBack);
+        await editMode.Commit(edits =>
+        {
+            var e = DoorCatalog.FindEdit(edits, d, rooms);
+            if (e == null)
+            {
+                e = DoorCatalog.NewEdit(d);
+                e.opensIntoRoomUuid = viewerSide;
+                e.kind = DoorKind.Fixed;
+                edits.doors.Add(e);
+            }
+            if (e.sections == null || e.sections.Count == 0)
+                e.sections = e.kind == DoorKind.Wall ? new List<SectionEdit> { new SectionEdit() }
+                    : DoorCatalog.Sections(e).Select(x => new SectionEdit { kind = x.s.kind, hinge = x.s.hinge }).ToList();
+            mutate(e.sections);
+            e.kind = DoorKind.Single; // "a window made of parts" (not walled up)
+        });
+        OpenPanel();
+    }
+
+    void OpenWindowPanel(DoorInfo d, Transform t, float pw)
+    {
+        var e = DoorCatalog.FindEdit(HouseEditsStore.Current, d, rooms);
+        bool walled = e != null && e.kind == DoorKind.Wall;
+        var parts = e != null && !walled ? DoorCatalog.Sections(e).Select(x => x.s).ToList() : new List<SectionEdit> { new SectionEdit() };
+        float x0 = 20, rowH = 62, gap = 8, y = 60;
+
+        XRUi.CreateText(t, "PartsLbl", "Parts", 20, TextAlignmentOptions.MidlineLeft, x0, y, 110, rowH, XRUi.MutedText);
+        float bw = (pw - 130 - 20 - gap * 3) / 4f;
+        for (int i = 1; i <= 4; i++)
+        {
+            int n = i;
+            var btn = XRUi.CreateButton(t, n.ToString(), 130 + (i - 1) * (bw + gap), y, bw, rowH, () => ChangeParts(list =>
+            {
+                while (list.Count < n) list.Add(new SectionEdit());
+                while (list.Count > n) list.RemoveAt(list.Count - 1);
+            }), 24);
+            XRUi.SetTint(btn, !walled && e != null && parts.Count == n ? XRUi.ButtonOnColor : XRUi.ButtonToggleColor);
+        }
+        y += rowH + gap;
+
+        float tw = (pw - 130 - 20 - gap) * 0.6f, hw = (pw - 130 - 20 - gap) - tw;
+        for (int i = 0; i < parts.Count; i++)
+        {
+            int idx = i;
+            var s = parts[i];
+            XRUi.CreateText(t, "Part" + i, $"Part {i + 1}", 20, TextAlignmentOptions.MidlineLeft, x0, y, 110, rowH, XRUi.TextColor);
+            XRUi.CreateButton(t, PartLabel(s.kind), 130, y, tw, rowH, () => ChangeParts(list =>
+            {
+                var cur = list[idx].kind;
+                int k = System.Array.IndexOf(PartCycle, cur);
+                list[idx].kind = PartCycle[(k + 1) % PartCycle.Length];
+            }), 20);
+            if (s.kind != DoorKind.Fixed && s.kind != DoorKind.Tilt)
+            {
+                string side = s.kind == DoorKind.Sliding ? (s.hinge == HingeSide.Left ? "slides <" : "slides >") : (s.hinge == HingeSide.Left ? "hinge L" : "hinge R");
+                XRUi.CreateButton(t, side, 130 + tw + gap, y, hw, rowH, () => ChangeParts(list =>
+                    list[idx].hinge = list[idx].hinge == HingeSide.Left ? HingeSide.Right : HingeSide.Left), 20);
+            }
+            y += rowH + gap;
+        }
+
+        XRUi.CreateText(t, "IntoLbl", "Opens into", 20, TextAlignmentOptions.MidlineLeft, x0, y, 110, rowH, XRUi.MutedText);
+        float bw2 = (pw - 130 - 20 - gap) / 2f;
+        intoIds[0] = DoorCatalog.RoomId(d.roomFront); intoIds[1] = DoorCatalog.RoomId(d.roomBack);
+        string id0 = intoIds[0], id1 = intoIds[1];
+        intoButtons[0] = XRUi.CreateButton(t, RoomLabel(d.roomFront), 130, y, bw2, rowH, () => Change(ed => ed.opensIntoRoomUuid = id0), 20);
+        intoButtons[1] = XRUi.CreateButton(t, RoomLabel(d.roomBack), 130 + bw2 + gap, y, bw2, rowH, () => Change(ed => ed.opensIntoRoomUuid = id1), 20);
+        y += rowH + gap;
+
+        XRUi.CreateText(t, "Hint", "Parts left to right as seen from the room it opens into. Click a part's type to change it.",
+            17, TextAlignmentOptions.TopLeft, x0, y, pw - 40, 44, XRUi.MutedText);
+        y += 48;
+        float b3 = (pw - 40 - gap * 2) / 3f;
+        // Toggles: a walled-up window gets its glazing back (its parts are kept).
+        var wall = XRUi.CreateButton(t, "Wall (no window)", x0, y, b3, rowH,
+            () => Change(ed => ed.kind = ed.kind == DoorKind.Wall ? DoorKind.Single : DoorKind.Wall), 18);
+        XRUi.SetTint(wall, walled ? XRUi.ButtonDangerColor : XRUi.ButtonToggleColor);
+        var clear = XRUi.CreateButton(t, "Clear", x0 + b3 + gap, y, b3, rowH, Clear, 20);
+        XRUi.SetTint(clear, XRUi.ButtonDangerColor);
+        XRUi.CreateButton(t, "Close", x0 + (b3 + gap) * 2, y, b3, rowH, () => { selected = null; ClosePanel(); }, 20);
+    }
+
+    static float WindowPanelHeight(int parts) => 60 + (62 + 8) * (1 + parts + 1) + 48 + 62 + 20;
+
     void OpenPanel()
     {
+        // Rebuilt in place (window parts change the layout): keep it exactly where it is.
+        bool hadPanel = panel;
+        Vector3 keepPos = hadPanel ? panel.transform.position : default;
+        Quaternion keepRot = hadPanel ? panel.transform.rotation : default;
+        bool keepMoved = hadPanel && panelDrag && panelDrag.Moved;
         ClosePanel();
+        for (int i = 0; i < 2; i++) intoButtons[i] = null;
         var d = selected;
+        if (d != null && d.isWindow)
+        {
+            var we = DoorCatalog.FindEdit(HouseEditsStore.Current, d, rooms);
+            int n = we != null && we.kind != DoorKind.Wall ? DoorCatalog.Sections(we).Count : 1;
+            float ph = WindowPanelHeight(n);
+            panel = XRUi.CreateWorldCanvas("WindowEditPanel", new Vector2(PW, ph), PScale);
+            var wt = panel.transform;
+            if (hadPanel) wt.SetPositionAndRotation(keepPos, keepRot);
+            else if (userPlaced) wt.SetPositionAndRotation(userPos, userRot);
+            else
+            {
+                Vector3 fwd = Vector3.ProjectOnPlane(head.forward, Vector3.up).normalized;
+                Vector3 pos = head.position + fwd * 0.6f - Vector3.up * 0.18f;
+                wt.SetPositionAndRotation(pos, Quaternion.LookRotation(pos - head.position, Vector3.up));
+            }
+            panelDrag = PanelDrag.Attach(panel, PW, ph);
+            if (keepMoved) userPlaced = true;
+            XRUi.CreatePanel(wt, "Background", XRUi.PanelColor, 0, 0, PW, ph);
+            panelTitle = XRUi.CreateText(wt, "Title", "", 26, TextAlignmentOptions.MidlineLeft, 20, 8, PW - 40, 44, XRUi.TextColor, FontStyles.Bold);
+            for (int i = 0; i < kindButtons.Length; i++) kindButtons[i] = null;
+            hingeButtons[0] = hingeButtons[1] = null;
+            OpenWindowPanel(d, wt, PW);
+            windowPanelSig = WindowSignature(we);
+            RefreshPanel();
+            return;
+        }
         panel = XRUi.CreateWorldCanvas("DoorEditPanel", new Vector2(PW, PH), PScale);
         var t = panel.transform;
         // Where you last dragged it (grip), else in front of you, a bit low, facing you.
@@ -365,13 +544,28 @@ public class DoorEditTool : MonoBehaviour
         if (!panel || selected == null) return;
         var e = DoorCatalog.FindEdit(HouseEditsStore.Current, selected, rooms);
         panelTitle.text = $"{(selected.isWindow ? "Window" : "Door")} {RoomLabel(selected.roomFront)} / {RoomLabel(selected.roomBack)}  {selected.width:0.00} m" + (e == null ? "  (not set)" : "");
+        if (selected.isWindow && WindowSignature(e) != windowPanelSig)
+        {
+            // Parts changed (undo/redo, clear, wall): the panel's rows depend on them.
+            OpenPanel();
+            return;
+        }
         for (int i = 0; i < 6; i++) if (kindButtons[i]) XRUi.SetTint(kindButtons[i], e != null && e.kind == kindValues[i] ? XRUi.ButtonOnColor : XRUi.ButtonToggleColor);
         bool leaf = e == null || e.kind == DoorKind.Single || e.kind == DoorKind.Double || e.kind == DoorKind.Sliding || e.kind == DoorKind.Tilt;
         for (int i = 0; i < 2; i++)
         {
-            XRUi.SetTint(hingeButtons[i], e != null && (int)e.hinge == i && leaf ? XRUi.ButtonOnColor : XRUi.ButtonToggleColor);
-            XRUi.SetTint(intoButtons[i], e != null && (e.opensIntoRoomUuid ?? "") == intoIds[i] ? XRUi.ButtonOnColor : XRUi.ButtonToggleColor);
+            if (hingeButtons[i]) XRUi.SetTint(hingeButtons[i], e != null && (int)e.hinge == i && leaf ? XRUi.ButtonOnColor : XRUi.ButtonToggleColor);
+            if (intoButtons[i]) XRUi.SetTint(intoButtons[i], e != null && (e.opensIntoRoomUuid ?? "") == intoIds[i] ? XRUi.ButtonOnColor : XRUi.ButtonToggleColor);
         }
+    }
+
+    string windowPanelSig;
+
+    static string WindowSignature(DoorEdit e)
+    {
+        if (e == null) return "none";
+        if (e.kind == DoorKind.Wall) return "wall";
+        return string.Join(",", DoorCatalog.Sections(e).Select(x => $"{x.s.kind}{x.s.hinge}"));
     }
 
     /// <summary>Creates the door's edit on first change (defaults: single leaf, left hinge, opening into the room

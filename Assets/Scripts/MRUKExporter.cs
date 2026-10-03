@@ -42,7 +42,15 @@ public class MRUKExporter : MonoBehaviour
         if (string.IsNullOrEmpty(savedName)) return;
         SelectedSource = savedName;
         ActiveSource = savedName;
-        HouseEditsStore.Bind(savedName);
+        BindScanData(savedName);
+    }
+
+    /// <summary>Points the edits and room names at the given saved scan (null = the live scan: no edits, default names).
+    /// On the headset room names are one shared file anyway; in the Editor each scan folder has its own.</summary>
+    static void BindScanData(string scanName)
+    {
+        HouseEditsStore.Bind(scanName);
+        RoomNames.FilePath = MRUKSceneCache.RoomNamesPath(scanName);
     }
 
     /// <summary>Moves the selection by +1/-1 through the available sources and returns the new one.</summary>
@@ -108,7 +116,7 @@ public class MRUKExporter : MonoBehaviour
         }
         ActiveSource = SelectedSource;
         // Edits belong to a saved scan; the live scan has none until its first edit saves it (EditModeController).
-        HouseEditsStore.Bind(ActiveSource == LiveSource ? null : ActiveSource);
+        BindScanData(ActiveSource == LiveSource ? null : ActiveSource);
         return true;
     #else
         await Task.CompletedTask;
@@ -322,6 +330,16 @@ public class MRUKExporter : MonoBehaviour
         } catch (Exception ex) {
             Debug.LogException(ex);
             ui?.AddLog("<color=orange>Could not include the scan JSON: " + ex.Message + "</color>");
+        }
+        // ...and what the scan itself doesn't hold: the user's edits and room names, so the export folder alone is
+        // enough to reload, edit and re-export this scan on the PC (it is a scan source there, see MRUKSceneCache).
+        try {
+            if (HouseEditsStore.CurrentScan != null && HouseEditsStore.HasAny)
+                File.WriteAllText(Path.Combine(session, MRUKPathUtility.DATA_EDITS), JsonUtility.ToJson(HouseEditsStore.Current, true));
+            RoomNames.WriteTo(Path.Combine(session, MRUKPathUtility.DATA_ROOM_NAMES), rooms.Select(r => r.Anchor.Uuid.ToString()));
+        } catch (Exception ex) {
+            Debug.LogException(ex);
+            ui?.AddLog("<color=orange>Could not include edits/room names: " + ex.Message + "</color>");
         }
         File.WriteAllText(Path.Combine(session, MRUKPathUtility.DATA_REPORT), MRUKReportBuilder.GenerateFullReport(outlines, angle, SelectedSource));
         SetProgress(45, ui);

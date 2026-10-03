@@ -196,6 +196,27 @@ public static class DoorCatalog
         toOther = -viewerRight * side;
     }
 
+    /// <summary>A window's parts with their span as fractions of its width (left to right, seen from the room it
+    /// opens into). A window edited before parts existed is one part of its own kind.</summary>
+    public static List<(SectionEdit s, float f0, float f1)> Sections(DoorEdit e)
+    {
+        var list = new List<(SectionEdit, float, float)>();
+        var secs = e.sections != null && e.sections.Count > 0 ? e.sections
+            : e.kind == DoorKind.Double
+                ? new List<SectionEdit> { new SectionEdit { kind = DoorKind.Single, hinge = HingeSide.Left }, new SectionEdit { kind = DoorKind.Single, hinge = HingeSide.Right } }
+                : new List<SectionEdit> { new SectionEdit { kind = e.kind, hinge = e.hinge } };
+        for (int i = 0; i < secs.Count; i++) list.Add((secs[i], i / (float)secs.Count, (i + 1) / (float)secs.Count));
+        return list;
+    }
+
+    /// <summary>Left jamb at the sill (seen from the room it opens into), the direction to the right jamb, and the
+    /// direction into that room.</summary>
+    public static void LeftFrame(DoorInfo d, DoorEdit e, out Vector3 left, out Vector3 toRight, out Vector3 swingDir)
+    {
+        var tmp = new DoorEdit { opensIntoRoomUuid = e.opensIntoRoomUuid, hinge = HingeSide.Left };
+        Swing(d, tmp, out left, out swingDir, out toRight);
+    }
+
     public static void Swing(DoorInfo d, DoorEdit e, out Vector3 hinge, out Vector3 swingDir, out Vector3 toOther) =>
         Swing(d.center, d.right, d.normal, d.width, d.height, e, d.roomFront, d.roomBack, out hinge, out swingDir, out toOther);
 }

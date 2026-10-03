@@ -83,6 +83,7 @@ public class WalkDoors
                 if (col && col.enabled) { col.enabled = false; suppressedColliders.Add(col); }
             }
             if (e.kind == DoorKind.Opening) continue; // just the empty opening
+            if (d.isWindow) { BuildWindow(visual, layer, d, e, g, center, wasOpen); continue; }
 
             DoorCatalog.Swing(d, e, out var hinge, out var swing, out var toOther);
             Vector3 hingeM = M(hinge), swingM = g * swing, toOtherM = g * toOther;
@@ -134,7 +135,54 @@ public class WalkDoors
         }
     }
 
-    enum LeafStyle { Door, SlidingDoor, Window, SlidingWindow, Garage }
+    enum LeafStyle { Door, SlidingDoor, Window, SlidingWindow, Garage, FixedPane }
+
+    /// <summary>A window as its parts side by side (fixed panes, tilt-turn/casement sashes, tilt sashes, HS sliding
+    /// sash in front of its neighbour), each opening part with its own handle.</summary>
+    void BuildWindow(GameObject visual, int layer, DoorInfo d, DoorEdit e, Quaternion g, Vector3 center, List<Vector3> wasOpen)
+    {
+        Vector3 M(Vector3 p) => g * (p - center);
+        DoorCatalog.LeftFrame(d, e, out var left, out var toRight, out var swing);
+        Vector3 leftM = M(left), rM = g * toRight, sM = g * swing;
+        float W = d.width, h = d.height - 0.01f;
+        bool portal = d.height > 1.8f;            // floor-to-ceiling glazing (HS portal): handles at door height
+        float handleH = portal ? HandleHeight : h * 0.5f;
+        foreach (var (s, f0, f1) in DoorCatalog.Sections(e))
+        {
+            float sw = W * (f1 - f0);
+            Vector3 a = leftM + rM * (W * f0), b = leftM + rM * (W * f1);
+            var door = new Door { center = (a + b) / 2f, isWindow = true };
+            door.manual = wasOpen.Any(p => Vector3.Distance(p, door.center) < 0.1f);
+            bool hingeLeft = s.hinge == HingeSide.Left;
+            switch (s.kind)
+            {
+                case DoorKind.Fixed:
+                    MakeLeaf(visual, layer, door, a, rM, sw, h, handleH, LeafStyle.FixedPane);
+                    break;
+                case DoorKind.Tilt:
+                {
+                    var leaf = new Leaf { motion = Motion.Tilt, axis = rM, sign = Vector3.Dot(Vector3.Cross(rM, Vector3.up), sM) >= 0f ? 1f : -1f };
+                    leaf.pivot = MakeLeaf(visual, layer, door, a, rM, sw, h, h * 0.85f, LeafStyle.Window);
+                    door.leaves.Add(leaf);
+                    break;
+                }
+                case DoorKind.Sliding:
+                {
+                    // Slides towards its hinge side, just inside the plane of the neighbouring part.
+                    Vector3 start = hingeLeft ? a : b, along = hingeLeft ? rM : -rM;
+                    Vector3 p = start + sM * (WindowThickness + 0.02f);
+                    var leaf = new Leaf { motion = Motion.Slide, closedPos = p, slideDir = -along, slide = sw * 0.95f };
+                    leaf.pivot = MakeLeaf(visual, layer, door, p, along, sw, h, handleH, LeafStyle.SlidingWindow);
+                    door.leaves.Add(leaf);
+                    break;
+                }
+                default: // Single (casement), TiltTurn (opens like a casement), Double
+                    door.leaves.Add(Hinged(visual, layer, door, hingeLeft ? a : b, hingeLeft ? rM : -rM, sM, sw, h, handleH));
+                    break;
+            }
+            doors.Add(door);
+        }
+    }
 
     Leaf Hinged(GameObject visual, int layer, Door door, Vector3 hinge, Vector3 toOther, Vector3 swing, float width, float h, float handleH)
     {
@@ -155,7 +203,8 @@ public class WalkDoors
         pivot.transform.localPosition = pos;
         created.Add(pivot);
 
-        bool window = style == LeafStyle.Window || style == LeafStyle.SlidingWindow;
+        bool window = style == LeafStyle.Window || style == LeafStyle.SlidingWindow || style == LeafStyle.FixedPane;
+        bool fixedPane = style == LeafStyle.FixedPane;
         bool garage = style == LeafStyle.Garage;
         float thick = window ? WindowThickness : LeafThickness;
         float bottom = garage ? -h : 0f; // garage leaf hangs below its pivot
@@ -172,12 +221,12 @@ public class WalkDoors
                 parts.Add(HandlePart(new Vector3(0, -h + h * k / 8f, 0) + along * (width / 2f), leafRot, new Vector3(thick + 0.01f, 0.012f, width), GarageColor * 0.85f));
 
         Vector3 handleBase = garage ? along * (width / 2f) + Vector3.up * (handleH - h) : along * (width - HandleInset) + Vector3.up * handleH;
-        foreach (float side in new[] { 1f, -1f })
+        foreach (float side in fixedPane ? new float[0] : new[] { 1f, -1f })
         {
             Vector3 n = face * side;
             if (garage) parts.Add(HandlePart(handleBase + n * (thick / 2f + 0.015f), leafRot, new Vector3(0.025f, 0.03f, 0.2f), HandleColor));
             else if (style == LeafStyle.SlidingDoor || style == LeafStyle.SlidingWindow)
-                parts.Add(HandlePart(handleBase + n * (thick / 2f + 0.015f), leafRot, new Vector3(0.025f, window ? 0.12f : 0.25f, 0.025f), HandleColor));
+                parts.Add(HandlePart(handleBase + n * (thick / 2f + 0.015f), leafRot, new Vector3(0.025f, window ? (h > 1.8f ? 0.3f : 0.12f) : 0.25f, 0.025f), HandleColor));
             else if (window)
             {
                 parts.Add(HandlePart(handleBase + n * (thick / 2f + 0.015f), leafRot, new Vector3(0.03f, 0.05f, 0.03f), HandleColor));
@@ -213,6 +262,7 @@ public class WalkDoors
             }
         }
 
+        if (fixedPane) return pivot.transform; // nothing to open
         // Generous trigger zone around both handles - walking ignores triggers, the handle ray doesn't.
         var zone = new GameObject("HandleZone");
         zone.layer = layer;
