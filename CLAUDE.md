@@ -40,7 +40,12 @@ and exports 3D models, floor plans and reports from the scan.
   `FloorPlanPanel`; `MRUKPlanExtractor` is the only MRUK-facing part. Room names come from `RoomNames` (user-picked
   presets stored per room UUID) because MRUK exposes no room name.
 - **Scan cache**: `MRUKSceneCache` (JSON incl. global mesh) lives in `persistentDataPath/ScanCache` on the headset
-  (scoped storage: adb-pushed files elsewhere are invisible to the app); Editor menu "Pull" copies it to `Exports/`.
+  (scoped storage: adb-pushed files elsewhere are invisible to the app). On the PC there is no separate cache:
+  `Exports/RoomData` is the one local folder, and every folder in it with a `92_Data_Scan.scene.json` is a scan
+  source (exports are self-contained: `93_Data_Edits.json` + `94_Data_RoomNames.json`). Editor menu "Pull" brings
+  exports plus the headset's saved scans (as `Scan_<name>` folders); `Tools/BatchExport.ps1` writes there too.
+- **Logs**: headset session logs are in `persistentDataPath/Logs` (menu "Pull logs from Quest" -> `Logs/Quest`),
+  never in the export folder.
 - **Build + install to a USB Quest**: call `MRUKExporter.EditorFastBuildAndInstall()` (e.g. via the Unity MCP
   `InvokeComponentMethod`; the call times out because the main thread is busy, the build continues). Read
   `%LOCALAPPDATA%\Unity\Editor\Editor.log` for "BUILD COMPLETED SUCCESSFULLY" / "FAST BUILD AND INSTALL DONE" /
