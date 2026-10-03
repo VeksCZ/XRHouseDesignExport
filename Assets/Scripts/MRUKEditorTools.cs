@@ -153,13 +153,44 @@ public static class MRUKEditorTools {
         return removed;
     }
 
-    /// <summary>Copies an export's scan JSON into the Editor's ScanCache (named after the export), so the exact
-    /// scan behind that export can be picked as a source and re-exported or inspected on the PC.</summary>
-    static void CopyExportScanToCache(string exportDir, string scanCache) {
-        string src = Path.Combine(exportDir, MRUKPathUtility.DATA_SCENE);
-        if (!File.Exists(src)) return;
-        string dst = Path.Combine(scanCache, Path.GetFileName(exportDir) + MRUKSceneCache.EXTENSION);
-        if (!File.Exists(dst)) File.Copy(src, dst);
+    /// <summary>
+    /// Copies the headset's saved scans (app storage: Name.scene.json, Name.edits.json, room_names.json) into
+    /// 'exportRoot'/Scan_&lt;Name&gt;/ as 92_Data_Scan.scene.json, 93_Data_Edits.json and 94_Data_RoomNames.json - the
+    /// same layout as an export, so the Editor treats them like any other scan source. Overwrites on every pull (the
+    /// edits may have changed on the headset); goes through a temp folder that is removed afterwards.
+    /// </summary>
+    static void PullSavedScans(string exportRoot) {
+        string tmp = Path.GetFullPath("Temp/QuestScanCache");
+        if (Directory.Exists(tmp)) Directory.Delete(tmp, true);
+        Directory.CreateDirectory(tmp);
+        try {
+            if (!RunAdb($"pull \"{RemoteAppFiles}/ScanCache/.\" \"{tmp}\"")) return;
+            string names = Path.Combine(tmp, "room_names.json");
+            int n = 0;
+            foreach (var scan in Directory.GetFiles(tmp, "*" + MRUKSceneCache.EXTENSION)) {
+                string name = Path.GetFileName(scan).Substring(0, Path.GetFileName(scan).Length - MRUKSceneCache.EXTENSION.Length);
+                string dir = Path.Combine(exportRoot, MRUKSceneCache.ScanFolderPrefix + name);
+                Directory.CreateDirectory(dir);
+                File.Copy(scan, Path.Combine(dir, MRUKPathUtility.DATA_SCENE), true);
+                string edits = Path.Combine(tmp, name + HouseEditsStore.EXTENSION);
+                if (File.Exists(edits)) File.Copy(edits, Path.Combine(dir, MRUKPathUtility.DATA_EDITS), true);
+                if (File.Exists(names)) File.Copy(names, Path.Combine(dir, MRUKPathUtility.DATA_ROOM_NAMES), true);
+                n++;
+            }
+            Debug.Log($"<color=green>Saved scans: {n} pulled into {MRUKSceneCache.ScanFolderPrefix}* folders.</color>");
+        } finally {
+            try { Directory.Delete(tmp, true); } catch { }
+        }
+    }
+
+    /// <summary>Session logs live in the app's own storage on the headset (not in the exports); fetches them into
+    /// the project's Logs/Quest folder when they are actually needed.</summary>
+    [MenuItem("MRUK/5b. Pull logs from Quest", false, 32)]
+    public static void PullLogsFromQuest() {
+        string local = Path.GetFullPath("Logs/Quest");
+        Directory.CreateDirectory(local);
+        if (RunAdb($"pull \"{RemoteAppFiles}/Logs/.\" \"{local}\"")) EditorUtility.RevealInFinder(local);
+        else Debug.LogError("<color=red>Could not pull logs (is the Quest connected?).</color>");
     }
 
     [MenuItem("MRUK/8. Open Exports Folder", false, 50)]
