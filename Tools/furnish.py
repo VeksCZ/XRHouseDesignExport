@@ -34,8 +34,11 @@ In the SVG +X points right and +Z points down. Every item is placed against one 
          which way the item faces)
   y      lift above the floor (default 0)
 
-Types: bathtub, shower, washbasin (vanity + top + basin, optional "mirror"), wc (wall-hung bowl + pre-wall),
-       washer, radiator (towel rail), mirror, cabinet (wall cabinet, "y" default 1.4), box (anything else).
+Types: bathtub, shower ("glass": ["front", "left", "right"] or {"side": "right", "from": 0, "to": 0.55}),
+       washbasin (vanity + top; "basins": n, "vessel": true = bowls standing on the top, "mirror": true with
+       "mirror_w"/"mirror_y"/"mirror_h", "cabinet_from" = underside height), wc (wall-hung bowl; "prewall": depth,
+       0 = none), washer, radiator (towel rail, "y" = bottom), mirror, cabinet (wall cabinet, "y" default 1.4),
+       box (anything else; "color" = material name or "#rrggbb", "y" = lift).
 """
 import argparse, json, math, os, struct, sys
 
@@ -121,6 +124,8 @@ def rooms_of(js, binc):
                                  min(p[0] for p in pts), max(p[0] for p in pts), min(p[2] for p in pts), max(p[2] for p in pts),
                                  min(ys), max(ys)))
         if floor_y is None: continue
+        # a room's mesh also carries openings of the story above/below (cross-story walls) - keep this story's
+        openings = [o for o in openings if floor_y - 0.2 <= o[5] <= floor_y + 2.0]
         xs = [p[0] for t in floor_tris for p in t]; zs = [p[2] for t in floor_tris for p in t]
         area = sum(abs((b[0] - a[0]) * (c[2] - a[2]) - (c[0] - a[0]) * (b[2] - a[2])) / 2 for a, b, c in floor_tris)
         out[node['name']] = {'y': floor_y, 'tris': floor_tris, 'xmin': min(xs), 'xmax': max(xs), 'zmin': min(zs), 'zmax': max(zs),
@@ -169,19 +174,31 @@ def shape(item, w, d, h):
         B.append(('ceramic', (0, w, 0, d, 0, tray)))
         g = 0.008
         for side in item.get('glass', ['front']):
-            if side == 'front': B.append(('glass', (0, w, d - g, d, tray, h)))
-            elif side == 'left': B.append(('glass', (0, g, 0, d, tray, h)))
-            elif side == 'right': B.append(('glass', (w - g, w, 0, d, tray, h)))
+            # "front" / "left" / "right", or {"side": ..., "from": m, "to": m} for a partial panel (measured along
+            # that side: from the left end for "front", from the wall for "left"/"right")
+            sd = side if isinstance(side, dict) else {'side': side}
+            a0 = sd.get('from', 0.0)
+            if sd['side'] == 'front': B.append(('glass', (a0, sd.get('to', w), d - g, d, tray, h)))
+            elif sd['side'] == 'left': B.append(('glass', (0, g, a0, sd.get('to', d), tray, h)))
+            elif sd['side'] == 'right': B.append(('glass', (w - g, w, a0, sd.get('to', d), tray, h)))
         B.append(('chrome', (w / 2 - 0.08, w / 2 + 0.08, 0.0, 0.25, h - 0.02, h)))      # rain head
     elif t == 'washbasin':
         top = h; cab0 = item.get('cabinet_from', 0.30)
-        B += [('wood', (0, w, 0, d - 0.02, cab0, top - 0.05)),
-              ('ceramic', (0, w, 0, d, top - 0.05, top)),
-              ('water', (w * 0.2, w * 0.8, 0.12, d - 0.08, top - 0.001, top + 0.001)),
-              ('chrome', (w / 2 - 0.02, w / 2 + 0.02, 0.03, 0.15, top, top + 0.18))]     # tap
+        n = item.get('basins', 1); vessel = item.get('vessel', False)
+        B += [('wood', (0, w, 0, d - 0.02, cab0, top - 0.04)),
+              ('wood' if vessel else 'ceramic', (0, w, 0, d, top - 0.04, top))]
+        for k in range(n):
+            c = w * (k + 0.5) / n
+            if vessel:   # bowl standing on the top, tap from the wall
+                B += [('ceramic', (c - 0.25, c + 0.25, 0.08, 0.44, top, top + 0.13)),
+                      ('water', (c - 0.21, c + 0.21, 0.12, 0.40, top + 0.13, top + 0.132)),
+                      ('chrome', (c - 0.015, c + 0.015, 0.0, 0.18, top + 0.22, top + 0.25))]
+            else:
+                B += [('water', (c - 0.2, c + 0.2, 0.12, d - 0.08, top - 0.001, top + 0.001)),
+                      ('chrome', (c - 0.02, c + 0.02, 0.03, 0.15, top, top + 0.18))]
         if item.get('mirror'):
-            mw = item.get('mirror_w', w)
-            B.append(('mirror', ((w - mw) / 2, (w + mw) / 2, 0, 0.02, top + 0.25, top + 1.05)))
+            mw = item.get('mirror_w', w); m0 = item.get('mirror_y', top + 0.25)
+            B.append(('mirror', ((w - mw) / 2, (w + mw) / 2, 0, 0.02, m0, m0 + item.get('mirror_h', 0.80))))
     elif t == 'wc':
         pre = item.get('prewall', 0.20)
         if pre > 0: B.append(('tiles', (-0.10, w + 0.10, 0, pre, 0, h)))
@@ -201,8 +218,9 @@ def shape(item, w, d, h):
         y0 = item.get('y', 1.10); B.append(('mirror', (0, w, 0, d, y0, y0 + h))); return B, 0.0
     elif t == 'cabinet':
         y0 = item.get('y', 1.40); B.append(('wood', (0, w, 0, d, y0, y0 + h))); return B, 0.0
-    else:  # box
+    else:  # box: "color" is a material name (wood, ceramic, tiles, ...) or "#rrggbb"
         B.append((item.get('color', 'wood'), (0, w, 0, d, 0, h)))
+        return B, item.get('y', 0.0)
     return B, item.get('y', 0.0)
 
 
@@ -307,10 +325,12 @@ def svg_room(path, rname, room, items):
     for kind, ax0, ax1, az0, az1, _y0, _y1 in room['openings']:
         col = '#8c510a' if kind == 'door' else '#2b8cbe'
         o.append(f'<rect x="{X(ax0):.1f}" y="{Z(az0):.1f}" width="{max(2, (ax1 - ax0) * S):.1f}" height="{max(2, (az1 - az0) * S):.1f}" fill="{col}"/>')
+    seen = {}
     for label, t, ix0, ix1, iz0, iz1 in items:
+        key = (round(ix0 + ix1, 2), round(iz0 + iz1, 2)); dy = 14 * seen.get(key, 0); seen[key] = seen.get(key, 0) + 1
         o.append(f'<rect x="{X(ix0):.1f}" y="{Z(iz0):.1f}" width="{(ix1 - ix0) * S:.1f}" height="{(iz1 - iz0) * S:.1f}" '
                  f'fill="{COLORS.get(t, "#ddd")}" stroke="#555"/>')
-        o.append(f'<text x="{X((ix0 + ix1) / 2):.1f}" y="{Z((iz0 + iz1) / 2):.1f}" text-anchor="middle">{label}</text>')
+        o.append(f'<text x="{X((ix0 + ix1) / 2):.1f}" y="{Z((iz0 + iz1) / 2) + dy:.1f}" text-anchor="middle">{label}</text>')
     w_, d_ = room['xmax'] - room['xmin'], room['zmax'] - room['zmin']
     o += [f'<text x="{W / 2:.0f}" y="{Z(room["zmin"]) - 8:.0f}" text-anchor="middle" fill="#c00">-z  ({w_:.2f} m)</text>',
           f'<text x="{W / 2:.0f}" y="{Z(room["zmax"]) + 18:.0f}" text-anchor="middle" fill="#c00">+z</text>',
