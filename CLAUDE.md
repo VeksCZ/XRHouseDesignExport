@@ -50,6 +50,12 @@ and exports 3D models, floor plans and reports from the scan.
   `InvokeComponentMethod`; the call times out because the main thread is busy, the build continues). Read
   `%LOCALAPPDATA%\Unity\Editor\Editor.log` for "BUILD COMPLETED SUCCESSFULLY" / "FAST BUILD AND INSTALL DONE" /
   "BUILD FAILED". No Play Mode, no project edits while building. Mono has no ARM64 player here, so IL2CPP only.
+- **Windows desktop app** (`DesktopWalkScene`: `DesktopWalkApp` + `DesktopWalkRig` driving the shared
+  `WalkThroughMode` with keyboard/mouse; reads `Exports/RoomData` via `DataFolder.txt` next to the exe). Build it with
+  menu MRUK > Desktop > Build (background) - it runs in the shadow project `../XRHouseDesignExport_WinBuild`
+  (junctions to Assets/Packages/ProjectSettings, own Library on Windows), so this project never switches off Android.
+  Never build Windows in this project's Library. The scene is not in EditorBuildSettings (APK unaffected). Smoke
+  test: `XRHouseWalk.exe -scan <folder> -shot <png>` loads, captures a frame, exits 0 if the walk started.
 - **Offline compile check**: compile `Assets/Scripts/**/*.cs` with dotnet against `Library/ScriptAssemblies/*.dll`
   (defines `UNITY_EDITOR;UNITY_ANDROID;META_XR_SDK_INSTALLED`) for a fast error check without a Unity reload.
 - **Do not add packages that spawn helper processes** (`com.unity.ai.assistant`'s `relay_win.exe` inherited the MCP
