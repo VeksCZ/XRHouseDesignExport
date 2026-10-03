@@ -61,7 +61,9 @@ public static class MRUKPlanExtractor
                         sill = Mathf.Max(0f, a.transform.position.y - h / 2f - outline.floorY),
                     };
                     // The user's hinge/swing for this door (edit mode), if set.
-                    var edit = door ? DoorCatalog.FindEdit(HouseEditsStore.Current, a, rooms) : null;
+                    var edit = DoorCatalog.FindEdit(HouseEditsStore.Current, a, rooms);
+                    if (edit != null && edit.kind == DoorKind.Wall) continue; // no door/window here - plain wall
+                    if (!door) edit = null; // windows: plain window symbol whatever opens
                     if (edit != null)
                     {
                         DoorCatalog.Frame(a, out var c, out var r, out var nrm, out float w, out _);

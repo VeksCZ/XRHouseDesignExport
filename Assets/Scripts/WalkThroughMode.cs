@@ -53,10 +53,26 @@ public class WalkThroughMode : MonoBehaviour
 
     void OnEnable() { HouseEditsStore.Changed += OnEditsChanged; }
     void OnDisable() { HouseEditsStore.Changed -= OnEditsChanged; }
-    void OnEditsChanged() { if (isOn) ApplyStairs(); }
+    string walledUp = "";
+    void OnEditsChanged()
+    {
+        if (!isOn) return;
+        // A doorway walled up / reopened changes the base model itself - rebuild it in place; anything else only
+        // needs the edit-driven parts (stairs, openings, door leaves) re-applied.
+        string sig = DoorCatalog.WalledUpSignature(HouseEditsStore.Current);
+        if (sig != walledUp && !rebuilding) { walledUp = sig; _ = RebuildInPlace(); }
+        else ApplyStairs();
+    }
+
+    async System.Threading.Tasks.Task RebuildInPlace()
+    {
+        rebuilding = true;
+        try { await BuildVisual(); } finally { rebuilding = false; }
+    }
 
     // Real door leaves for doors set up in edit mode (see WalkDoors).
     readonly WalkDoors walkDoors = new WalkDoors();
+    readonly List<Renderer> windowPanels = new List<Renderer>(); // replaced by real sashes for windows set up in edit mode
 
     /// <summary>(Re)builds everything that comes from the user's edits: stairs and door leaves.</summary>
     void ApplyStairs()
@@ -65,7 +81,7 @@ public class WalkThroughMode : MonoBehaviour
         // The scanned-mesh models already contain the real stairs and doorways as scanned.
         if (walkModel != WalkModel.Anchor) return;
         stairs.Apply(walkVisual, yaw, center, walkRooms, HouseEditsStore.Current, true, WalkLayer, shaded: true);
-        walkDoors.Build(walkVisual, yaw, center, walkRooms, HouseEditsStore.Current, WalkLayer, doors.Select(d => d.r));
+        walkDoors.Build(walkVisual, yaw, center, walkRooms, HouseEditsStore.Current, WalkLayer, doors.Select(d => d.r).Concat(windowPanels));
         Physics.SyncTransforms();
     }
 
@@ -137,6 +153,7 @@ public class WalkThroughMode : MonoBehaviour
         center = DollHouseVisualizer.CalculateCenter(rooms);
         yaw = FloorPlanBuilder.CorrectionYaw(MRUKPlanExtractor.Extract(rooms));
         walkRooms = rooms;
+        walledUp = DoorCatalog.WalledUpSignature(HouseEditsStore.Current);
 
         root = new GameObject("WalkRoot");
         // Kinematic body: the colliders get moved every frame, which PhysX handles far better for a kinematic
@@ -308,12 +325,14 @@ public class WalkThroughMode : MonoBehaviour
     void PrepareParts()
     {
         doors.Clear();
+        windowPanels.Clear();
         var seeThrough = Shader.Find("Sprites/Default");
         foreach (var mf in walkVisual.GetComponentsInChildren<MeshFilter>())
         {
             mf.gameObject.layer = WalkLayer;
             var mr = mf.GetComponent<MeshRenderer>();
             bool isDoor = mr && mr.sharedMaterial && mr.sharedMaterial.name == "DOOR";
+            if (mr && mr.sharedMaterial && mr.sharedMaterial.name == "WINDOW") windowPanels.Add(mr);
             if (isDoor)
             {
                 if (seeThrough != null && mf.sharedMesh)

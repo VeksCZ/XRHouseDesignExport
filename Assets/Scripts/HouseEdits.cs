@@ -53,7 +53,13 @@ public class StairEdit
     public List<int> risers = new List<int>();
 }
 
-public enum DoorKind { Single, Double, Sliding, Opening }
+/// <summary>
+/// What fills an opening. Doors: Single, Double, Sliding, Opening (empty), Garage (roller door rolling up).
+/// Windows: Fixed, Single (side-hung casement), Double, Tilt (bottom-hung, top tips in), Sliding.
+/// Both: Wall = there is nothing here at all (a false detection) - the opening is walled up.
+/// Values are stored as numbers in the edits file - only ever append.
+/// </summary>
+public enum DoorKind { Single, Double, Sliding, Opening, Wall, Garage, Fixed, Tilt }
 public enum HingeSide { Left, Right }
 
 /// <summary>One door's user-defined properties. Matched to its door by anchorUuid first; roomUuid + localPos is

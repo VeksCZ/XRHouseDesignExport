@@ -85,6 +85,8 @@ public class XRMenu : MonoBehaviour
         stairTool.uiLog = this; stairTool.editMode = editMode; stairTool.walk = walk; stairTool.dollhouse = dollhouse;
         var holeTool = FindAnyObjectByType<HoleEditTool>() ?? gameObject.AddComponent<HoleEditTool>();
         holeTool.uiLog = this; holeTool.editMode = editMode; holeTool.walk = walk; holeTool.dollhouse = dollhouse;
+        // Doorways walled up in edit mode are left out of every built model (walk, Dollhouse, minimap, export).
+        XRModelFactory.RemovedOpening = DoorCatalog.IsWalledUp;
         var quality = FindAnyObjectByType<RenderQuality>() ?? gameObject.AddComponent<RenderQuality>();
         quality.uiLog = this;
         plansPanel = gameObject.AddComponent<FloorPlanPanel>();

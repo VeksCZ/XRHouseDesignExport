@@ -50,8 +50,15 @@ public class DollHouseVisualizer : MonoBehaviour
     private readonly StairsInModel stairs = new StairsInModel();
     private GameObject visualGo;
     private List<MRUKRoom> lastRooms;
-    void OnEnable() { HouseEditsStore.Changed += ApplyStairs; }
-    void OnDisable() { HouseEditsStore.Changed -= ApplyStairs; }
+    void OnEnable() { HouseEditsStore.Changed += OnEditsChanged; }
+    void OnDisable() { HouseEditsStore.Changed -= OnEditsChanged; }
+    string walledUp = "";
+    void OnEditsChanged() {
+        // A doorway walled up / reopened changes the model itself (rebuilt in place); else just the stairs/openings.
+        string sig = DoorCatalog.WalledUpSignature(HouseEditsStore.Current);
+        if (sig != walledUp) { walledUp = sig; RebuildInPlace(); }
+        else ApplyStairs();
+    }
     void ApplyStairs() {
         if (!isOn || !root || !visualGo || lastRooms == null) return;
         if (mode != DollhouseMode.AnchorAnalytical && mode != DollhouseMode.AnchorWithDimensions) return;

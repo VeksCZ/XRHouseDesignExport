@@ -23,6 +23,7 @@ public class DoorEditTool : MonoBehaviour
     static readonly Color HoverColor = new Color(1f, 0.9f, 0.2f, 0.95f);
     static readonly Color SelectColor = new Color(1f, 0.55f, 0.1f, 1f);
     static readonly Color SwingColor = new Color(0.3f, 0.95f, 0.45f, 0.95f);
+    static readonly Color WallColor = new Color(1f, 0.3f, 0.3f, 0.95f);
 
     Transform frameRoot; float frameYaw; Vector3 frameCenter; bool frameIsWalk;
     List<MRUKRoom> rooms = new List<MRUKRoom>();
@@ -37,7 +38,7 @@ public class DoorEditTool : MonoBehaviour
 
     Canvas panel;
     TMP_Text panelTitle;
-    readonly Button[] kindButtons = new Button[4];
+    readonly Button[] kindButtons = new Button[6];
     readonly Button[] hingeButtons = new Button[2];
     readonly Button[] intoButtons = new Button[2];
     readonly string[] intoIds = new string[2];
@@ -169,8 +170,41 @@ public class DoorEditTool : MonoBehaviour
                 break;
             }
             case DoorKind.Opening:
+            case DoorKind.Fixed:
                 Rect3(hinge, hinge + toOther * w, h, SwingColor);
                 break;
+            case DoorKind.Garage:
+            {
+                // Roller door: its outline plus a few slats, and the roll box above.
+                Vector3 a = hinge, b = hinge + toOther * w;
+                Rect3(a, b, h, SwingColor);
+                for (int k = 1; k < 4; k++)
+                {
+                    pts.Clear(); pts.Add(a + Vector3.up * (h * k / 4f)); pts.Add(b + Vector3.up * (h * k / 4f)); Emit(SwingColor, false);
+                }
+                Rect3(a + Vector3.up * h + swing * 0.15f, b + Vector3.up * h + swing * 0.15f, 0.3f, SwingColor);
+                break;
+            }
+            case DoorKind.Tilt:
+            {
+                // Bottom-hung: top tipped ~12 cm into the room.
+                Vector3 a = hinge, b = hinge + toOther * w, top = Vector3.up * h + swing * 0.12f;
+                pts.Clear(); pts.Add(a); pts.Add(b); pts.Add(b + top); pts.Add(a + top);
+                Emit(SwingColor, true);
+                break;
+            }
+            case DoorKind.Wall:
+            {
+                // Walled up: a red frame with a cross, so it can still be found and reopened.
+                // Drawn just in front of the (now solid) wall on your side, else the wall would hide it.
+                Vector3 eye = WorldToScan(head.position);
+                Vector3 off = d.normal * (Vector3.Dot(eye - d.center, d.normal) >= 0f ? 0.25f : -0.25f);
+                Vector3 a = hinge + off, b = hinge + toOther * w + off, up = Vector3.up * h;
+                Rect3(a, b, h, WallColor);
+                pts.Clear(); pts.Add(a + Vector3.up * 0.01f); pts.Add(b + up); Emit(WallColor, false);
+                pts.Clear(); pts.Add(b + Vector3.up * 0.01f); pts.Add(a + up); Emit(WallColor, false);
+                break;
+            }
         }
     }
 
@@ -240,7 +274,19 @@ public class DoorEditTool : MonoBehaviour
 
     // ---------- panel ----------
 
-    const float PW = 640f, PH = 470f, PScale = 0.0006f;
+    const float PW = 640f, PH = 544f, PScale = 0.0006f;
+
+    static readonly (string label, DoorKind kind)[] DoorKinds =
+    {
+        ("Single", DoorKind.Single), ("Double", DoorKind.Double), ("Sliding", DoorKind.Sliding),
+        ("Garage", DoorKind.Garage), ("Opening", DoorKind.Opening), ("Wall", DoorKind.Wall),
+    };
+    static readonly (string label, DoorKind kind)[] WindowKinds =
+    {
+        ("Fixed", DoorKind.Fixed), ("Casement", DoorKind.Single), ("Double", DoorKind.Double),
+        ("Tilt", DoorKind.Tilt), ("Sliding", DoorKind.Sliding), ("Wall", DoorKind.Wall),
+    };
+    readonly DoorKind[] kindValues = new DoorKind[6];
 
     void OpenPanel()
     {
@@ -265,15 +311,17 @@ public class DoorEditTool : MonoBehaviour
         float x0 = 20, rowH = 66, gap = 8;
         float y = 60;
         XRUi.CreateText(t, "TypeLbl", "Type", 20, TextAlignmentOptions.MidlineLeft, x0, y, 110, rowH, XRUi.MutedText);
-        string[] kinds = { "Single", "Double", "Sliding", "Opening" };
-        float bw = (PW - 130 - 20 - gap * 3) / 4f;
-        for (int i = 0; i < 4; i++)
+        var options = d.isWindow ? WindowKinds : DoorKinds;
+        float bw = (PW - 130 - 20 - gap * 2) / 3f;
+        for (int i = 0; i < options.Length; i++)
         {
-            var k = (DoorKind)i;
-            kindButtons[i] = XRUi.CreateButton(t, kinds[i], 130 + i * (bw + gap), y, bw, rowH, () => Change(e => e.kind = k), 22);
+            var k = options[i].kind;
+            kindValues[i] = k;
+            float bx = 130 + (i % 3) * (bw + gap), by = y + (i / 3) * (rowH + gap);
+            kindButtons[i] = XRUi.CreateButton(t, options[i].label, bx, by, bw, rowH, () => Change(e => e.kind = k), 20);
         }
 
-        y += rowH + gap;
+        y += 2 * (rowH + gap);
         XRUi.CreateText(t, "HingeLbl", "Hinge", 20, TextAlignmentOptions.MidlineLeft, x0, y, 110, rowH, XRUi.MutedText);
         float bw2 = (PW - 130 - 20 - gap) / 2f;
         hingeButtons[0] = XRUi.CreateButton(t, "Left", 130, y, bw2, rowH, () => Change(e => e.hinge = HingeSide.Left), 22);
@@ -287,7 +335,9 @@ public class DoorEditTool : MonoBehaviour
         intoButtons[1] = XRUi.CreateButton(t, b, 130 + bw2 + gap, y, bw2, rowH, () => Change(e => e.opensIntoRoomUuid = id1), 22);
 
         y += rowH + gap;
-        XRUi.CreateText(t, "Hint", "Hinge side as seen from the room the door opens into (the leaf swings towards you).",
+        XRUi.CreateText(t, "Hint", d.isWindow
+                ? "Hinge side as seen from the room the window opens into (usually the inside)."
+                : "Hinge side as seen from the room the door opens into (the leaf swings towards you).",
             17, TextAlignmentOptions.TopLeft, x0, y, PW - 40, 50, XRUi.MutedText);
 
         y += 56;
@@ -314,9 +364,9 @@ public class DoorEditTool : MonoBehaviour
     {
         if (!panel || selected == null) return;
         var e = DoorCatalog.FindEdit(HouseEditsStore.Current, selected, rooms);
-        panelTitle.text = $"Door {RoomLabel(selected.roomFront)} / {RoomLabel(selected.roomBack)}  {selected.width:0.00} m" + (e == null ? "  (not set)" : "");
-        for (int i = 0; i < 4; i++) XRUi.SetTint(kindButtons[i], e != null && (int)e.kind == i ? XRUi.ButtonOnColor : XRUi.ButtonToggleColor);
-        bool leaf = e == null || e.kind == DoorKind.Single || e.kind == DoorKind.Double || e.kind == DoorKind.Sliding;
+        panelTitle.text = $"{(selected.isWindow ? "Window" : "Door")} {RoomLabel(selected.roomFront)} / {RoomLabel(selected.roomBack)}  {selected.width:0.00} m" + (e == null ? "  (not set)" : "");
+        for (int i = 0; i < 6; i++) if (kindButtons[i]) XRUi.SetTint(kindButtons[i], e != null && e.kind == kindValues[i] ? XRUi.ButtonOnColor : XRUi.ButtonToggleColor);
+        bool leaf = e == null || e.kind == DoorKind.Single || e.kind == DoorKind.Double || e.kind == DoorKind.Sliding || e.kind == DoorKind.Tilt;
         for (int i = 0; i < 2; i++)
         {
             XRUi.SetTint(hingeButtons[i], e != null && (int)e.hinge == i && leaf ? XRUi.ButtonOnColor : XRUi.ButtonToggleColor);
@@ -331,6 +381,9 @@ public class DoorEditTool : MonoBehaviour
         var d = selected;
         if (d == null || editMode == null) return;
         string viewerSide = ViewerSideRoomId(d);
+        // A window opens into the room, never "outside".
+        if (d.isWindow && string.IsNullOrEmpty(viewerSide))
+            viewerSide = d.roomFront != null ? DoorCatalog.RoomId(d.roomFront) : DoorCatalog.RoomId(d.roomBack);
         await editMode.Commit(edits =>
         {
             var e = DoorCatalog.FindEdit(edits, d, rooms);

@@ -14,6 +14,10 @@ using Meta.XR;
 
 public static class XRModelFactory
 {
+    /// <summary>Doorways the user has walled up in edit mode (DoorKind.Wall): left out of every model, so the wall
+    /// is built solid there. Set by the app at startup (DoorCatalog.IsWalledUp); no-op by default (tests).</summary>
+    public static Func<MRUKAnchor, bool> RemovedOpening = _ => false;
+
     public static XRHouseModel CreateAnchorAnalytical(List<MRUKRoom> rooms, float rotation, Vector3 center)
     {
         var model = new XRHouseModel { center = center, globalRotation = rotation };
@@ -25,7 +29,7 @@ public static class XRModelFactory
         // anchors) means the door gets cut and drawn on every wall that actually borders it, in every room,
         // instead of only whichever room happened to own the anchor MRUK attached it to.
         var allOpenings = rooms.SelectMany(r => r.Anchors)
-            .Where(a => a != null && a.PlaneRect.HasValue && (a.Label.ToString().Contains("DOOR") || a.Label.ToString().Contains("WINDOW")))
+            .Where(a => a != null && a.PlaneRect.HasValue && (a.Label.ToString().Contains("DOOR") || a.Label.ToString().Contains("WINDOW")) && !RemovedOpening(a))
             .ToList();
         var uniqueOpenings = new List<MRUKAnchor>();
         foreach (var o in allOpenings)
@@ -196,7 +200,7 @@ public static class XRModelFactory
             else foreach (var a in room.Anchors.Where(x => MRUKDataProcessor.IsStructuralWall(x) || x.Label == MRUKAnchor.SceneLabels.FLOOR))
                 if (a.Anchor.TryGetComponent<OVRTriangleMesh>(out var tm)) rm.parts.Add(await CreateMeshPart(a.Label.ToString(), tm, a.Anchor, a.Label == MRUKAnchor.SceneLabels.FLOOR ? "FLOOR" : "WALL", center, rotation));
             if (forDollhouse) SplitScanForDollhouse(rm, room, "GlobalMesh", center);
-            foreach (var o in room.Anchors.Where(a => a.PlaneRect.HasValue && (a.Label.ToString().Contains("DOOR") || a.Label.ToString().Contains("WINDOW"))))
+            foreach (var o in room.Anchors.Where(a => a.PlaneRect.HasValue && (a.Label.ToString().Contains("DOOR") || a.Label.ToString().Contains("WINDOW")) && !RemovedOpening(a)))
                 rm.parts.Add(CreateBoxPart(o.Label.ToString(), o.transform.position, o.transform.rotation, new Vector3(o.PlaneRect.Value.width, o.PlaneRect.Value.height, 0.08f), MRUKDataProcessor.IsDoor(o) ? "DOOR" : "WINDOW", center, rotation));
             model.rooms.Add(rm);
         }
@@ -211,7 +215,7 @@ public static class XRModelFactory
 
         // Global deduplicated openings list
         var allOpenings = rooms.SelectMany(r => r.Anchors)
-            .Where(a => a != null && (a.Label.ToString().Contains("DOOR") || a.Label.ToString().Contains("WINDOW")))
+            .Where(a => a != null && (a.Label.ToString().Contains("DOOR") || a.Label.ToString().Contains("WINDOW")) && !RemovedOpening(a))
             .ToList();
         var uniqueOpenings = new List<MRUKAnchor>();
         foreach (var o in allOpenings) {

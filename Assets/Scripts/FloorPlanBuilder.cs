@@ -499,6 +499,16 @@ public static class FloorPlanBuilder
                 break;
             case DoorKind.Opening:
                 break; // just the jambs
+            case DoorKind.Garage:
+            {
+                // Roller door: a line across the opening plus a dashed one where the roll sits inside.
+                float hh = WallBand / 2f;
+                page.lines.Add(new PlanLine(At(t0, hh), At(t1, hh), style));
+                float off = intoThisRoom ? -0.12f : WallBand + 0.12f;
+                for (float t = t0; t < t1; t += 0.2f)
+                    page.lines.Add(new PlanLine(At(t, off), At(Mathf.Min(t + 0.1f, t1), off), style));
+                break;
+            }
         }
     }
 

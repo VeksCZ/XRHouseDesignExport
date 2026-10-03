@@ -16,6 +16,7 @@ public class DoorInfo
     public Vector3 right, normal;   // horizontal unit vectors: along the wall / out of the anchor's face
     public float width, height;
     public MRUKRoom roomFront, roomBack; // room on the +normal / -normal side (null = outside / not scanned)
+    public bool isWindow;
     public float FloorY => center.y - height / 2f;
 }
 
@@ -49,11 +50,12 @@ public static class DoorCatalog
     {
         var result = new List<DoorInfo>();
         var all = rooms.SelectMany(r => r.Anchors)
-            .Where(a => a != null && a.PlaneRect.HasValue && MRUKDataProcessor.IsDoor(a)).ToList();
+            .Where(a => a != null && a.PlaneRect.HasValue && (MRUKDataProcessor.IsDoor(a) || MRUKDataProcessor.IsWindow(a))).ToList();
         foreach (var a in all)
         {
+            bool isWindow = !MRUKDataProcessor.IsDoor(a);
             Frame(a, out var c, out var r, out var n, out float w, out float h);
-            var same = result.FirstOrDefault(d => SameDoorway(d, c, n));
+            var same = result.FirstOrDefault(d => d.isWindow == isWindow && SameDoorway(d, c, n));
             if (same != null)
             {
                 // The other room's view of the same doorway: use the middle of the wall between the two faces.
@@ -72,12 +74,28 @@ public static class DoorCatalog
                 center = c, right = r, normal = n, width = w, height = h,
                 roomFront = FindRoomAt(rooms, c + n * SideProbe),
                 roomBack = FindRoomAt(rooms, c - n * SideProbe),
+                isWindow = isWindow,
             };
             door.anchors.Add(a);
             result.Add(door);
         }
         return result;
     }
+
+    /// <summary>True if the user marked this door anchor's doorway as "no door, wall" (DoorKind.Wall).</summary>
+    public static bool IsWalledUp(MRUKAnchor a)
+    {
+        var edits = HouseEditsStore.Current;
+        if (a == null || edits == null || !edits.doors.Any(d => d.kind == DoorKind.Wall)) return false;
+        if (!MRUKDataProcessor.IsDoor(a) && !MRUKDataProcessor.IsWindow(a)) return false;
+        var rooms = MRUK.Instance != null ? MRUK.Instance.Rooms : new List<MRUKRoom>();
+        var e = FindEdit(edits, a, rooms);
+        return e != null && e.kind == DoorKind.Wall;
+    }
+
+    /// <summary>Changes whenever the set of walled-up doorways changes - views rebuild their model only then.</summary>
+    public static string WalledUpSignature(HouseEdits edits) =>
+        edits == null ? "" : string.Join(",", edits.doors.Where(d => d.kind == DoorKind.Wall).Select(d => d.anchorUuid).OrderBy(s => s));
 
     /// <summary>The edit of a doorway, whichever of its anchors it was saved for (or by position).</summary>
     public static DoorEdit FindEdit(HouseEdits edits, DoorInfo d, List<MRUKRoom> rooms)
