@@ -263,6 +263,7 @@ public partial class DesktopWalkApp
                     poly.Add($"({m.x:0.00},{-m.z:0.00})");
                 }
             Debug.Log($"TEST room {NameOf(room)}: x {xmin:0.00}..{xmax:0.00} ({xmax - xmin:0.00}) z {zmin:0.00}..{zmax:0.00} ({zmax - zmin:0.00}) floor y {y:0.00} poly {string.Join(" ", poly)}");
+            Debug.Log($"TEST    ceiling anchors at y {string.Join(", ", room.CeilingAnchors.Where(c => c != null).Select(c => $"{c.transform.position.y - center.y:0.00} (h {c.transform.position.y - center.y - y:0.00})"))}");
             if (key != null)
                 foreach (var wa in room.Anchors.Where(MRUKDataProcessor.IsStructuralWall))
                 {

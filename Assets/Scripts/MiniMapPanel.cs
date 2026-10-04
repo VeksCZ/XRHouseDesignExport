@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using System.Linq;
 using UnityEngine;
 #if META_XR_SDK_INSTALLED
@@ -105,6 +106,18 @@ public class MiniMapPanel : MonoBehaviour
 
         if (visual != null) visual.transform.SetParent(root.transform, false);
         AddCol(visual);
+
+        // One storey at a time (the one you're on) - from below, the floor above hid the avatar. The model has one
+        // child per room, in the rooms' order (XRModelFactory.CreateAnchorAnalytical).
+        roomLevels.Clear(); levels.Clear(); shownLevel = -1;
+        foreach (var y in rooms.SelectMany(r => r.FloorAnchors).Where(f => f != null).Select(f => f.transform.position.y).OrderBy(y => y))
+            if (levels.Count == 0 || y - levels[levels.Count - 1] > 1.5f) levels.Add(y);
+        if (visual != null)
+            for (int i = 0; i < rooms.Count && i < visual.transform.childCount; i++)
+            {
+                var fl = rooms[i].FloorAnchors.Where(f => f != null).Select(f => f.transform.position.y).DefaultIfEmpty(modelCenter.y).Min();
+                roomLevels.Add((visual.transform.GetChild(i).gameObject, NearestLevel(fl)));
+            }
         // Registers it with the XR Interaction Toolkit purely so the ray hovers it as a valid target (turns
         // green and clips at its surface - see XRMenu.StyleRay); the actual grab is still the same custom
         // grip+raycast logic in Update() below.
@@ -137,6 +150,27 @@ public class MiniMapPanel : MonoBehaviour
 #else
         isOn = false;
 #endif
+    }
+
+    readonly List<(GameObject go, int level)> roomLevels = new List<(GameObject, int)>();
+    readonly List<float> levels = new List<float>();
+    int shownLevel = -1;
+
+    int NearestLevel(float y)
+    {
+        int best = 0;
+        for (int i = 1; i < levels.Count; i++) if (Mathf.Abs(levels[i] - y) < Mathf.Abs(levels[best] - y)) best = i;
+        return best;
+    }
+
+    /// <summary>Shows only the rooms of the storey your feet are on.</summary>
+    void ShowLevel(float feetY)
+    {
+        if (levels.Count < 2) return;
+        int lv = NearestLevel(feetY);
+        if (lv == shownLevel) return;
+        shownLevel = lv;
+        foreach (var (go, level) in roomLevels) if (go) go.SetActive(level == lv);
     }
 
     void AddCol(GameObject visual)
@@ -214,7 +248,10 @@ public class MiniMapPanel : MonoBehaviour
             Vector3 headPos = cam.transform.position, headFwd = cam.transform.forward;
             if (WalkThroughMode.Active != null && WalkThroughMode.Active.TryGetScanWorldPose(out var wp, out var wf)) { headPos = wp; headFwd = wf; }
             Vector3 localCam = gRot * (headPos - modelCenter);
-            avatarBody.transform.localPosition = new Vector3(localCam.x, AvatarHeight / 2f, localCam.z);
+            // feet ~1.6 m under the head; the avatar stands on that storey's floor
+            ShowLevel(headPos.y - 1.6f);
+            float floorY = levels.Count > 0 && shownLevel >= 0 ? levels[shownLevel] - modelCenter.y : 0f;
+            avatarBody.transform.localPosition = new Vector3(localCam.x, floorY + AvatarHeight / 2f, localCam.z);
             Vector3 facing = Vector3.ProjectOnPlane(headFwd, Vector3.up);
             if (facing.sqrMagnitude > 0.0001f) avatarBody.transform.localRotation = Quaternion.LookRotation(gRot * facing.normalized, Vector3.up);
         }

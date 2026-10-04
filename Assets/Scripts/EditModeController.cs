@@ -14,7 +14,7 @@ using UnityEngine.UI;
 /// </summary>
 public class EditModeController : MonoBehaviour
 {
-    public enum Tool { None, Doors, Stairs, Holes }
+    public enum Tool { None, Doors, Stairs, Holes, Furniture }
 
     public XRMenu uiLog;
     public MRUKExporter exporter;
@@ -23,7 +23,7 @@ public class EditModeController : MonoBehaviour
 
     Canvas toolbar;
     TMP_Text infoText;
-    Button doorsButton, stairsButton, holesButton, undoButton, redoButton;
+    Button doorsButton, stairsButton, holesButton, furnitureButton, undoButton, redoButton;
     Transform leftHand;
     bool saving;
 
@@ -98,6 +98,7 @@ public class EditModeController : MonoBehaviour
         if (CurrentTool == Tool.Stairs) uiLog?.AddLog("Stairs: trigger on the floor under the first step, each landing's middle, the top end - then Finish.");
         if (CurrentTool == Tool.Doors) uiLog?.AddLog("Doors: point at a door + trigger to pick it, then set it on the panel.");
         if (CurrentTool == Tool.Holes) uiLog?.AddLog("Opening: two opposite corners on the ceiling (from below) or the floor (from above).");
+        if (CurrentTool == Tool.Furniture) uiLog?.AddLog("Furniture (while walking): trigger on a piece picks it up, it follows the ray over the floor; trigger again puts it down. Right stick click turns it 90 degrees.");
         RefreshInfo();
     }
 
@@ -122,11 +123,12 @@ public class EditModeController : MonoBehaviour
         infoText = XRUi.CreateText(t, "Info", "", 20, TextAlignmentOptions.MidlineRight, 100, 6, CanvasW - 114, 36, XRUi.MutedText);
 
         const float y = 52, h = 60, g = 8;
-        float w = (CanvasW - 14 * 2 - g * 5) / 6f;
+        float w = (CanvasW - 14 * 2 - g * 6) / 7f;
         float x = 14;
         doorsButton = XRUi.CreateButton(t, "Doors", x, y, w, h, () => SelectTool(Tool.Doors), 22); x += w + g;
         stairsButton = XRUi.CreateButton(t, "Stairs", x, y, w, h, () => SelectTool(Tool.Stairs), 22); x += w + g;
-        holesButton = XRUi.CreateButton(t, "Opening", x, y, w, h, () => SelectTool(Tool.Holes), 20); x += w + g;
+        holesButton = XRUi.CreateButton(t, "Opening", x, y, w, h, () => SelectTool(Tool.Holes), 19); x += w + g;
+        furnitureButton = XRUi.CreateButton(t, "Furniture", x, y, w, h, () => SelectTool(Tool.Furniture), 17); x += w + g;
         undoButton = XRUi.CreateButton(t, "Undo", x, y, w, h, OnUndo, 22); x += w + g;
         redoButton = XRUi.CreateButton(t, "Redo", x, y, w, h, OnRedo, 22); x += w + g;
         XRUi.CreateButton(t, "Done", x, y, w, h, Toggle, 22);
@@ -160,6 +162,7 @@ public class EditModeController : MonoBehaviour
         XRUi.SetTint(doorsButton, CurrentTool == Tool.Doors ? XRUi.ButtonOnColor : XRUi.ButtonToggleColor);
         XRUi.SetTint(stairsButton, CurrentTool == Tool.Stairs ? XRUi.ButtonOnColor : XRUi.ButtonToggleColor);
         XRUi.SetTint(holesButton, CurrentTool == Tool.Holes ? XRUi.ButtonOnColor : XRUi.ButtonToggleColor);
+        XRUi.SetTint(furnitureButton, CurrentTool == Tool.Furniture ? XRUi.ButtonOnColor : XRUi.ButtonToggleColor);
         undoButton.interactable = HouseEditsStore.UndoCount > 0;
         redoButton.interactable = HouseEditsStore.RedoCount > 0;
         string scan = HouseEditsStore.CurrentScan ?? "live scan (saved on first edit)";

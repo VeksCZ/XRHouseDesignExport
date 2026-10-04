@@ -215,30 +215,42 @@ public class WalkThroughMode : MonoBehaviour
         return "Turned 90°";
     }
 
-    /// <summary>Quest: right grip on a piece of furniture holds it, release puts it down, right stick click turns it.</summary>
+    EditModeController editMode;
+
+    bool FurnitureTool => editMode && editMode.IsOn && editMode.CurrentTool == EditModeController.Tool.Furniture;
+
+    /// <summary>Quest, edit mode, Furniture tool: trigger on a piece picks it up (it follows the ray over the floor),
+    /// trigger again puts it down (saved); right stick click turns it 90 degrees. Leaving the tool puts it down.</summary>
     void HandleFurnitureGrab()
     {
         if (desktop || !rightHand) return;
+        if (!editMode)
+        {
+            editMode = FindFirstObjectByType<EditModeController>();
+            if (editMode) editMode.TriggerPressed += OnEditTrigger;
+        }
         var ray = new Ray(rightHand.position, rightHand.forward);
-        if (!moving)
-        {
-            if (GrabLock.GripPressed && TryGrabFurniture(ray))
-            {
-                if (GrabLock.TryTake(this)) OVRInput.SetControllerVibration(0.3f, 0.15f, OVRInput.Controller.RTouch);
-                else DropFurniture(false);
-            }
-            return;
-        }
-        if (!OVRInput.Get(OVRInput.Button.PrimaryHandTrigger, OVRInput.Controller.RTouch))
-        {
-            uiLog?.AddLog(DropFurniture() ?? "Furniture: put back");
-            GrabLock.Release(this);
-            OVRInput.SetControllerVibration(0f, 0f, OVRInput.Controller.RTouch);
-            return;
-        }
-        DragFurniture(ray);
-        if (OVRInput.GetDown(OVRInput.Button.PrimaryThumbstick, OVRInput.Controller.RTouch)) uiLog?.AddLog(RotateFurniture(ray));
+        if (moving && !FurnitureTool) { uiLog?.AddLog(DropFurniture() ?? "Furniture: put down"); return; }
+        if (!FurnitureTool) return;
+        if (moving) DragFurniture(ray);
+        if (OVRInput.GetDown(OVRInput.Button.PrimaryThumbstick, OVRInput.Controller.RTouch))
+            uiLog?.AddLog(RotateFurniture(ray) ?? "Furniture: point at a piece of furniture");
     }
+
+    void OnEditTrigger()
+    {
+        if (!isOn || desktop || !rightHand || !FurnitureTool) return;
+        if (moving) { uiLog?.AddLog(DropFurniture() ?? "Furniture: put down"); return; }
+        if (TryGrabFurniture(new Ray(rightHand.position, rightHand.forward)))
+        {
+            OVRInput.SetControllerVibration(0.3f, 0.15f, OVRInput.Controller.RTouch);
+            Invoke(nameof(StopFurnitureHaptic), 0.08f);
+            uiLog?.AddLog("Furniture: moving - trigger puts it down, right stick click turns it");
+        }
+        else uiLog?.AddLog("Furniture: point at a piece of furniture");
+    }
+
+    void StopFurnitureHaptic() => OVRInput.SetControllerVibration(0f, 0f, OVRInput.Controller.RTouch);
 
     /// <summary>Opens/closes every door (desktop scripted tests).</summary>
     public void SetAllDoors(bool open) => walkDoors.SetAllDoors(open);
