@@ -35,6 +35,8 @@ public static class Furniture
         { "chrome", new Color(0.80f, 0.80f, 0.82f) }, { "plaster", new Color(0.93f, 0.92f, 0.90f) },
         { "stone", new Color(0.30f, 0.30f, 0.32f) }, { "fire", new Color(1.00f, 0.42f, 0.05f) },
         { "ember", new Color(1.00f, 0.75f, 0.10f) },
+        { "fabric", new Color(0.45f, 0.47f, 0.52f) }, { "linen", new Color(0.94f, 0.93f, 0.89f) },
+        { "duvet", new Color(0.62f, 0.70f, 0.78f) }, { "screen", new Color(0.06f, 0.07f, 0.09f) },
         { "tiles", new Color(0.88f, 0.88f, 0.86f) }, { "dark", new Color(0.25f, 0.25f, 0.27f) },
         { "fronts", new Color(0.66f, 0.68f, 0.70f) }, { "oak", new Color(0.68f, 0.56f, 0.44f) },
         { "steel", new Color(0.74f, 0.75f, 0.77f) }, { "gap", new Color(0.35f, 0.36f, 0.38f) },
@@ -52,6 +54,11 @@ public static class Furniture
         // Corner fireplace: stone base, firebox glazed on the front and on "glass_side" (left/right), plastered
         // cladding up to h ("h": "ceiling" = up to the room's ceiling, also for a "box" like a chimney).
         { "fireplace", (0.90f, 0.60f, 2.20f) },
+        // Living/bedrooms: wall TV ("y" = bottom edge), L sofa ("l" = return along the other wall, "corner": start|end
+        // = which end of the run turns), dining table with "chairs" round its long sides, bed (headboard on the wall,
+        // "nightstands"), desk ("chair" = office chair in front).
+        { "tv", (1.45f, 0.05f, 0.84f) }, { "sofa_corner", (2.90f, 0.95f, 0.85f) }, { "dining_table", (1.80f, 0.90f, 0.75f) },
+        { "bed", (1.80f, 2.10f, 0.50f) }, { "desk", (1.20f, 0.60f, 0.75f) },
     };
 
     /// <summary>Glass parts are named so the viewer can make them see-through.</summary>
@@ -311,6 +318,82 @@ public static class Furniture
                 break;
             }
             case "cabinet": { float y0 = F(item, "y", 1.40f); B.Add(("wood", 0, w, 0, d, y0, y0 + h)); lift = 0f; break; }
+            case "tv":
+            {
+                float y0 = F(item, "y", 0.85f);
+                B.Add(("dark", 0, w, 0, d, y0, y0 + h));
+                B.Add(("screen", 0.015f, w - 0.015f, d, d + 0.003f, y0 + 0.015f, y0 + h - 0.015f));
+                lift = 0f;
+                break;
+            }
+            case "sofa_corner":
+            {
+                // run along the wall (u 0..w, back on the wall) + return along the perpendicular wall at u=0
+                float l = F(item, "l", 1.6f), seat = 0.45f, back = 0.22f, arm = 0.18f, armH = 0.62f;
+                var S = new List<(string, float, float, float, float, float, float)>
+                {
+                    ("dark", 0.05f, w - 0.05f, 0.05f, d - 0.05f, 0f, 0.10f), ("fabric", 0, w, 0, d, 0.10f, seat),
+                    ("fabric", 0, w, 0, back, seat, h), ("fabric", w - arm, w, back, d, seat, armH),
+                    ("dark", 0.05f, d - 0.05f, d, l - 0.05f, 0f, 0.10f), ("fabric", 0, d, d, l, 0.10f, seat),
+                    ("fabric", 0, back, back, l, seat, h), ("fabric", back, d, l - arm, l, seat, armH),
+                    ("gap", w * 0.5f, w * 0.5f + 0.006f, back, d, seat, seat + 0.004f),            // cushion seams
+                };
+                bool atEnd = (string)item["corner"] == "end";
+                foreach (var (m, u0, u1, v0, v1, y0, y1) in S) B.Add(atEnd ? (m, w - u1, w - u0, v0, v1, y0, y1) : (m, u0, u1, v0, v1, y0, y1));
+                break;
+            }
+            case "dining_table":
+            {
+                const float top = 0.04f, lg = 0.07f, ins = 0.06f;
+                B.Add(("oak", 0, w, 0, d, h - top, h));
+                foreach (var (lu, lv) in new[] { (ins, ins), (w - ins - lg, ins), (ins, d - ins - lg), (w - ins - lg, d - ins - lg) })
+                    B.Add(("dark", lu, lu + lg, lv, lv + lg, 0, h - top));
+                int chairs = item["chairs"] != null ? (int)item["chairs"] : 6, perSide = Mathf.Max(0, chairs / 2);
+                for (int i = 0; i < perSide; i++)
+                {
+                    float c = w * (i + 0.5f) / perSide;
+                    Chair(B, c, -0.05f, -1f);   // seat front at the table edge, back away from it
+                    Chair(B, c, d + 0.05f, 1f);
+                }
+                break;
+            }
+            case "bed":
+            {
+                float hb = F(item, "headboard", 1.0f);
+                B.Add(("oak", 0, w, 0, 0.06f, 0, hb));                                     // headboard on the wall
+                B.Add(("dark", 0.10f, w - 0.10f, 0.20f, d - 0.15f, 0, 0.08f));             // recessed base
+                B.Add(("oak", 0, w, 0.06f, d, 0.08f, 0.30f));                              // frame
+                B.Add(("linen", 0.03f, w - 0.03f, 0.08f, d - 0.03f, 0.30f, h));            // mattress
+                B.Add(("duvet", 0.02f, w - 0.02f, 0.60f, d - 0.02f, h, h + 0.06f));        // duvet
+                int pillows = w > 1.2f ? 2 : 1;
+                float pw = (w - 0.12f) / pillows;
+                for (int i = 0; i < pillows; i++)
+                    B.Add(("linen", 0.06f + i * pw + 0.03f, 0.06f + (i + 1) * pw - 0.03f, 0.12f, 0.52f, h, h + 0.12f));
+                if (item["nightstands"] != null && (bool)item["nightstands"])
+                {
+                    B.Add(("oak", -0.50f, -0.05f, 0, 0.40f, 0, 0.50f));
+                    B.Add(("oak", w + 0.05f, w + 0.50f, 0, 0.40f, 0, 0.50f));
+                }
+                break;
+            }
+            case "desk":
+            {
+                B.Add(("oak", 0, w, 0, d, h - 0.03f, h));
+                B.Add(("fronts", 0, 0.03f, 0.02f, d - 0.02f, 0, h - 0.03f));
+                B.Add(("fronts", w - 0.40f, w, 0.02f, d - 0.04f, 0, h - 0.03f));           // drawer unit
+                for (int i = 1; i < 3; i++)                                                // drawer gaps
+                    B.Add(("gap", w - 0.38f, w - 0.02f, d - 0.04f, d - 0.037f, (h - 0.03f) * i / 3f - 0.002f, (h - 0.03f) * i / 3f + 0.002f));
+                if (item["chair"] == null || (bool)item["chair"])
+                {
+                    // office chair in front, facing the desk
+                    float c = (w - 0.40f) / 2f, v0 = d + 0.10f;
+                    B.Add(("dark", c - 0.30f, c + 0.30f, v0 + 0.05f, v0 + 0.65f, 0, 0.05f));
+                    B.Add(("chrome", c - 0.03f, c + 0.03f, v0 + 0.32f, v0 + 0.38f, 0.05f, 0.45f));
+                    B.Add(("fabric", c - 0.25f, c + 0.25f, v0 + 0.10f, v0 + 0.60f, 0.45f, 0.52f));
+                    B.Add(("fabric", c - 0.23f, c + 0.23f, v0 + 0.56f, v0 + 0.62f, 0.55f, 1.05f));
+                }
+                break;
+            }
             case "kitchen_base":
             {
                 string fr = (string)item["color"] ?? "fronts", top = (string)item["top"] ?? "oak";
@@ -399,6 +482,21 @@ public static class Furniture
         B.Add(("mirror", u0 + f, u1 - f, v, v + 0.02f, y0 + f, y1 - f));
         B.Add(("sheen", u0 + w * 0.16f, u0 + w * 0.20f, v + 0.02f, v + 0.021f, y0 + 0.06f, y1 - 0.06f));
         B.Add(("sheen", u0 + w * 0.24f, u0 + w * 0.255f, v + 0.02f, v + 0.021f, y0 + 0.06f, y1 - 0.06f));
+    }
+
+    /// <summary>Dining chair centred at u = c, its seat front at v = edge, extending away from it along
+    /// sign (-1 / +1); the back is on the far side.</summary>
+    static void Chair(List<(string, float, float, float, float, float, float)> B, float c, float edge, float sign)
+    {
+        const float hw = 0.22f, depth = 0.45f, seat = 0.45f, lg = 0.035f;
+        float near = edge, far = edge + sign * depth;
+        float v0 = Mathf.Min(near, far), v1 = Mathf.Max(near, far);
+        B.Add(("oak", c - hw, c + hw, v0, v1, seat - 0.04f, seat));
+        float bv0 = sign > 0 ? v1 - 0.04f : v0, bv1 = sign > 0 ? v1 : v0 + 0.04f;
+        B.Add(("oak", c - hw, c + hw, bv0, bv1, seat, 0.90f));
+        foreach (var lu in new[] { c - hw + 0.02f, c + hw - 0.02f - lg })
+            foreach (var lv in new[] { v0 + 0.02f, v1 - 0.02f - lg })
+                B.Add(("dark", lu, lu + lg, lv, lv + lg, 0, seat - 0.04f));
     }
 
     /// <summary>Thin dark lines on a run's front face every ~unit wide (door/drawer gaps).</summary>

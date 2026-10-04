@@ -59,7 +59,7 @@ public static class XRModelFactory
                 Quaternion wallRot = SnapToPerpendicular(w.transform.rotation, rotation);
                 Vector3 wallPos = w.transform.position;
                 // wallRot*forward points into this room, so the opposite room (if scanned) is on the -forward side.
-                float wallThickness = EstimateWallThickness(room, rooms, wallPos, -(wallRot * Vector3.forward), wW, wallRot * Vector3.right, 0.25f, out float wallShift);
+                float wallThickness = EstimateWallThickness(room, rooms, wallPos, -(wallRot * Vector3.forward), wW, wallRot * Vector3.right, 0.25f, out float wallShift, wH);
                 Vector3 wallOff = WallBoxOffset(wallThickness, wallShift, 1f); // behind the face, not centred on it
                 var wallHoles = uniqueOpenings.Where(o => {
                     Vector3 lp = Quaternion.Inverse(wallRot) * (o.transform.position - wallPos);
@@ -287,7 +287,7 @@ public static class XRModelFactory
                     Vector3 segDir = (wP2 - wP1).normalized;
                     Quaternion segRot = Quaternion.LookRotation(Vector3.Cross(segDir, Vector3.up), Vector3.up);
                     Vector3 segMid = (wP1 + wP2) / 2f + Vector3.up * (hMin/2f);
-                    float wallThickness = EstimateWallThickness(room, rooms, segMid, segRot * Vector3.forward, segLen, segDir, 0.25f, out float wallShift);
+                    float wallThickness = EstimateWallThickness(room, rooms, segMid, segRot * Vector3.forward, segLen, segDir, 0.25f, out float wallShift, hMin);
                     Vector3 wallOff = WallBoxOffset(wallThickness, wallShift, -1f); // local +Z points out of the room here
 
                     var holes = uniqueOpenings.Where(o => {
@@ -435,7 +435,7 @@ return model;
     /// When the two faces touch or cross, both walls are drawn thin and meet halfway: <paramref name="shift"/>
     /// is how far this wall's face moves into its own room to get there.
     /// </remarks>
-    private static float EstimateWallThickness(MRUKRoom room, List<MRUKRoom> allRooms, Vector3 wallWorldPos, Vector3 outwardNormal, float extentAlongWall, Vector3 wallDir, float fallback, out float shift)
+    private static float EstimateWallThickness(MRUKRoom room, List<MRUKRoom> allRooms, Vector3 wallWorldPos, Vector3 outwardNormal, float extentAlongWall, Vector3 wallDir, float fallback, out float shift, float height = 2.5f)
     {
         const float minGap = -0.15f, maxThickness = 0.5f, thin = 0.02f;
         float best = float.MaxValue;
@@ -455,9 +455,10 @@ return model;
                 float along = Vector3.Dot(delta, wallDir), half = a.PlaneRect.Value.width / 2f;
                 if (along - half > extentAlongWall / 2f - 0.15f || along + half < -extentAlongWall / 2f + 0.15f) continue;
 
-                // Two faces of one physical wall are always at essentially the same height; an unrelated wall
-                // elsewhere in the home is unlikely to also line up in height by coincidence.
-                if (Mathf.Abs(a.transform.position.y - wallWorldPos.y) > 0.4f) continue;
+                // Two faces of one physical wall overlap in height (by at least half a metre) - centres alone
+                // differ when one side is a double-height room (a 4 m living room against 2.9 m rooms); an
+                // unrelated wall on another storey doesn't overlap.
+                if (Mathf.Abs(a.transform.position.y - wallWorldPos.y) > (height + a.PlaneRect.Value.height) / 2f - 0.5f) continue;
 
                 best = gap;
             }
@@ -471,7 +472,7 @@ return model;
                 if (gap < minGap || gap > maxThickness || gap >= best) continue;
                 float along = Vector3.Dot(delta, wallDir);
                 if (along - width / 2f > extentAlongWall / 2f - 0.15f || along + width / 2f < -extentAlongWall / 2f + 0.15f) continue;
-                if (Mathf.Abs(pos.y - wallWorldPos.y) > 0.6f) continue;
+                if (Mathf.Abs(pos.y - wallWorldPos.y) > height / 2f + 0.5f) continue;
                 best = gap;
             }
         if (best == float.MaxValue) return fallback;

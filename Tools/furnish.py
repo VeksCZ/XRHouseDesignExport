@@ -160,6 +160,10 @@ MATERIALS = {
     'stone':   ([0.30, 0.30, 0.32, 1.0], 0.0, 0.50, None),
     'fire':    ([1.00, 0.42, 0.05, 1.0], 0.0, 0.50, None),
     'ember':   ([1.00, 0.75, 0.10, 1.0], 0.0, 0.50, None),
+    'fabric':  ([0.45, 0.47, 0.52, 1.0], 0.0, 0.90, None),
+    'linen':   ([0.94, 0.93, 0.89, 1.0], 0.0, 0.90, None),
+    'duvet':   ([0.62, 0.70, 0.78, 1.0], 0.0, 0.90, None),
+    'screen':  ([0.06, 0.07, 0.09, 1.0], 0.3, 0.15, None),
     'floor':   ([0.80, 0.66, 0.50, 1.0], 0.0, 0.70, None),   # extra (unscanned) rooms
     'wall':    ([0.96, 0.96, 0.95, 1.0], 0.0, 0.90, None),
     'ceiling': ([0.98, 0.98, 0.97, 1.0], 0.0, 0.90, None),
@@ -175,7 +179,72 @@ DEFAULTS = {  # w, d, h
     'kitchen_tall': (0.60, 0.60, 2.15), 'island': (1.30, 0.80, 0.90),
     # corner fireplace: glazed front + "glass_side"; "h": "ceiling" uses "h_fallback" here (the app measures it)
     'fireplace': (0.90, 0.60, 2.20),
+    # living/bedrooms (see Furniture.cs): wall TV, L sofa ("l", "corner"), dining table + "chairs", bed
+    # ("nightstands"), desk ("chair")
+    'tv': (1.45, 0.05, 0.84), 'sofa_corner': (2.90, 0.95, 0.85), 'dining_table': (1.80, 0.90, 0.75),
+    'bed': (1.80, 2.10, 0.50), 'desk': (1.20, 0.60, 0.75),
 }
+
+
+def _chair(B, c, edge, sign):
+    hw, depth, seat, lg = 0.22, 0.45, 0.45, 0.035
+    v0, v1 = sorted((edge, edge + sign * depth))
+    B.append(('oak', (c - hw, c + hw, v0, v1, seat - 0.04, seat)))
+    bv0, bv1 = (v1 - 0.04, v1) if sign > 0 else (v0, v0 + 0.04)
+    B.append(('oak', (c - hw, c + hw, bv0, bv1, seat, 0.90)))
+    for lu in (c - hw + 0.02, c + hw - 0.02 - lg):
+        for lv in (v0 + 0.02, v1 - 0.02 - lg):
+            B.append(('dark', (lu, lu + lg, lv, lv + lg, 0, seat - 0.04)))
+
+
+def _living(item, t, w, d, h):
+    B = []
+    if t == 'tv':
+        y0 = item.get('y', 0.85)
+        B += [('dark', (0, w, 0, d, y0, y0 + h)), ('screen', (0.015, w - 0.015, d, d + 0.003, y0 + 0.015, y0 + h - 0.015))]
+        return B, 0.0
+    if t == 'sofa_corner':
+        l, seat, back, arm, arm_h = item.get('l', 1.6), 0.45, 0.22, 0.18, 0.62
+        S = [('dark', (0.05, w - 0.05, 0.05, d - 0.05, 0, 0.10)), ('fabric', (0, w, 0, d, 0.10, seat)),
+             ('fabric', (0, w, 0, back, seat, h)), ('fabric', (w - arm, w, back, d, seat, arm_h)),
+             ('dark', (0.05, d - 0.05, d, l - 0.05, 0, 0.10)), ('fabric', (0, d, d, l, 0.10, seat)),
+             ('fabric', (0, back, back, l, seat, h)), ('fabric', (back, d, l - arm, l, seat, arm_h)),
+             ('gap', (w * 0.5, w * 0.5 + 0.006, back, d, seat, seat + 0.004))]
+        if item.get('corner') == 'end':
+            S = [(m, (w - u1, w - u0, v0, v1, y0, y1)) for m, (u0, u1, v0, v1, y0, y1) in S]
+        return S, item.get('y', 0.0)
+    if t == 'dining_table':
+        th, lg, ins = 0.04, 0.07, 0.06
+        B.append(('oak', (0, w, 0, d, h - th, h)))
+        for lu, lv in ((ins, ins), (w - ins - lg, ins), (ins, d - ins - lg), (w - ins - lg, d - ins - lg)):
+            B.append(('dark', (lu, lu + lg, lv, lv + lg, 0, h - th)))
+        per = max(0, item.get('chairs', 6) // 2)
+        for i in range(per):
+            c = w * (i + 0.5) / per
+            _chair(B, c, -0.05, -1); _chair(B, c, d + 0.05, 1)
+        return B, item.get('y', 0.0)
+    if t == 'bed':
+        hb = item.get('headboard', 1.0)
+        B += [('oak', (0, w, 0, 0.06, 0, hb)), ('dark', (0.10, w - 0.10, 0.20, d - 0.15, 0, 0.08)),
+              ('oak', (0, w, 0.06, d, 0.08, 0.30)), ('linen', (0.03, w - 0.03, 0.08, d - 0.03, 0.30, h)),
+              ('duvet', (0.02, w - 0.02, 0.60, d - 0.02, h, h + 0.06))]
+        n = 2 if w > 1.2 else 1; pw = (w - 0.12) / n
+        for i in range(n):
+            B.append(('linen', (0.06 + i * pw + 0.03, 0.06 + (i + 1) * pw - 0.03, 0.12, 0.52, h, h + 0.12)))
+        if item.get('nightstands'):
+            B += [('oak', (-0.50, -0.05, 0, 0.40, 0, 0.50)), ('oak', (w + 0.05, w + 0.50, 0, 0.40, 0, 0.50))]
+        return B, item.get('y', 0.0)
+    # desk
+    B += [('oak', (0, w, 0, d, h - 0.03, h)), ('fronts', (0, 0.03, 0.02, d - 0.02, 0, h - 0.03)),
+          ('fronts', (w - 0.40, w, 0.02, d - 0.04, 0, h - 0.03))]
+    for i in (1, 2):
+        yy = (h - 0.03) * i / 3
+        B.append(('gap', (w - 0.38, w - 0.02, d - 0.04, d - 0.037, yy - 0.002, yy + 0.002)))
+    if item.get('chair', True):
+        c, v0 = (w - 0.40) / 2, d + 0.10
+        B += [('dark', (c - 0.30, c + 0.30, v0 + 0.05, v0 + 0.65, 0, 0.05)), ('chrome', (c - 0.03, c + 0.03, v0 + 0.32, v0 + 0.38, 0.05, 0.45)),
+              ('fabric', (c - 0.25, c + 0.25, v0 + 0.10, v0 + 0.60, 0.45, 0.52)), ('fabric', (c - 0.23, c + 0.23, v0 + 0.56, v0 + 0.62, 0.55, 1.05))]
+    return B, item.get('y', 0.0)
 
 
 def _doors(B, w, d, y0, y1, unit=0.6):
@@ -232,6 +301,8 @@ def shape(item, w, d, h):
     t = item['type']; B = []
     if t in ('kitchen_base', 'kitchen_wall', 'kitchen_tall', 'island'):
         return _kitchen(item, t, w, d, h)
+    if t in ('tv', 'sofa_corner', 'dining_table', 'bed', 'desk'):
+        return _living(item, t, w, d, h)
     if t == 'fireplace':
         left = item.get('glass_side', 'left') == 'left'
         fb0, fb1, back, cheek, gl = 0.42, 1.02, 0.16, 0.10, 0.008

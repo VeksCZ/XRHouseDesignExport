@@ -45,6 +45,7 @@ public partial class DesktopWalkApp
                     "holes" => await TestHoles(outDir),
                     "doorinfo" => DumpDoors(),
                     "roomplan" => DumpRoomPlan(Arg("-room")),
+                    "probe" => Probe(Arg("-rays") ?? ""),
                     _ => false,
                 };
             }
@@ -260,6 +261,12 @@ public partial class DesktopWalkApp
                     poly.Add($"({m.x:0.00},{-m.z:0.00})");
                 }
             Debug.Log($"TEST room {NameOf(room)}: x {xmin:0.00}..{xmax:0.00} ({xmax - xmin:0.00}) z {zmin:0.00}..{zmax:0.00} ({zmax - zmin:0.00}) floor y {y:0.00} poly {string.Join(" ", poly)}");
+            if (key != null)
+                foreach (var wa in room.Anchors.Where(MRUKDataProcessor.IsStructuralWall))
+                {
+                    Vector3 c = g * (wa.transform.position - center), n = g * wa.transform.forward;
+                    Debug.Log($"TEST    wall c=({c.x:0.00},{-c.z:0.00}) into-room n=({n.x:0.00},{-n.z:0.00}) w {wa.PlaneRect.Value.width:0.00} h {wa.PlaneRect.Value.height:0.00}");
+                }
             foreach (var d in DoorCatalog.Build(rooms).Where(d => d.anchors.Any(a => a.Room == room)))
             {
                 Vector3 c = g * (d.center - center), r = g * d.right;
@@ -282,6 +289,32 @@ public partial class DesktopWalkApp
             var r = StairGeometry.Resolve(s, rooms);
             Debug.Log($"TEST stair {Short(s.id)} width {s.width:0.00} risers [{string.Join(",", s.risers ?? new List<int>())}] points {string.Join(" ", StairGeometry.WorldPoints(s, rooms).Select(G))}" +
                       (r != null ? $" bottom {r.bottomY - center.y:0.00} top {r.topY - center.y:0.00} rise {r.rise * 100f:0.0} cm" : ""));
+        }
+        return true;
+    }
+
+    /// <summary>-rays "x,y,z,dx,dy,dz;..." (GLB axes, y from the model origin): every model part each ray passes
+    /// through, nearest first - what is really in front of what.</summary>
+    bool Probe(string rays)
+    {
+        if (!walk.TryGetModelFrame(out var root, out float yaw, out var center)) return false;
+        Quaternion g = Quaternion.Euler(0, yaw, 0), gi = Quaternion.Inverse(g);
+        Vector3 ToWorld(Vector3 glb) => root.TransformPoint(new Vector3(glb.x, glb.y, -glb.z));
+        Vector3 Glb(Vector3 w) { var m = root.InverseTransformPoint(w); return new Vector3(m.x, m.y, -m.z); }
+        foreach (var r in rays.Split(new[] { ';' }, StringSplitOptions.RemoveEmptyEntries))
+        {
+            var f = r.Split(',').Select(s => float.Parse(s.Trim(), CultureInfo.InvariantCulture)).ToArray();
+            Vector3 o = ToWorld(new Vector3(f[0], f[1], f[2])), d = (ToWorld(new Vector3(f[0] + f[3], f[1] + f[4], f[2] + f[5])) - o).normalized;
+            var hits = Physics.RaycastAll(o, d, 10f, ~0, QueryTriggerInteraction.Ignore).OrderBy(h => h.distance).Take(6);
+            Debug.Log($"TEST ray {r}: " + string.Join(" | ", hits.Select(h => { var p = Glb(h.point); return $"{h.collider.name}@({p.x:0.00},{p.y:0.00},{p.z:0.00})"; })));
+            // renderers without a collider (doors, panes...) whose bounds the ray crosses
+            var ray = new Ray(o, d);
+            foreach (var mr in root.GetComponentsInChildren<MeshRenderer>())
+            {
+                if (!mr.enabled || mr.GetComponent<Collider>() || !mr.bounds.IntersectRay(ray, out float dist) || dist > 10f) continue;
+                var p = Glb(o + d * dist);
+                Debug.Log($"TEST    renderer {mr.name} mat {mr.sharedMaterial?.name} enters @({p.x:0.00},{p.y:0.00},{p.z:0.00})");
+            }
         }
         return true;
     }
