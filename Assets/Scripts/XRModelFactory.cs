@@ -58,6 +58,17 @@ public static class XRModelFactory
                 // "clean" reconstruction should look regardless of scan noise.
                 Quaternion wallRot = SnapToPerpendicular(w.transform.rotation, rotation);
                 Vector3 wallPos = w.transform.position;
+                if (CeilingOverride != null) {
+                    // a ceiling from the spec can be lower than the flat one the panel was scanned up to - cut the
+                    // panel down to it (the sloped cap below then takes it up to the ceiling line)
+                    Vector3 tan = wallRot * Vector3.right * (wW / 2f);
+                    var c1 = CeilingOverride(room.CeilingAnchors, wallPos - tan);
+                    var c2 = CeilingOverride(room.CeilingAnchors, wallPos + tan);
+                    if (c1.HasValue && c2.HasValue) {
+                        float bottom = wallPos.y - wH / 2f, top = Mathf.Min(c1.Value, c2.Value);
+                        if (top < bottom + wH && top > bottom + 0.5f) { wH = top - bottom; wallPos.y = bottom + wH / 2f; }
+                    }
+                }
                 // wallRot*forward points into this room, so the opposite room (if scanned) is on the -forward side.
                 float wallThickness = EstimateWallThickness(room, rooms, wallPos, -(wallRot * Vector3.forward), wW, wallRot * Vector3.right, 0.25f, out float wallShift, wH);
                 Vector3 wallOff = WallBoxOffset(wallThickness, wallShift, 1f); // behind the face, not centred on it
@@ -359,6 +370,9 @@ return model;
     /// </summary>
     internal static float SampleCeilingHeight(IEnumerable<MRUKAnchor> ceilingAnchors, Vector3 probeWorldXZ, float fallback)
     {
+        // the headset stores one flat ceiling per room - real sloped ones come from the furniture spec
+        var over = CeilingOverride?.Invoke(ceilingAnchors, probeWorldXZ);
+        if (over.HasValue) return over.Value;
         bool haveFallback = false; float fallbackY = fallback; float bestDist = float.MaxValue;
 
         foreach (var ceil in ceilingAnchors) {
@@ -484,6 +498,10 @@ return model;
     /// <summary>Wall faces (world: centre at mid-height, normal into its room, width) of rooms that aren't in the
     /// scan but drawn from the spec (Furniture.ExtraFaces). Set by the walk-through around building its model.</summary>
     public static List<(Vector3 pos, Vector3 inward, float width)> ExtraFaces;
+
+    /// <summary>Ceilings from the furniture spec ("ceilings"): (a room's CeilingAnchors, world probe) -> world Y, or
+    /// null to keep the scanned one. Installed per scan by Furniture.InstallCeilings.</summary>
+    public static System.Func<IEnumerable<MRUKAnchor>, Vector3, float?> CeilingOverride;
 
     /// <summary>Local offset in metres (wall-box space; <paramref name="inwardZ"/> = +1 when the box's local +Z
     /// points into the room, -1 when it points out) that puts a wall box of this thickness behind its face instead

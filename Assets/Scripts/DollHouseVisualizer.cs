@@ -218,6 +218,7 @@ public class DollHouseVisualizer : MonoBehaviour
 
         uiLog?.AddLog($"Dollhouse: Processing {rooms.Count} rooms...");
 
+        Furniture.InstallCeilings(rooms, HouseEditsStore.CurrentScan); // real (sloped) ceilings from the spec
         Vector3 c = CalculateCenter(rooms);
         // Same wall alignment as the export, so the preview is oriented like the exported model.
         float yaw = FloorPlanBuilder.CorrectionYaw(MRUKPlanExtractor.Extract(rooms));
@@ -244,6 +245,7 @@ public class DollHouseVisualizer : MonoBehaviour
                     ApplyStairs();
                     // furniture and the rooms the scan couldn't take (same spec as the walk-through)
                     furniture.Clear();
+                    furniture.RoofAlpha = 0.25f; // looked into from above: roofs only hinted
                     if (mode == DollhouseMode.AnchorAnalytical || mode == DollhouseMode.AnchorWithDimensions)
                         furniture.Apply(visual, yaw, c, rooms, HouseEditsStore.CurrentScan, visual.layer);
                     // Registers it with the XR Interaction Toolkit purely so the ray hovers it as a valid

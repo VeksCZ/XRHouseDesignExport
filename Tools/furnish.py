@@ -167,6 +167,7 @@ MATERIALS = {
     'floor':   ([0.80, 0.66, 0.50, 1.0], 0.0, 0.70, None),   # extra (unscanned) rooms
     'wall':    ([0.96, 0.96, 0.95, 1.0], 0.0, 0.90, None),
     'ceiling': ([0.98, 0.98, 0.97, 1.0], 0.0, 0.90, None),
+    'roof': ([0.27, 0.28, 0.30, 1.0], 0.0, 0.80, None), 'brick': ([0.62, 0.36, 0.28, 1.0], 0.0, 0.85, None),
 }
 
 DEFAULTS = {  # w, d, h
@@ -420,6 +421,27 @@ def box_mesh(x0, x1, y0, y1, z0, z1):
         I += [b, b + 2, b + 1, b, b + 3, b + 2]   # counter-clockwise seen from outside
     return P, N, I
 
+def sloped_mesh(x0, x1, z0, z1, bottom, top):
+    """box_mesh whose bottom/top follow (x, z) -> y (sloped ceilings, walls under them, roofs)."""
+    P, N, I = box_mesh(x0, x1, 0.0, 1.0, z0, z1)
+    P = [(x, top(x, z) if y > 0.5 else bottom(x, z), z) for x, y, z in P]
+    return P, N, I
+
+
+def ceiling_plane(spec, key):
+    """The spec's "ceilings" plane (a, bx, bz) - GLB y = a + bx*x + bz*z - for a room id / extra room name."""
+    key = key.lower()
+    for c in spec.get('ceilings', []):
+        for r in c.get('rooms', []):
+            k = r.lower()
+            if k.startswith('room_'): k = k[5:]
+            if k and key.startswith(k): return tuple(c['plane'])
+    return None
+
+
+def plane_fn(p):
+    return lambda x, z: p[0] + p[1] * x + p[2] * z
+
 # ----------------------------------------------------------------------------------------------------------- building
 
 def furnish(js, binc, rooms, spec):
@@ -439,7 +461,11 @@ def furnish(js, binc, rooms, spec):
             dw, dd, dh = DEFAULTS[t]
             w, d, h = item.get('w', dw), item.get('d', dd), item.get('h', dh)
             if h == 'ceiling':  # the app measures the room's ceiling; the export has no ceiling data here
-                h = item.get('h_fallback', 2.6)
+                cp = ceiling_plane(spec, rs['room'][5:] if rs['room'].lower().startswith('room_') else rs['room'])
+                if cp:   # the spec's real ceiling above the item's middle
+                    cx, cz = place(rooms[rname], item, w, d)(w / 2, d / 2)
+                    h = max(0.1, plane_fn(cp)(cx, cz) - rooms[rname]['y'] - item.get('y', 0.0))
+                else: h = item.get('h_fallback', 2.6)
             boxes, lift = shape(item, w, d, h)
             to_xz = place(room, item, w, d)
             by_mat, rect = {}, None
@@ -473,7 +499,11 @@ def furnish(js, binc, rooms, spec):
         room = rooms[find_room(rooms, er['like'])]
         x0, x1, z0, z1 = er['x0'], er['x1'], er['z0'], er['z1']
         fy = er.get('floor', room['y']); cy = fy + er.get('h', er.get('h_fallback', 2.6)); t = er.get('wall_t', 0.25); slab = 0.05
-        boxes = [('floor', (x0, x1, fy - slab, fy, z0, z1)), ('ceiling', (x0, x1, cy, cy + slab, z0, z1))]
+        cp = ceiling_plane(spec, er.get('name', ''))
+        ceil = plane_fn(cp) if cp else (lambda x, z, cy=cy: cy)
+        flat = lambda y: (lambda x, z: y)
+        boxes = [('floor', (x0, x1, z0, z1, flat(fy - slab), flat(fy))),
+                 ('ceiling', (x0, x1, z0, z1, ceil, lambda x, z: ceil(x, z) + slab))]
         for wl in er.get('walls', []):
             wd = wl if isinstance(wl, dict) else {'side': wl}
             side = wd['side']; along_x = side in ('-z', '+z')
@@ -481,14 +511,14 @@ def furnish(js, binc, rooms, spec):
             a, b = wd.get('from', lo), wd.get('to', hi)
             if abs(a - lo) < 0.01: a -= t
             if abs(b - hi) < 0.01: b += t
-            ya, yb = fy - slab, cy + slab
-            if side == '-x': boxes.append(('wall', (x0 - t, x0, ya, yb, a, b)))
-            elif side == '+x': boxes.append(('wall', (x1, x1 + t, ya, yb, a, b)))
-            elif side == '-z': boxes.append(('wall', (a, b, ya, yb, z0 - t, z0)))
-            elif side == '+z': boxes.append(('wall', (a, b, ya, yb, z1, z1 + t)))
+            ya, yb = flat(fy - slab), (lambda x, z: ceil(x, z) + slab)
+            if side == '-x': boxes.append(('wall', (x0 - t, x0, a, b, ya, yb)))
+            elif side == '+x': boxes.append(('wall', (x1, x1 + t, a, b, ya, yb)))
+            elif side == '-z': boxes.append(('wall', (a, b, z0 - t, z0, ya, yb)))
+            elif side == '+z': boxes.append(('wall', (a, b, z1, z1 + t, ya, yb)))
         by_mat = {}
-        for mat, (xa, xb, ya, yb, za, zb) in boxes:
-            P, N, I = box_mesh(xa, xb, ya, yb, za, zb)
+        for mat, (xa, xb, za, zb, ya, yb) in boxes:
+            P, N, I = sloped_mesh(xa, xb, za, zb, ya, yb)
             g = by_mat.setdefault(mat, ([], [], []))
             base = len(g[0]); g[0].extend(P); g[1].extend(N); g[2].extend(i + base for i in I)
         prims = [{'attributes': {'POSITION': add_accessor(js, binc, P, 'VEC3'), 'NORMAL': add_accessor(js, binc, N, 'VEC3')},
@@ -497,6 +527,20 @@ def furnish(js, binc, rooms, spec):
         js['meshes'].append({'name': label, 'primitives': prims})
         js['nodes'].append({'name': label, 'mesh': len(js['meshes']) - 1})
         furn_children.append(len(js['nodes']) - 1)
+    # roofs (see Furniture.cs): sloped slabs, underside on "plane", "t" thick; a chimney is a flat one
+    roof_children = []
+    for rf in spec.get('roofs', []):
+        bot = plane_fn(rf['plane']); t = rf.get('t', 0.3); mat = rf.get('color', 'roof')
+        P, N, I = sloped_mesh(rf['x0'], rf['x1'], rf['z0'], rf['z1'], bot, lambda x, z, bot=bot, t=t: bot(x, z) + t)
+        prim = {'attributes': {'POSITION': add_accessor(js, binc, P, 'VEC3'), 'NORMAL': add_accessor(js, binc, N, 'VEC3')},
+                'indices': add_accessor(js, binc, I, 'SCALAR'), 'material': mat_index[mat]}
+        label = 'ROOF_' + rf.get('name', 'roof')
+        js['meshes'].append({'name': label, 'primitives': [prim]})
+        js['nodes'].append({'name': label, 'mesh': len(js['meshes']) - 1})
+        roof_children.append(len(js['nodes']) - 1)
+    if roof_children:
+        js['nodes'].append({'name': 'ROOFS', 'children': roof_children})
+        js['scenes'][js.get('scene', 0)]['nodes'].append(len(js['nodes']) - 1)
     js['nodes'].append({'name': 'FURNITURE', 'children': furn_children})
     js['scenes'][js.get('scene', 0)]['nodes'].append(len(js['nodes']) - 1)
     return placed

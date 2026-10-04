@@ -76,6 +76,7 @@ public class MiniMapPanel : MonoBehaviour
         var rooms = MRUKDataProcessor.GetValidRooms(MRUK.Instance);
         if (rooms.Count == 0) { uiLog?.AddLog("<color=red>Minimap: no valid rooms.</color>"); isOn = false; return; }
 
+        Furniture.InstallCeilings(rooms, HouseEditsStore.CurrentScan); // real (sloped) ceilings from the spec
         var floorAnchors = rooms.SelectMany(r => r.FloorAnchors).Where(f => f != null).ToList();
         modelCenter = floorAnchors.Count > 0
             ? floorAnchors.Aggregate(Vector3.zero, (s, f) => s + f.transform.position) / floorAnchors.Count

@@ -40,6 +40,7 @@ public static class Furniture
         { "tiles", new Color(0.88f, 0.88f, 0.86f) }, { "dark", new Color(0.25f, 0.25f, 0.27f) },
         { "fronts", new Color(0.66f, 0.68f, 0.70f) }, { "oak", new Color(0.68f, 0.56f, 0.44f) },
         { "steel", new Color(0.74f, 0.75f, 0.77f) }, { "gap", new Color(0.35f, 0.36f, 0.38f) },
+        { "roof", new Color(0.27f, 0.28f, 0.30f) }, { "brick", new Color(0.62f, 0.36f, 0.28f) },
     };
 
     static readonly Dictionary<string, (float w, float d, float h)> Defaults = new Dictionary<string, (float, float, float)>
@@ -116,7 +117,8 @@ public static class Furniture
             var rm = new XRRoomModel { roomName = "Extra_" + er.name };
             const float slab = 0.05f;
             rm.parts.Add(Box(er.name + "_floor", "floor", er.x0, er.x1, er.floor - slab, er.floor, er.z0, er.z1, "FLOOR"));
-            rm.parts.Add(Box(er.name + "_ceiling", "ceiling", er.x0, er.x1, er.ceil, er.ceil + slab, er.z0, er.z1, "CEILING"));
+            var ceilAt = er.CeilAt;
+            rm.parts.Add(SlopedBox(er.name + "_ceiling", "ceiling", er.x0, er.x1, er.z0, er.z1, ceilAt, (x, z) => ceilAt(x, z) + slab, "CEILING"));
             foreach (var wl in er.spec["walls"] as JArray ?? new JArray())
             {
                 string side = wl.Type == JTokenType.String ? (string)wl : (string)wl["side"];
@@ -127,22 +129,117 @@ public static class Furniture
                 float t = F(er.spec, "wall_t", 0.25f);
                 if (Mathf.Abs(a - lo) < 0.01f) a -= t;   // close the outer corner with the perpendicular wall
                 if (Mathf.Abs(b - hi) < 0.01f) b += t;
-                float y0 = er.floor - slab, y1 = er.ceil + slab;
-                if (side == "-x") rm.parts.Add(Box(er.name + "_wall", "wall", er.x0 - t, er.x0, y0, y1, a, b, "WALL"));
-                else if (side == "+x") rm.parts.Add(Box(er.name + "_wall", "wall", er.x1, er.x1 + t, y0, y1, a, b, "WALL"));
-                else if (side == "-z") rm.parts.Add(Box(er.name + "_wall", "wall", a, b, y0, y1, er.z0 - t, er.z0, "WALL"));
-                else if (side == "+z") rm.parts.Add(Box(er.name + "_wall", "wall", a, b, y0, y1, er.z1, er.z1 + t, "WALL"));
+                float y0 = er.floor - slab;
+                Func<float, float, float> bot = (x, z) => y0, top = (x, z) => ceilAt(x, z) + slab;
+                if (side == "-x") rm.parts.Add(SlopedBox(er.name + "_wall", "wall", er.x0 - t, er.x0, a, b, bot, top, "WALL"));
+                else if (side == "+x") rm.parts.Add(SlopedBox(er.name + "_wall", "wall", er.x1, er.x1 + t, a, b, bot, top, "WALL"));
+                else if (side == "-z") rm.parts.Add(SlopedBox(er.name + "_wall", "wall", a, b, er.z0 - t, er.z0, bot, top, "WALL"));
+                else if (side == "+z") rm.parts.Add(SlopedBox(er.name + "_wall", "wall", a, b, er.z1, er.z1 + t, bot, top, "WALL"));
             }
             model.rooms.Add(rm);
         }
+        // roofs: sloped slabs, "roofs": [{"name", "x0","x1","z0","z1", "plane": [a, bx, bz] (underside at GLB
+        // y = a + bx*x + bz*z), "t": thickness, "color"}] - a chimney is just a flat one ("plane": [y, 0, 0], "t": height)
+        if (spec["roofs"] is JArray roofs)
+        {
+            var rm = new XRRoomModel { roomName = "Roofs" };
+            foreach (var rf in roofs.OfType<JObject>())
+            {
+                if (!TryPlane(rf["plane"], out var p)) continue;
+                float t = F(rf, "t", 0.3f);
+                Func<float, float, float> bot = (x, z) => p.a + p.bx * x + p.bz * z;
+                var part = SlopedBox((string)rf["name"] ?? "roof", (string)rf["color"] ?? "roof", F(rf, "x0", 0f), F(rf, "x1", 0f),
+                    F(rf, "z0", 0f), F(rf, "z1", 0f), bot, (x, z) => bot(x, z) + t);
+                part.name = RoofPart;
+                rm.parts.Add(part);
+            }
+            if (rm.parts.Count > 0) model.rooms.Add(rm);
+        }
         return model;
+    }
+
+    /// <summary>Roof parts are named so the Dollhouse can make them see-through.</summary>
+    public const string RoofPart = "FURN_roof";
+
+    static bool TryPlane(JToken t, out (float a, float bx, float bz) p)
+    {
+        p = default;
+        if (t is not JArray pl || pl.Count < 3) return false;
+        p = ((float)pl[0], (float)pl[1], (float)pl[2]);
+        return true;
+    }
+
+    /// <summary>The "ceilings" plane (GLB y = a + bx*x + bz*z) for a room id or extra room name, if the spec has one:
+    /// "ceilings": [{"rooms": ["6DF8", "Satna", ...], "plane": [a, bx, bz]}].</summary>
+    static bool TryCeilingPlane(JObject spec, string key, out (float a, float bx, float bz) p)
+    {
+        p = default;
+        if (spec?["ceilings"] is not JArray list || string.IsNullOrEmpty(key)) return false;
+        key = key.ToLowerInvariant();
+        foreach (var c in list.OfType<JObject>())
+            foreach (var r in c["rooms"] as JArray ?? new JArray())
+            {
+                string k = ((string)r ?? "").ToLowerInvariant();
+                if (k.StartsWith("room_")) k = k.Substring(5);
+                if (k.Length > 0 && key.StartsWith(k) && TryPlane(c["plane"], out p)) return true;
+            }
+        return false;
+    }
+
+    /// <summary>Makes every model of this scan use the spec's "ceilings" instead of the flat ceilings the headset
+    /// stored (walls, caps, ceilings and "h": "ceiling" items all sample XRModelFactory.SampleCeilingHeight). The
+    /// planes are in the export's GLB axes, so the same frame (CorrectionYaw + CalculateCenter) is used here
+    /// whatever frame the caller builds in. Call before building a model of these rooms.</summary>
+    public static void InstallCeilings(List<MRUKRoom> rooms, string scanName)
+    {
+        XRModelFactory.CeilingOverride = null;
+        var spec = string.IsNullOrEmpty(scanName) ? null : Load(scanName);
+        if (spec?["ceilings"] is not JArray || rooms == null || rooms.Count == 0) return;
+        Vector3 center = DollHouseVisualizer.CalculateCenter(rooms);
+        Quaternion g = Quaternion.Euler(0, FloorPlanBuilder.CorrectionYaw(MRUKPlanExtractor.Extract(rooms)), 0);
+        var planes = new List<(MRUKRoom room, (float a, float bx, float bz) p)>();
+        foreach (var r in rooms)
+            if (r != null && r.CeilingAnchors != null && TryCeilingPlane(spec, DoorCatalog.RoomId(r), out var p)) planes.Add((r, p));
+        if (planes.Count == 0) return;
+        XRModelFactory.CeilingOverride = (anchors, probe) =>
+        {
+            if (anchors == null) return null;
+            var first = anchors.FirstOrDefault(a => a != null);
+            foreach (var (room, p) in planes)
+            {
+                if (!ReferenceEquals(room.CeilingAnchors, anchors) && (first == null || !room.CeilingAnchors.Contains(first))) continue;
+                Vector3 m = g * (probe - center);
+                return center.y + p.a + p.bx * m.x + p.bz * -m.z;   // GLB z = -model z
+            }
+            return null;
+        };
+        Debug.Log($"[Furniture] {scanName}: ceilings from the spec for {planes.Count} room(s)");
+    }
+
+    /// <summary>A box in GLB axes whose bottom and top follow (x, z) -> y (sloped ceilings, walls under them, roofs).</summary>
+    static XRMeshPart SlopedBox(string name, string mat, float x0, float x1, float z0, float z1,
+        Func<float, float, float> bottom, Func<float, float, float> top, string modelMat = "FURNITURE")
+    {
+        var part = Box(name, mat, x0, x1, 0f, 1f, z0, z1, modelMat);
+        for (int i = 0; i < part.vertices.Count; i++)
+        {
+            var v = part.vertices[i];
+            v.y = v.y > 0.5f ? top(v.x, -v.z) : bottom(v.x, -v.z);   // model z = -GLB z
+            part.vertices[i] = v;
+        }
+        return part;
     }
 
     /// <summary>A room the headset couldn't scan any more (the scan has a room limit), drawn from the spec:
     /// "extra_rooms": [{"name", "like": room id (floor height and ceiling taken from it), "x0","x1","z0","z1"
     /// (GLB axes), "walls": ["-x", {"side": "+z", "from": x, "to": x}, ...]}]. Only the listed walls are drawn -
     /// the other sides are neighbours' walls, which get thin where they meet it (see <see cref="ExtraFaces"/>).</summary>
-    struct ExtraRoom { public string name; public JObject spec; public float x0, x1, z0, z1, floor, ceil; }
+    struct ExtraRoom
+    {
+        public string name; public JObject spec; public float x0, x1, z0, z1, floor, ceil;
+        public (float a, float bx, float bz)? plane;   // its own "ceilings" entry (sloped), else flat at ceil
+        public Func<float, float, float> CeilAt { get { var p = plane; float c = ceil; return p.HasValue ? (x, z) => p.Value.a + p.Value.bx * x + p.Value.bz * z : (x, z) => c; } }
+    }
 
     static IEnumerable<ExtraRoom> ExtraRooms(JObject spec, List<MRUKRoom> rooms, Quaternion g, Vector3 center)
     {
@@ -158,7 +255,14 @@ public static class Furniture
             Vector3 refWorld = Quaternion.Inverse(g) * new Vector3((box.xmin + box.xmax) / 2f, box.y, -(box.zmin + box.zmax) / 2f) + center;
             float h = XRModelFactory.SampleCeilingHeight(room.CeilingAnchors, refWorld, refWorld.y + 2.6f) - refWorld.y;
             float floor = F(er, "floor", box.y);
-            yield return new ExtraRoom { name = (string)er["name"] ?? "extra", spec = er, x0 = x0, x1 = x1, z0 = z0, z1 = z1, floor = floor, ceil = floor + F(er, "h", h) };
+            string name = (string)er["name"] ?? "extra";
+            var x = new ExtraRoom { name = name, spec = er, x0 = x0, x1 = x1, z0 = z0, z1 = z1, floor = floor, ceil = floor + F(er, "h", h) };
+            if (TryCeilingPlane(spec, name, out var p))
+            {
+                x.plane = p;
+                x.ceil = x.CeilAt((x0 + x1) / 2f, (z0 + z1) / 2f);
+            }
+            yield return x;
         }
     }
 
@@ -636,6 +740,9 @@ public class FurnitureInModel
     public JObject Spec { get; private set; }
     public string ScanName => lastScan;
 
+    /// <summary>Below 1 the roofs are see-through (the Dollhouse is looked into from above).</summary>
+    public float RoofAlpha = 1f;
+
     /// <summary>Rebuilds from the current Spec (after an item was moved/turned).</summary>
     public void Reload()
     {
@@ -674,10 +781,11 @@ public class FurnitureInModel
         {
             mf.gameObject.layer = layer;
             if (mf.sharedMesh) mf.gameObject.AddComponent<MeshCollider>().sharedMesh = mf.sharedMesh;
-            if (mf.name != Furniture.GlassPart || glass == null) continue;
+            bool roof = mf.name == Furniture.RoofPart && RoofAlpha < 1f;
+            if ((mf.name != Furniture.GlassPart && !roof) || glass == null) continue;
             var mr = mf.GetComponent<MeshRenderer>();
             if (mr.sharedMaterial) UnityEngine.Object.Destroy(mr.sharedMaterial);
-            var m = new Material(glass) { color = new Color(1f, 1f, 1f, 0.3f) };
+            var m = new Material(glass) { color = roof ? new Color(0.27f, 0.28f, 0.30f, RoofAlpha) : new Color(1f, 1f, 1f, 0.3f) };
             mats.Add(m);
             mr.sharedMaterial = m;
         }

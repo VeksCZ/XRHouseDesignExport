@@ -278,6 +278,7 @@ public class WalkThroughMode : MonoBehaviour
         var rooms = MRUKDataProcessor.GetValidRooms(MRUK.Instance);
         if (rooms.Count == 0) { uiLog?.AddLog("<color=red>Walk: no valid rooms.</color>"); return false; }
 
+        Furniture.InstallCeilings(rooms, HouseEditsStore.CurrentScan); // the real (sloped) ceilings from the spec
         center = DollHouseVisualizer.CalculateCenter(rooms);
         yaw = FloorPlanBuilder.CorrectionYaw(MRUKPlanExtractor.Extract(rooms));
         walkRooms = rooms;
