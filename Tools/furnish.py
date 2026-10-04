@@ -160,6 +160,9 @@ MATERIALS = {
     'stone':   ([0.30, 0.30, 0.32, 1.0], 0.0, 0.50, None),
     'fire':    ([1.00, 0.42, 0.05, 1.0], 0.0, 0.50, None),
     'ember':   ([1.00, 0.75, 0.10, 1.0], 0.0, 0.50, None),
+    'floor':   ([0.80, 0.66, 0.50, 1.0], 0.0, 0.70, None),   # extra (unscanned) rooms
+    'wall':    ([0.96, 0.96, 0.95, 1.0], 0.0, 0.90, None),
+    'ceiling': ([0.98, 0.98, 0.97, 1.0], 0.0, 0.90, None),
 }
 
 DEFAULTS = {  # w, d, h
@@ -394,6 +397,35 @@ def furnish(js, binc, rooms, spec):
             overflow = (min(fx0, fx1) < room['xmin'] - 0.01 or max(fx0, fx1) > room['xmax'] + 0.01 or
                         min(fz0, fz1) < room['zmin'] - 0.01 or max(fz0, fz1) > room['zmax'] + 0.01)
             if overflow: print(f'  WARNING: {label} sticks out of {rname}\'s floor rectangle')
+    # rooms the scan couldn't take any more (see Furniture.cs ExtraRooms): floor, ceiling, the listed walls
+    for er in spec.get('extra_rooms', []):
+        room = rooms[find_room(rooms, er['like'])]
+        x0, x1, z0, z1 = er['x0'], er['x1'], er['z0'], er['z1']
+        fy = er.get('floor', room['y']); cy = fy + er.get('h', er.get('h_fallback', 2.6)); t = er.get('wall_t', 0.25); slab = 0.05
+        boxes = [('floor', (x0, x1, fy - slab, fy, z0, z1)), ('ceiling', (x0, x1, cy, cy + slab, z0, z1))]
+        for wl in er.get('walls', []):
+            wd = wl if isinstance(wl, dict) else {'side': wl}
+            side = wd['side']; along_x = side in ('-z', '+z')
+            lo, hi = (x0, x1) if along_x else (z0, z1)
+            a, b = wd.get('from', lo), wd.get('to', hi)
+            if abs(a - lo) < 0.01: a -= t
+            if abs(b - hi) < 0.01: b += t
+            ya, yb = fy - slab, cy + slab
+            if side == '-x': boxes.append(('wall', (x0 - t, x0, ya, yb, a, b)))
+            elif side == '+x': boxes.append(('wall', (x1, x1 + t, ya, yb, a, b)))
+            elif side == '-z': boxes.append(('wall', (a, b, ya, yb, z0 - t, z0)))
+            elif side == '+z': boxes.append(('wall', (a, b, ya, yb, z1, z1 + t)))
+        by_mat = {}
+        for mat, (xa, xb, ya, yb, za, zb) in boxes:
+            P, N, I = box_mesh(xa, xb, ya, yb, za, zb)
+            g = by_mat.setdefault(mat, ([], [], []))
+            base = len(g[0]); g[0].extend(P); g[1].extend(N); g[2].extend(i + base for i in I)
+        prims = [{'attributes': {'POSITION': add_accessor(js, binc, P, 'VEC3'), 'NORMAL': add_accessor(js, binc, N, 'VEC3')},
+                  'indices': add_accessor(js, binc, I, 'SCALAR'), 'material': mat_index[mat]} for mat, (P, N, I) in by_mat.items()]
+        label = 'EXTRA_' + er.get('name', 'room')
+        js['meshes'].append({'name': label, 'primitives': prims})
+        js['nodes'].append({'name': label, 'mesh': len(js['meshes']) - 1})
+        furn_children.append(len(js['nodes']) - 1)
     js['nodes'].append({'name': 'FURNITURE', 'children': furn_children})
     js['scenes'][js.get('scene', 0)]['nodes'].append(len(js['nodes']) - 1)
     return placed

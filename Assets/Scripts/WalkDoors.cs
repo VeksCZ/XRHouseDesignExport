@@ -24,7 +24,8 @@ public class WalkDoors
     const float TiltDeg = 8f;
     static readonly Color LeafColor = new Color(0.62f, 0.45f, 0.28f);
     static readonly Color GarageColor = new Color(0.72f, 0.73f, 0.75f);
-    static readonly Color GlassColor = new Color(0.70f, 0.85f, 1f, 0.35f);
+    /// <summary>Window glass - opening sashes and (WalkThroughMode) the fixed panes use the same look.</summary>
+    internal static readonly Color GlassColor = new Color(0.70f, 0.85f, 1f, 0.35f);
     static readonly Color HandleColor = new Color(0.30f, 0.30f, 0.32f);
 
     enum Motion { Swing, Slide, Roll, Tilt }
@@ -315,6 +316,12 @@ public class WalkDoors
             moved = true;
         }
         return moved;
+    }
+
+    /// <summary>Opens (or closes) every door at once - the desktop app's scripted tests.</summary>
+    public void SetAllDoors(bool open)
+    {
+        foreach (var d in doors) if (!d.isWindow) d.manual = open;
     }
 
     /// <summary>Trigger on a handle: open it if it's (mostly) closed, else close it.</summary>

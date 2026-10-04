@@ -32,7 +32,8 @@ public class WalkThroughMode : MonoBehaviour
                                             // rooms' floor slabs, or the stairwell edge), not as a fall
     const float HeightFollow = 14f;         // 1/s - how fast the floor height catches up when stepping up/down
     const float DoorAlphaFar = 0.35f, DoorFadeNear = 0.5f, DoorFadeFar = 2.0f;
-    const float WindowGlassAlpha = 0.25f;
+    /// <summary>The colour the model gives WINDOW parts (XRModelFactory) - shaded vertex colours are this times light.</summary>
+    static readonly Color WindowPaletteColor = new Color(0.25f, 0.60f, 0.92f);
     const float TeleportSpeed = 7f;
 
     GameObject root;
@@ -139,6 +140,9 @@ public class WalkThroughMode : MonoBehaviour
         return Physics.Raycast(rightHand.position, rightHand.forward, out var hit, 6f, WalkMask, QueryTriggerInteraction.Collide)
                && walkDoors.Toggle(hit.collider);
     }
+
+    /// <summary>Opens/closes every door (desktop scripted tests).</summary>
+    public void SetAllDoors(bool open) => walkDoors.SetAllDoors(open);
 
     /// <summary>The running walk-through, if any - lets the minimap show where you are in the model.</summary>
     public static WalkThroughMode Active { get; private set; }
@@ -249,7 +253,11 @@ public class WalkThroughMode : MonoBehaviour
         XRHouseModel model;
         if (walkModel == WalkModel.Anchor)
         {
-            model = XRModelFactory.CreateAnchorAnalytical(walkRooms, yaw, center);
+            // rooms drawn from the furniture spec (not scanned): walls next to them are built thin, as against a
+            // scanned neighbour
+            XRModelFactory.ExtraFaces = Furniture.ExtraFaces(Furniture.Load(HouseEditsStore.CurrentScan), walkRooms, yaw, center);
+            try { model = XRModelFactory.CreateAnchorAnalytical(walkRooms, yaw, center); }
+            finally { XRModelFactory.ExtraFaces = null; }
             XRModelFactory.AddCeilings(model, walkRooms); // walking inside, a ceiling is what tells you you're indoors
         }
         else if (walkModel == WalkModel.Mesh) model = await XRModelFactory.CreateMeshAnalytical(walkRooms, yaw, center, forDollhouse: false);
@@ -383,8 +391,18 @@ public class WalkThroughMode : MonoBehaviour
                 if (seeThrough != null && mf.sharedMesh)
                 {
                     Destroy(mr.sharedMaterial);
-                    if (mf.sharedMesh.colors.Length == 0) mf.sharedMesh.colors = WhiteColors(mf.sharedMesh.vertexCount);
-                    mr.sharedMaterial = new Material(seeThrough) { name = "WINDOW_GLASS", color = new Color(0.75f, 0.88f, 1f, WindowGlassAlpha) };
+                    // Same glass as an opening sash (WalkDoors): re-tint the shaded vertex colours from the window
+                    // palette colour to the glass colour (keeps the per-face shading), white material, same alpha.
+                    var cols = mf.sharedMesh.colors;
+                    if (cols.Length == 0) cols = WhiteColors(mf.sharedMesh.vertexCount);
+                    else
+                    {
+                        Color g = WalkDoors.GlassColor, b = WindowPaletteColor;
+                        for (int i = 0; i < cols.Length; i++)
+                            cols[i] = new Color(Mathf.Clamp01(cols[i].r * g.r / b.r), Mathf.Clamp01(cols[i].g * g.g / b.g), Mathf.Clamp01(cols[i].b * g.b / b.b), 1f);
+                    }
+                    mf.sharedMesh.colors = cols;
+                    mr.sharedMaterial = new Material(seeThrough) { name = "WINDOW_GLASS", color = new Color(1f, 1f, 1f, WalkDoors.GlassColor.a) };
                 }
             }
             if (isDoor)

@@ -103,7 +103,75 @@ public static class Furniture
             }
             model.rooms.Add(rm);
         }
+        foreach (var er in ExtraRooms(spec, rooms, g, center))
+        {
+            // floor, ceiling and only the listed walls (the others are neighbours' walls that already exist)
+            var rm = new XRRoomModel { roomName = "Extra_" + er.name };
+            const float slab = 0.05f;
+            rm.parts.Add(Box(er.name + "_floor", "floor", er.x0, er.x1, er.floor - slab, er.floor, er.z0, er.z1, "FLOOR"));
+            rm.parts.Add(Box(er.name + "_ceiling", "ceiling", er.x0, er.x1, er.ceil, er.ceil + slab, er.z0, er.z1, "CEILING"));
+            foreach (var wl in er.spec["walls"] as JArray ?? new JArray())
+            {
+                string side = wl.Type == JTokenType.String ? (string)wl : (string)wl["side"];
+                bool alongX = side == "-z" || side == "+z";
+                float lo = alongX ? er.x0 : er.z0, hi = alongX ? er.x1 : er.z1;
+                float a = wl.Type == JTokenType.Object ? F((JObject)wl, "from", lo) : lo;
+                float b = wl.Type == JTokenType.Object ? F((JObject)wl, "to", hi) : hi;
+                float t = F(er.spec, "wall_t", 0.25f);
+                if (Mathf.Abs(a - lo) < 0.01f) a -= t;   // close the outer corner with the perpendicular wall
+                if (Mathf.Abs(b - hi) < 0.01f) b += t;
+                float y0 = er.floor - slab, y1 = er.ceil + slab;
+                if (side == "-x") rm.parts.Add(Box(er.name + "_wall", "wall", er.x0 - t, er.x0, y0, y1, a, b, "WALL"));
+                else if (side == "+x") rm.parts.Add(Box(er.name + "_wall", "wall", er.x1, er.x1 + t, y0, y1, a, b, "WALL"));
+                else if (side == "-z") rm.parts.Add(Box(er.name + "_wall", "wall", a, b, y0, y1, er.z0 - t, er.z0, "WALL"));
+                else if (side == "+z") rm.parts.Add(Box(er.name + "_wall", "wall", a, b, y0, y1, er.z1, er.z1 + t, "WALL"));
+            }
+            model.rooms.Add(rm);
+        }
         return model;
+    }
+
+    /// <summary>A room the headset couldn't scan any more (the scan has a room limit), drawn from the spec:
+    /// "extra_rooms": [{"name", "like": room id (floor height and ceiling taken from it), "x0","x1","z0","z1"
+    /// (GLB axes), "walls": ["-x", {"side": "+z", "from": x, "to": x}, ...]}]. Only the listed walls are drawn -
+    /// the other sides are neighbours' walls, which get thin where they meet it (see <see cref="ExtraFaces"/>).</summary>
+    struct ExtraRoom { public string name; public JObject spec; public float x0, x1, z0, z1, floor, ceil; }
+
+    static IEnumerable<ExtraRoom> ExtraRooms(JObject spec, List<MRUKRoom> rooms, Quaternion g, Vector3 center)
+    {
+        if (spec?["extra_rooms"] is not JArray list) yield break;
+        foreach (var er in list.OfType<JObject>())
+        {
+            string like = ((string)er["like"] ?? "").ToLowerInvariant();
+            var room = rooms.FirstOrDefault(r => like.Length > 0 && DoorCatalog.RoomId(r).ToLowerInvariant().StartsWith(like));
+            if (room == null || !TryRoomBox(room, g, center, out var box)) { Debug.LogWarning($"[Furniture] extra room '{er["name"]}': room '{er["like"]}' not found"); continue; }
+            float x0 = F(er, "x0", 0f), x1 = F(er, "x1", 0f), z0 = F(er, "z0", 0f), z1 = F(er, "z1", 0f);
+            if (x1 <= x0 || z1 <= z0) { Debug.LogWarning($"[Furniture] extra room '{er["name"]}': empty rectangle"); continue; }
+            // its ceiling: the reference room's ceiling height above its own floor
+            Vector3 refWorld = Quaternion.Inverse(g) * new Vector3((box.xmin + box.xmax) / 2f, box.y, -(box.zmin + box.zmax) / 2f) + center;
+            float h = XRModelFactory.SampleCeilingHeight(room.CeilingAnchors, refWorld, refWorld.y + 2.6f) - refWorld.y;
+            float floor = F(er, "floor", box.y);
+            yield return new ExtraRoom { name = (string)er["name"] ?? "extra", spec = er, x0 = x0, x1 = x1, z0 = z0, z1 = z1, floor = floor, ceil = floor + F(er, "h", h) };
+        }
+    }
+
+    /// <summary>The four faces of every extra room in world space (centre at mid-height, normal into the room,
+    /// width), so the scanned rooms' walls next to it are drawn as thin as against a scanned neighbour instead
+    /// of 25 cm into it.</summary>
+    public static List<(Vector3 pos, Vector3 inward, float width)> ExtraFaces(JObject spec, List<MRUKRoom> rooms, float yaw, Vector3 center)
+    {
+        var faces = new List<(Vector3, Vector3, float)>();
+        Quaternion g = Quaternion.Euler(0, yaw, 0), gi = Quaternion.Inverse(g);
+        foreach (var er in ExtraRooms(spec, rooms, g, center))
+        {
+            float ym = (er.floor + er.ceil) / 2f, xm = (er.x0 + er.x1) / 2f, zm = (er.z0 + er.z1) / 2f;
+            Vector3 W(float x, float z) => gi * new Vector3(x, ym, -z) + center;   // GLB axes -> world
+            faces.Add((W(er.x0, zm), gi * Vector3.right, er.z1 - er.z0));
+            faces.Add((W(er.x1, zm), gi * Vector3.left, er.z1 - er.z0));
+            faces.Add((W(xm, er.z0), gi * Vector3.back, er.x1 - er.x0));     // GLB +z = model -z
+            faces.Add((W(xm, er.z1), gi * Vector3.forward, er.x1 - er.x0));
+        }
+        return faces;
     }
 
     static float F(JObject o, string k, float def) => o[k] != null && o[k].Type != JTokenType.Null ? (float)o[k] : def;
@@ -364,13 +432,14 @@ public static class Furniture
     }
 
     /// <summary>An axis-aligned box given in GLB axes, as a model-space part (Z mirrored back).</summary>
-    static XRMeshPart Box(string name, string mat, float x0, float x1, float y0, float y1, float z0, float z1)
+    static XRMeshPart Box(string name, string mat, float x0, float x1, float y0, float y1, float z0, float z1, string modelMat = "FURNITURE")
     {
+        // modelMat FLOOR/WALL/CEILING (extra rooms) gets the walk-through's own floor/wall/ceiling colours
         float ax = Mathf.Min(x0, x1), bx = Mathf.Max(x0, x1), ay = Mathf.Min(y0, y1), by = Mathf.Max(y0, y1);
         float az = Mathf.Min(-z0, -z1), bz = Mathf.Max(-z0, -z1);
         var size = new Vector3(Mathf.Max(0.002f, bx - ax), Mathf.Max(0.002f, by - ay), Mathf.Max(0.002f, bz - az));
         var c = new Vector3((ax + bx) / 2f, (ay + by) / 2f, (az + bz) / 2f);
-        var part = XRModelFactory.CreateSolidBoxPart(mat == "glass" ? GlassPart : "FURN_" + name, c, Quaternion.identity, size, "FURNITURE", Vector3.zero, 0f);
+        var part = XRModelFactory.CreateSolidBoxPart(mat == "glass" ? GlassPart : "FURN_" + name, c, Quaternion.identity, size, modelMat, Vector3.zero, 0f);
         part.color = ColorOf(mat);
         return part;
     }

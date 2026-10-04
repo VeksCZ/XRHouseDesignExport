@@ -59,7 +59,8 @@ public static class XRModelFactory
                 Quaternion wallRot = SnapToPerpendicular(w.transform.rotation, rotation);
                 Vector3 wallPos = w.transform.position;
                 // wallRot*forward points into this room, so the opposite room (if scanned) is on the -forward side.
-                float wallThickness = EstimateWallThickness(room, rooms, wallPos, -(wallRot * Vector3.forward), wW, wallRot * Vector3.right, 0.25f);
+                float wallThickness = EstimateWallThickness(room, rooms, wallPos, -(wallRot * Vector3.forward), wW, wallRot * Vector3.right, 0.25f, out float wallShift);
+                Vector3 wallOff = WallBoxOffset(wallThickness, wallShift, 1f); // behind the face, not centred on it
                 var wallHoles = uniqueOpenings.Where(o => {
                     Vector3 lp = Quaternion.Inverse(wallRot) * (o.transform.position - wallPos);
                     return Mathf.Abs(lp.z) < 0.25f && Mathf.Abs(lp.x) < (wW / 2f + 0.1f) && Mathf.Abs(lp.y) < (wH / 2f + 0.1f);
@@ -86,10 +87,10 @@ public static class XRModelFactory
                                 float hw = h.PlaneRect.Value.width/2f, hh = h.PlaneRect.Value.height/2f;
                                 return midX > lp.x-hw+0.01f && midX < lp.x+hw-0.01f && midY > lp.y-hh+0.01f && midY < lp.y+hh-0.01f;
                             });
-                            if (!isHole) rm.parts.Add(CreateBoxPart("WallSeg", wallPos + wallRot * new Vector3(midX, midY, 0), wallRot, new Vector3(x2-x1, y2-y1, wallThickness), "WALL", center, rotation));
+                            if (!isHole) rm.parts.Add(CreateBoxPart("WallSeg", wallPos + wallRot * new Vector3(midX, midY, 0), wallRot, new Vector3(x2-x1, y2-y1, wallThickness), "WALL", center, rotation, wallOff));
                         }
                     }
-                } else rm.parts.Add(CreateBoxPart("WALL", wallPos, wallRot, new Vector3(wW, wH, wallThickness), "WALL", center, rotation));
+                } else rm.parts.Add(CreateBoxPart("WALL", wallPos, wallRot, new Vector3(wW, wH, wallThickness), "WALL", center, rotation, wallOff));
 
                 // A wall anchor's own PlaneRect height is whatever flat rectangle MRUK fit to that panel, which
                 // stops short of the real ceiling under a sloped/vaulted roof - sample the actual ceiling height
@@ -104,7 +105,7 @@ public static class XRModelFactory
                 float h1 = Mathf.Max(wH, SampleCeilingHeight(room.CeilingAnchors, leftFloor, fallbackTop) - floorY);
                 float h2 = Mathf.Max(wH, SampleCeilingHeight(room.CeilingAnchors, rightFloor, fallbackTop) - floorY);
                 if (Mathf.Max(h1, h2) - wH > 0.03f)
-                    rm.parts.Add(CreateSlopedCapPart(leftFloor, rightFloor, wH, h1, h2, wallThickness, "WALL", center, rotation));
+                    rm.parts.Add(CreateSlopedCapPart(leftFloor + wallRot * wallOff, rightFloor + wallRot * wallOff, wH, h1, h2, wallThickness, "WALL", center, rotation));
 
                 AddWallLengthLabel(model.dimensions, wallPos, wallRot, wW, wH, wallThickness, center, gRotForLabels);
                 AddWallHeightLabels(model.dimensions, wallPos, wallRot, wW, h1, h2, floorY, wallThickness, center, gRotForLabels);
@@ -286,7 +287,8 @@ public static class XRModelFactory
                     Vector3 segDir = (wP2 - wP1).normalized;
                     Quaternion segRot = Quaternion.LookRotation(Vector3.Cross(segDir, Vector3.up), Vector3.up);
                     Vector3 segMid = (wP1 + wP2) / 2f + Vector3.up * (hMin/2f);
-                    float wallThickness = EstimateWallThickness(room, rooms, segMid, segRot * Vector3.forward, segLen, segDir, 0.25f);
+                    float wallThickness = EstimateWallThickness(room, rooms, segMid, segRot * Vector3.forward, segLen, segDir, 0.25f, out float wallShift);
+                    Vector3 wallOff = WallBoxOffset(wallThickness, wallShift, -1f); // local +Z points out of the room here
 
                     var holes = uniqueOpenings.Where(o => {
                         Vector3 lp = Quaternion.Inverse(segRot) * (o.transform.position - segMid);
@@ -315,18 +317,18 @@ public static class XRModelFactory
                                     float hw = ho.PlaneRect.Value.width/2f, hh = ho.PlaneRect.Value.height/2f;
                                     return midX > lp.x-hw+0.005f && midX < lp.x+hw-0.005f && midY > lp.y-hh+0.005f && midY < lp.y+hh-0.005f;
                                 });
-                                if (!isHole) rm.parts.Add(CreateBoxPart("WallSeg", segMid + segRot * new Vector3(midX, midY, 0), segRot, new Vector3(x2-x1, y2-y1, wallThickness), "WALL", center, rotation));
+                                if (!isHole) rm.parts.Add(CreateBoxPart("WallSeg", segMid + segRot * new Vector3(midX, midY, 0), segRot, new Vector3(x2-x1, y2-y1, wallThickness), "WALL", center, rotation, wallOff));
                             }
                         }
                     } else if (hMin > 0.02f) {
-                        rm.parts.Add(CreateBoxPart("WALL", segMid, segRot, new Vector3(segLen, hMin, wallThickness), "WALL", center, rotation));
+                        rm.parts.Add(CreateBoxPart("WALL", segMid, segRot, new Vector3(segLen, hMin, wallThickness), "WALL", center, rotation, wallOff));
                     }
 
                     // Sloped/vaulted ceiling cap: solid wall material from hMin up to the real
                     // ceiling line at each end of the segment. Zero-height at the low end, so it
                     // degrades to nothing for a flat ceiling (hMax == hMin).
                     if (hMax - hMin > 0.03f) {
-                        rm.parts.Add(CreateSlopedCapPart(wP1, wP2, hMin, h1, h2, wallThickness, "WALL", center, rotation));
+                        rm.parts.Add(CreateSlopedCapPart(wP1 + segRot * wallOff, wP2 + segRot * wallOff, hMin, h1, h2, wallThickness, "WALL", center, rotation));
                     }
                 }
             }
@@ -423,10 +425,21 @@ return model;
         return Quaternion.Euler(0f, snappedCorrected - dominantYawDeg, 0f);
     }
 
-    private static float EstimateWallThickness(MRUKRoom room, List<MRUKRoom> allRooms, Vector3 wallWorldPos, Vector3 outwardNormal, float extentAlongWall, Vector3 wallDir, float fallback)
+    /// <remarks>
+    /// Walls are drawn from their own scanned face OUTWARD (see <see cref="WallBoxOffset"/>), never into their own
+    /// room - a wall centred on its face stuck half its thickness into the room, and where the neighbour's face
+    /// wasn't matched (two independently scanned rooms often end up 0-5 cm apart, or even overlapping) the 25 cm
+    /// fallback stuck into the NEIGHBOUR's room too: a second wall a few cm in front of the real one, with the
+    /// door leaf disappearing into it when opened. So a neighbour face counts when its span overlaps ours along
+    /// the wall and it sits anywhere from slightly in front of ours (overlapping scans) to 0.5 m behind it.
+    /// When the two faces touch or cross, both walls are drawn thin and meet halfway: <paramref name="shift"/>
+    /// is how far this wall's face moves into its own room to get there.
+    /// </remarks>
+    private static float EstimateWallThickness(MRUKRoom room, List<MRUKRoom> allRooms, Vector3 wallWorldPos, Vector3 outwardNormal, float extentAlongWall, Vector3 wallDir, float fallback, out float shift)
     {
-        const float minThickness = 0.06f, maxThickness = 0.5f;
+        const float minGap = -0.15f, maxThickness = 0.5f, thin = 0.02f;
         float best = float.MaxValue;
+        shift = 0f;
         foreach (var other in allRooms) {
             if (other == room) continue;
             foreach (var a in other.Anchors) {
@@ -435,13 +448,12 @@ return model;
 
                 Vector3 delta = a.transform.position - wallWorldPos;
                 float gap = Vector3.Dot(delta, outwardNormal);
-                if (gap < minThickness || gap > maxThickness || gap >= best) continue;
+                if (gap < minGap || gap > maxThickness || gap >= best) continue;
 
-                // The other anchor's centre must sit almost directly behind this wall's own span - not merely
-                // within reach once the other wall's own width is added on top, which is what let barely-adjacent,
-                // unrelated walls match before.
-                float along = Vector3.Dot(delta, wallDir);
-                if (Mathf.Abs(along) > extentAlongWall * 0.35f) continue;
+                // The two faces must really be behind each other: their spans along the wall overlap (by more
+                // than a corner's worth), not merely lie on the same line further along.
+                float along = Vector3.Dot(delta, wallDir), half = a.PlaneRect.Value.width / 2f;
+                if (along - half > extentAlongWall / 2f - 0.15f || along + half < -extentAlongWall / 2f + 0.15f) continue;
 
                 // Two faces of one physical wall are always at essentially the same height; an unrelated wall
                 // elsewhere in the home is unlikely to also line up in height by coincidence.
@@ -450,8 +462,33 @@ return model;
                 best = gap;
             }
         }
-        return best < float.MaxValue ? best : fallback;
+        // faces of rooms that exist only in the furniture spec (Furniture.ExtraFaces, set by the walk-through)
+        if (ExtraFaces != null)
+            foreach (var (pos, inward, width) in ExtraFaces) {
+                if (Vector3.Dot(inward, outwardNormal) < 0.9f) continue;
+                Vector3 delta = pos - wallWorldPos;
+                float gap = Vector3.Dot(delta, outwardNormal);
+                if (gap < minGap || gap > maxThickness || gap >= best) continue;
+                float along = Vector3.Dot(delta, wallDir);
+                if (along - width / 2f > extentAlongWall / 2f - 0.15f || along + width / 2f < -extentAlongWall / 2f + 0.15f) continue;
+                if (Mathf.Abs(pos.y - wallWorldPos.y) > 0.6f) continue;
+                best = gap;
+            }
+        if (best == float.MaxValue) return fallback;
+        if (best >= thin) return best;
+        shift = Mathf.Max(0f, -best) / 2f;
+        return thin;
     }
+
+    /// <summary>Wall faces (world: centre at mid-height, normal into its room, width) of rooms that aren't in the
+    /// scan but drawn from the spec (Furniture.ExtraFaces). Set by the walk-through around building its model.</summary>
+    public static List<(Vector3 pos, Vector3 inward, float width)> ExtraFaces;
+
+    /// <summary>Local offset in metres (wall-box space; <paramref name="inwardZ"/> = +1 when the box's local +Z
+    /// points into the room, -1 when it points out) that puts a wall box of this thickness behind its face instead
+    /// of centred on it, the face itself moved <paramref name="shift"/> into the room (see EstimateWallThickness).</summary>
+    internal static Vector3 WallBoxOffset(float thickness, float shift, float inwardZ) =>
+        new Vector3(0f, 0f, inwardZ * (shift - thickness / 2f));
 
     private static bool IsPointInPolygon(Vector2 pt, IReadOnlyList<Vector2> poly)
     {

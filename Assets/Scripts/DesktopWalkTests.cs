@@ -84,6 +84,7 @@ public partial class DesktopWalkApp
     {
         var list = (Arg("-views") ?? "").Split(new[] { ';' }, StringSplitOptions.RemoveEmptyEntries);
         int i = 0;
+        if (Environment.GetCommandLineArgs().Contains("-opendoors")) { walk.SetAllDoors(true); await Frames(90); } // swing time
         // -glbviews "x,y,z,tx,tz,pitch;..." - the furniture spec's frame (GLB axes: model space, Z mirrored): stand at
         // floor point (x,y,z), look towards (tx,tz).
         if (Arg("-glbviews") != null && walk.TryGetModelFrame(out _, out float yw, out var ctr))
