@@ -26,6 +26,17 @@ public class DesktopWalkRig : MonoBehaviour
 
     float yaw, pitch;
 
+    /// <summary>Tests: a move vector applied instead of the keyboard while set (InputEnabled not required).</summary>
+    public Vector2? ForcedMove { get; set; }
+
+    /// <summary>Looks in the given direction (degrees; yaw around up, pitch positive = down).</summary>
+    public void SetView(float yawDeg, float pitchDeg)
+    {
+        yaw = yawDeg; pitch = Mathf.Clamp(pitchDeg, -89f, 89f);
+        transform.rotation = Quaternion.Euler(0f, yaw, 0f);
+        if (cam) cam.transform.localRotation = Quaternion.Euler(pitch, 0f, 0f);
+    }
+
     void Awake()
     {
         if (!cam) cam = GetComponentInChildren<Camera>();
@@ -43,6 +54,7 @@ public class DesktopWalkRig : MonoBehaviour
         var mouse = Mouse.current;
         Move = Vector2.zero;
         SpeedMultiplier = 1f;
+        if (ForcedMove.HasValue) { Move = ForcedMove.Value; return; }
         if (!InputEnabled || kb == null || mouse == null) return;
 
         Vector2 d = mouse.delta.ReadValue() * mouseSensitivity;

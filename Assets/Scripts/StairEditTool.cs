@@ -80,6 +80,8 @@ public class StairEditTool : MonoBehaviour
         bool active = Active && ResolveFrame();
         if (!active)
         {
+            StickCapture = false;
+            if (preview != null) CommitPreview();
             if (wasActive) { ClosePanel(); if (!userPlaced) panelPlaced = false; state = State.Idle; }
             wasActive = false;
             FinishLines();
@@ -104,10 +106,16 @@ public class StairEditTool : MonoBehaviour
         }
         if (state == State.Corner2 && hover.HasValue) hover = SnapCorner2(hover.Value);
 
-        foreach (var s in HouseEditsStore.Current.stairs)
+        HandleSticks(Time.deltaTime);
+
+        foreach (var stored in HouseEditsStore.Current.stairs)
         {
+            bool sel = stored.id == selectedId && state == State.Adjusting;
+            var s = sel && preview != null ? preview : stored;
             var r = StairGeometry.Resolve(s, rooms);
-            if (r != null) DrawResolved(r, s.id == selectedId && state == State.Adjusting ? SelectColor : StairColor);
+            if (r == null) continue;
+            DrawResolved(r, sel ? SelectColor : StairColor);
+            if (sel && selFlight < r.flights.Count) DrawFlight(r, selFlight, Color.white);
         }
         DrawGhost();
         FinishLines();
@@ -176,6 +184,9 @@ public class StairEditTool : MonoBehaviour
         float sRay = (b * e - dd) / den;
         if (sRay < 0f) return null;
         float t = Mathf.Clamp((a * e - b * dd) / den, 0.2f, 8f);
+        // The ray may point through walls, but the flight itself stops at the first wall ahead.
+        float wall = WallAhead(axisStart, d);
+        if (wall > 0.2f) t = Mathf.Min(t, wall);
         return axisStart + d * t;
     }
 
@@ -324,7 +335,116 @@ public class StairEditTool : MonoBehaviour
         RebuildPanel();
     }
 
+    // ---------- adjusting with the sticks ----------
+
+    /// <summary>True while the sticks belong to the stair being adjusted (left grip held) - walking, turning,
+    /// teleport, menu flicks and the dollhouse ignore them meanwhile.</summary>
+    public static bool StickCapture { get; private set; }
+
+    StairEdit preview;          // the selected stair as being changed by the sticks; committed on grip release
+    int selFlight;
+    bool rightArmed = true;
+    float panelDirtyAt = -1f;
+
+    /// <summary>Hold the LEFT grip: left stick up/down = length of the selected flight (later flights move with
+    /// it, it can't run through a wall), left/right = width; right stick up/down = one step more/less on this
+    /// flight (steeper/shallower), left/right = select the previous/next flight. Released = saved (one undo step).</summary>
+    void HandleSticks(float dt)
+    {
+        StairEdit stored = state == State.Adjusting ? HouseEditsStore.Current.stairs.FirstOrDefault(s => s.id == selectedId) : null;
+        bool grip = stored != null && OVRInput.Get(OVRInput.Button.PrimaryHandTrigger, OVRInput.Controller.LTouch);
+        StickCapture = grip;
+        if (!grip)
+        {
+            if (preview != null) CommitPreview();
+            return;
+        }
+        if (preview == null) preview = Clone(stored);
+        int flights = Mathf.Max(1, preview.localPoints.Count - 1);
+        selFlight = Mathf.Clamp(selFlight, 0, flights - 1);
+
+        Vector2 l = OVRInput.Get(OVRInput.Axis2D.PrimaryThumbstick, OVRInput.Controller.LTouch);
+        Vector2 r = OVRInput.Get(OVRInput.Axis2D.PrimaryThumbstick, OVRInput.Controller.RTouch);
+        bool changed = false;
+        if (Mathf.Abs(l.y) > 0.2f && Mathf.Abs(l.y) >= Mathf.Abs(l.x))
+            changed |= ChangeLength(preview, selFlight, Speed(l.y) * 0.6f * dt);
+        else if (Mathf.Abs(l.x) > 0.2f)
+        {
+            float w = Mathf.Clamp(preview.width + Speed(l.x) * 0.3f * dt, 0.6f, 2.0f);
+            changed |= !Mathf.Approximately(w, preview.width);
+            preview.width = w;
+        }
+        if (rightArmed)
+        {
+            if (Mathf.Abs(r.x) > 0.7f) { selFlight = (selFlight + (r.x > 0 ? 1 : -1) + flights) % flights; rightArmed = false; changed = true; }
+            else if (Mathf.Abs(r.y) > 0.7f) { SetRisers(preview, selFlight, r.y > 0 ? +1 : -1); rightArmed = false; changed = true; }
+            if (!rightArmed) OVRInput.SetControllerVibration(0.2f, 0.1f, OVRInput.Controller.RTouch);
+        }
+        else if (r.magnitude < 0.3f) { rightArmed = true; OVRInput.SetControllerVibration(0f, 0f, OVRInput.Controller.RTouch); }
+
+        if (changed && panelDirtyAt < 0f) panelDirtyAt = Time.time;
+        if (panelDirtyAt >= 0f && Time.time - panelDirtyAt > 0.15f) { panelDirtyAt = -1f; RebuildPanel(); }
+    }
+
+    static float Speed(float v) => Mathf.Sign(v) * (Mathf.Abs(v) - 0.2f) / 0.8f;
+
+    static StairEdit Clone(StairEdit s) => new StairEdit
+    {
+        id = s.id, roomUuid = s.roomUuid, width = s.width,
+        localPoints = s.localPoints.Select(p => new Vector3Data(new Vector3(p.x, p.y, p.z))).ToList(),
+        risers = new List<int>(s.risers ?? new List<int>()),
+    };
+
+    async void CommitPreview()
+    {
+        var p = preview; preview = null;
+        string id = p.id;
+        await editMode.Commit(e =>
+        {
+            var s = e.stairs.FirstOrDefault(x => x.id == id);
+            if (s == null) return;
+            s.width = p.width; s.localPoints = p.localPoints; s.risers = p.risers;
+        });
+    }
+
+    /// <summary>Distance from p (on the bottom floor's plan) along dir to the first wall facing it, else -1.</summary>
+    float WallAhead(Vector3 p, Vector3 dir) => walls != null ? walls.Ahead(p, dir, 12f, 0.5f) : -1f;
+
+    /// <summary>Flight fi made delta longer/shorter; the points after it move along with its end. It can't be
+    /// stretched past the first wall ahead (a flight that already runs through one can only get shorter).</summary>
+    bool ChangeLength(StairEdit s, int fi, float delta)
+    {
+        var room = rooms.FirstOrDefault(rm => DoorCatalog.RoomId(rm) == s.roomUuid);
+        var pts = StairGeometry.WorldPoints(s, rooms);
+        if (fi + 1 >= pts.Count) return false;
+        var lens = StairGeometry.FlightLengths(pts, s.width);
+        Vector3 dir = pts[fi + 1] - pts[fi]; dir.y = 0f; dir.Normalize();
+        float len = lens[fi], newLen = Mathf.Max(0.3f, len + delta);
+        if (delta > 0f)
+        {
+            bool landingAfter = fi < pts.Count - 2;
+            Vector3 start = pts[fi] + (fi > 0 ? dir * (s.width / 2f) : Vector3.zero);
+            float wall = WallAhead(start, dir);
+            if (wall > 0f) newLen = Mathf.Min(newLen, Mathf.Max(len, wall - (landingAfter ? s.width : 0f)));
+        }
+        float d = newLen - len;
+        if (Mathf.Abs(d) < 1e-5f) return false;
+        for (int j = fi + 1; j < pts.Count; j++) pts[j] += dir * d;
+        s.localPoints = pts.Select(p => new Vector3Data(room != null ? room.transform.InverseTransformPoint(p) : p)).ToList();
+        return true;
+    }
+
     // ---------- drawing ----------
+
+    void DrawFlight(StairGeometry.Resolved r, int i, Color c)
+    {
+        var (start, end, dir, risers, y0) = r.flights[i];
+        float y1 = y0 + risers * r.rise;
+        Vector3 side = Vector3.Cross(Vector3.up, dir) * (r.width / 2f + 0.03f);
+        line.Clear();
+        line.Add(At(start - side, y0 + 0.01f)); line.Add(At(end - side, y1 + 0.01f)); line.Add(At(end + side, y1 + 0.01f)); line.Add(At(start + side, y0 + 0.01f));
+        Emit(c, true);
+    }
 
     void DrawResolved(StairGeometry.Resolved r, Color c)
     {
@@ -439,10 +559,12 @@ public class StairEditTool : MonoBehaviour
         ClosePanel();
         if (state == State.Idle) return;
 
-        StairEdit sel = state == State.Adjusting ? HouseEditsStore.Current.stairs.FirstOrDefault(s => s.id == selectedId) : null;
+        StairEdit sel = state != State.Adjusting ? null
+            : preview != null && preview.id == selectedId ? preview
+            : HouseEditsStore.Current.stairs.FirstOrDefault(s => s.id == selectedId);
         if (state == State.Adjusting && sel == null) return;
         int flights = sel != null ? Mathf.Max(0, sel.localPoints.Count - 1) : 0;
-        float ph = Placing ? 60 + 76 + (RowH + Gap) * 2 + 20 : 60 + 50 + (RowH + Gap) * (2 + flights) + 20;
+        float ph = Placing ? 60 + 76 + (RowH + Gap) * 2 + 20 : 60 + 50 + 64 + (RowH + Gap) * (2 + flights) + 20;
 
         panel = XRUi.CreateWorldCanvas("StairEditPanel", new Vector2(PW, ph), PScale);
         var t = panel.transform;
@@ -503,14 +625,19 @@ public class StairEditTool : MonoBehaviour
         string info = r != null ? $"{sel.risers.Sum()} steps x {r.rise * 100f:0.0} cm = {r.topY - r.bottomY:0.00} m" : "";
         XRUi.CreateText(t, "Title", $"Stair  {info}", 22, TextAlignmentOptions.MidlineLeft, x0, y, fullW, 44, XRUi.TextColor, FontStyles.Bold);
         y += 52;
+        XRUi.CreateText(t, "Sticks", "Hold LEFT grip:  left stick up/down = length of the white flight, sideways = width.  " +
+                        "Right stick up/down = steps (steeper / shallower), sideways = next flight.", 17, TextAlignmentOptions.TopLeft, x0, y, fullW, 58, XRUi.MutedText);
+        y += 64;
         WidthRow(t, ref y, sel.width, d => Change(s => s.width = Mathf.Clamp(s.width + d, 0.6f, 2.0f)));
         var lens = r != null ? StairGeometry.FlightLengths(r.points, r.width) : null;
         for (int i = 0; i < flights; i++)
         {
             int fi = i;
             int n = i < sel.risers.Count ? sel.risers[i] : 0;
-            string tread = lens != null && n > 0 ? $"  tread {lens[i] / n * 100f:0} cm" : "";
-            XRUi.CreateText(t, "Flight" + i, $"Flight {i + 1}: {n} steps{tread}", 20, TextAlignmentOptions.MidlineLeft, x0, y, 380, RowH, XRUi.TextColor);
+            string tread = lens != null && n > 0
+                ? $"  {lens[i]:0.00} m, tread {lens[i] / n * 100f:0} cm, {Mathf.Atan2(n * r.rise, lens[i]) * Mathf.Rad2Deg:0} deg" : "";
+            XRUi.CreateText(t, "Flight" + i, $"{(i == selFlight ? "> " : "")}Flight {i + 1}: {n} steps{tread}", 19,
+                            TextAlignmentOptions.MidlineLeft, x0, y, 430, RowH, i == selFlight ? Color.white : XRUi.TextColor);
             XRUi.CreateButton(t, "-", PW - 20 - 2 * 90 - Gap, y, 90, RowH, () => Change(s => SetRisers(s, fi, -1)), 30);
             XRUi.CreateButton(t, "+", PW - 20 - 90, y, 90, RowH, () => Change(s => SetRisers(s, fi, +1)), 30);
             y += RowH + Gap;

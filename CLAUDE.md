@@ -62,6 +62,12 @@ and exports 3D models, floor plans and reports from the scan.
   assets to Assets/XR/Temp during a build) - `Builds/Windows/.building` blocks the Quest build meanwhile. The Windows
   build leaves out Meta's telemetry/tooling native plugins (startup). The scene is not in EditorBuildSettings. Smoke
   test: `XRHouseWalk.exe -scan <folder> -shot <png>` loads, captures a frame, exits 0 if the walk started.
+  Scripted checks (DesktopWalkTests.cs), screenshots + `TEST`/`TRACE` log lines, exit 0 = passed:
+  `-scan <folder> -test views|doors|windows|stairs|fall|holes -out <dir> [-views "x,y,z,yaw,pitch;..."]`
+  (scan-frame floor points). Use these to verify walk-through changes before asking the user to try the headset.
+- **Walk-through rules**: stairs cut nothing - only openings drawn with the Hole tool cut floors/ceilings; you can
+  fall only inside a drawn opening (never out of a wall your head went into); a walled-up doorway is removed for
+  every room that captured it (DoorCatalog.IsWalledUp).
 - **Offline compile check**: compile `Assets/Scripts/**/*.cs` with dotnet against `Library/ScriptAssemblies/*.dll`
   (defines `UNITY_EDITOR;UNITY_ANDROID;META_XR_SDK_INSTALLED`) for a fast error check without a Unity reload.
 - **Do not add packages that spawn helper processes** (`com.unity.ai.assistant`'s `relay_win.exe` inherited the MCP

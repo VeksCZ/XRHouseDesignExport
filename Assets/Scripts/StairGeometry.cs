@@ -165,7 +165,7 @@ public static class StairGeometry
 
     static XRMeshPart Box(string name, Vector3 pos, Quaternion rot, Vector3 size, float yaw, Vector3 center)
     {
-        var p = XRModelFactory.CreateBoxPart(name, pos, rot, size, "STAIRS", center, yaw);
+        var p = XRModelFactory.CreateSolidBoxPart(name, pos, rot, size, "STAIRS", center, yaw);
         p.color = StairColor;
         return p;
     }
@@ -303,7 +303,7 @@ public static class StairGeometry
 
 /// <summary>
 /// The stairs of the current edits inside one built model (walk-through or Dollhouse): adds the step/landing
-/// geometry under the model and cuts the stairwell opening into the floor slabs/ceilings above the bottom story.
+/// geometry under the model and cuts the openings the user drew (Hole tool) into the floor slabs/ceilings.
 /// Re-applied whenever the edits change; the uncut meshes are kept so a re-cut always starts from the original.
 /// </summary>
 public class StairsInModel
@@ -333,15 +333,13 @@ public class StairsInModel
         var group = new XRRoomModel { roomName = "Stairs" };
         model.rooms.Add(group);
         var holes = new List<(List<Vector2[]> rects, float minY, float maxY)>();
+        // The stairs themselves cut nothing: a real stairwell rarely matches the stair's footprint (e.g. no opening
+        // above the first landing), so the only openings are the ones the user drew with the Hole tool.
         foreach (var s in edits.stairs)
         {
             var r = StairGeometry.Resolve(s, rooms);
             if (r == null) continue;
             group.parts.AddRange(StairGeometry.Parts(r, yaw, center));
-            var rects = r.footprint.Select(q => q.Select(p => { var m = gRot * (p - center); return new Vector2(m.x, m.z); }).ToArray()).ToList();
-            // Cut everything horizontal between ~1 m above the bottom floor and just above the top floor: the
-            // ceiling of the story below and the floor slab of the story above.
-            holes.Add((rects, r.bottomY - center.y + 1.0f, r.topY - center.y + 0.3f));
         }
         // Openings the user drew themselves (Hole tool): square to the walls in model space.
         if (edits.holes != null)

@@ -40,9 +40,13 @@ public static class DoorCatalog
     public static bool SameDoorway(DoorInfo d, Vector3 c, Vector3 n)
     {
         Vector3 delta = c - d.center;
+        // Along the wall the two rooms' captures of one doorway can be off by more than a fixed few cm (each room
+        // is scanned on its own) - anything whose middle lies within the opening itself is that opening. A missed
+        // match left the second room's panel standing as a see-through "door" next to the real leaf.
+        float along = Mathf.Max(0.35f, d.width * 0.5f);
         return Mathf.Abs(Vector3.Dot(n, d.normal)) > 0.9f
             && Mathf.Abs(Vector3.Dot(delta, d.normal)) < 0.6f
-            && Mathf.Abs(Vector3.Dot(delta, d.right)) < 0.35f
+            && Mathf.Abs(Vector3.Dot(delta, d.right)) < along
             && Mathf.Abs(delta.y) < 0.4f;
     }
 
@@ -90,8 +94,28 @@ public static class DoorCatalog
         if (!MRUKDataProcessor.IsDoor(a) && !MRUKDataProcessor.IsWindow(a)) return false;
         var rooms = MRUK.Instance != null ? MRUK.Instance.Rooms : new List<MRUKRoom>();
         var e = FindEdit(edits, a, rooms);
-        return e != null && e.kind == DoorKind.Wall;
+        if (e != null) return e.kind == DoorKind.Wall;
+        // A doorway between two rooms has one anchor per room, the edit is saved for one of them - the other
+        // room's anchor must be walled up too, or its half of the wall keeps the opening (with a see-through panel).
+        var signature = WalledUpSignature(edits);
+        int roomsKey = rooms.Count;
+        foreach (var r in rooms) if (r) roomsKey = roomsKey * 31 + r.GetInstanceID(); // a reloaded scan = new room objects
+        if (walledCacheSig != signature || walledCacheRooms != roomsKey)
+        {
+            walledCacheSig = signature; walledCacheRooms = roomsKey;
+            walledCache.Clear();
+            foreach (var d in Build(rooms))
+            {
+                var de = FindEdit(edits, d, rooms);
+                if (de != null && de.kind == DoorKind.Wall) foreach (var an in d.anchors) walledCache.Add(an);
+            }
+        }
+        return walledCache.Contains(a);
     }
+
+    static readonly HashSet<MRUKAnchor> walledCache = new HashSet<MRUKAnchor>();
+    static string walledCacheSig;
+    static int walledCacheRooms = -1;
 
     /// <summary>Changes whenever the set of walled-up doorways changes - views rebuild their model only then.</summary>
     public static string WalledUpSignature(HouseEdits edits) =>

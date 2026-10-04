@@ -29,6 +29,9 @@ public static class MRUKPathUtility
     public const string DATA_EDITS = "93_Data_Edits.json";
     /// <summary>Room names picked in the app (RoomNames format, keyed by room UUID).</summary>
     public const string DATA_ROOM_NAMES = "94_Data_RoomNames.json";
+    /// <summary>Furniture spec (bathroom fittings, boxes) - shown in the walk-through and turned into
+    /// 16_Model_Furnished.glb by Tools/furnish.py. See Furniture.</summary>
+    public const string DATA_FURNITURE = "95_Data_Furniture.json";
     public const string DATA_REPORT = "99_Report_House.html";
     public const string DATA_REPORT_ROOM = "99_Report_Room.html";
 

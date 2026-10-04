@@ -50,6 +50,12 @@ public static class MRUKSceneCache
         ? Path.Combine(GetCacheRoot(), name, MRUKPathUtility.DATA_EDITS)
         : Path.Combine(GetCacheRoot(), name + HouseEditsStore.EXTENSION);
 
+    /// <summary>Furniture spec of a saved scan (95_Data_Furniture.json in its folder / Name.furniture.json).</summary>
+    public const string FurnitureExtension = ".furniture.json";
+    public static string FurniturePath(string name) => string.IsNullOrEmpty(name) ? null : FolderMode
+        ? Path.Combine(GetCacheRoot(), name, MRUKPathUtility.DATA_FURNITURE)
+        : Path.Combine(GetCacheRoot(), name + FurnitureExtension);
+
     /// <summary>Room names file to use while this scan is active: its own file in the Editor; null (= the shared
     /// default file) on the headset, where room UUIDs stay the same across re-saves of one house.</summary>
     public static string RoomNamesPath(string name) => FolderMode && !string.IsNullOrEmpty(name)

@@ -748,6 +748,18 @@ return model;
         }
     }
 
+    /// <summary>CreateBoxPart with its faces wound to point outwards. CreateBoxPart's own winding points every face
+    /// into the box - harmless for drawing (no culling) and for sweeps, but a raycast skips a face seen from its back,
+    /// so a downward ray went straight through a step's top and found the floor under the stairs instead (you could
+    /// not climb them). Use this for anything walked on or probed from outside: steps, landings, furniture.</summary>
+    internal static XRMeshPart CreateSolidBoxPart(string name, Vector3 pos, Quaternion rot, Vector3 size, string mat, Vector3 center, float globalRot)
+    {
+        var part = CreateBoxPart(name, pos, rot, size, mat, center, globalRot);
+        for (int i = 0; i + 2 < part.triangles.Count; i += 3)
+            (part.triangles[i + 1], part.triangles[i + 2]) = (part.triangles[i + 2], part.triangles[i + 1]);
+        return part;
+    }
+
     internal static XRMeshPart CreateBoxPart(string name, Vector3 pos, Quaternion rot, Vector3 size, string mat, Vector3 center, float globalRot, Vector3 localOff = default)
     {
         var part = new XRMeshPart { name = name, materialName = mat, color = GetColorForMaterial(mat) };

@@ -187,6 +187,10 @@ var mrukAnchor = room.GetComponent<MRUKAnchor>();
             .GroupBy(r => r.Anchor.Uuid)
             .Select(g => g.First())
             .Where(r => {
+                // A floor is the cheap, sufficient check - and the only one that works for a scan loaded from
+                // JSON: its room anchor has no live space handle, so TryGetComponent fails inside the Meta SDK
+                // and logs an error with a stack trace per room per call (megabytes of log in edit mode).
+                if (r.Anchors.Any(a => a.Label == MRUKAnchor.SceneLabels.FLOOR)) return true;
                 // "ROOM" isn't a value in the enum-based Classification type (only object/surface
                 // labels are), so unlike the other .Labels usages in this file this one can't be
                 // swapped for GetClassifications() without losing the check entirely.
@@ -195,7 +199,7 @@ var mrukAnchor = room.GetComponent<MRUKAnchor>();
                     if (labels.Labels.ToUpperInvariant().Contains("ROOM")) return true;
                 #pragma warning restore 0618
                 }
-                return r.Anchors.Any(a => a.Label == MRUKAnchor.SceneLabels.FLOOR);
+                return false;
             })
             .Where(IsRoomAreaValid)
             .ToList();

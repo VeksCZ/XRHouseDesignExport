@@ -379,6 +379,7 @@ public class DollHouseVisualizer : MonoBehaviour
         var hand = rightHand;
         bool grip = OVRInput.Get(OVRInput.Button.PrimaryHandTrigger, OVRInput.Controller.RTouch);
         Vector2 s = OVRInput.Get(OVRInput.Axis2D.PrimaryThumbstick, OVRInput.Controller.RTouch);
+        if (StairEditTool.StickCapture) s = Vector2.zero;
         if (!grabbed) {
             if (GrabLock.GripPressed && Physics.Raycast(hand.position, hand.forward, out RaycastHit hit) && hit.collider.gameObject == root && GrabLock.TryTake(this)) {
                 grabbed = true;

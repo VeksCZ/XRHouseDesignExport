@@ -15,7 +15,7 @@ using Meta.XR.MRUtilityKit;
 /// its edits and names, WalkThroughMode builds and walks the model (stairs, door leaves, floors, Anchor/Mesh/Raw).
 /// Edits are read-only here; they are made in the headset (or the Editor) and show up after a reload.
 /// </summary>
-public class DesktopWalkApp : MonoBehaviour
+public partial class DesktopWalkApp : MonoBehaviour
 {
     public WalkThroughMode walk;
     public DesktopWalkRig rig;
@@ -33,6 +33,8 @@ public class DesktopWalkApp : MonoBehaviour
     void Awake()
     {
         StopXR();
+        // Doorways walled up in edit mode are left out of the built model (the Quest app sets this in XRMenu).
+        XRModelFactory.RemovedOpening = DoorCatalog.IsWalledUp;
         walk ??= FindAnyObjectByType<WalkThroughMode>() ?? gameObject.AddComponent<WalkThroughMode>();
         rig ??= FindAnyObjectByType<DesktopWalkRig>();
         Application.targetFrameRate = -1;
@@ -47,12 +49,15 @@ public class DesktopWalkApp : MonoBehaviour
 
     async void Start()
     {
-        if (Arg("-shot") != null) Application.runInBackground = true; // a test window may never get focus
+        if (Arg("-shot") != null || Arg("-test") != null) Application.runInBackground = true; // a test window may never get focus
         RefreshScans();
         string last = Arg("-scan") ?? PlayerPrefs.GetString(PrefLastScan, "");
         selected = Mathf.Max(0, scans.IndexOf(last));
         if (scans.Count == 0) status = $"No scans in {DataFolder}. Pull data from the Quest in the Editor (MRUK > 5. Pull data from Quest).";
         else if (scans.Contains(last)) await Load(last); // straight back into the house walked last time
+
+        // Scripted checks (views, stair walk, falling) - see DesktopWalkTests.cs.
+        if (await RunTests()) return;
 
         // Smoke test: XRHouseWalk.exe -scan <name> -shot <png> loads, captures one frame and quits.
         string shot = Arg("-shot");

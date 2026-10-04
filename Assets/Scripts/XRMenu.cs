@@ -336,7 +336,7 @@ public class XRMenu : MonoBehaviour
         if (OVRInput.GetDown(OVRInput.Button.PrimaryThumbstick, OVRInput.Controller.LTouch)) { if (walking) walk.ToggleSeated(); else OnShowPlans(); }
 
         // Both sticks belong to the walk-through (move / turn / teleport) - no flick shortcuts while walking.
-        if (walking) return;
+        if (walking || StairEditTool.StickCapture) return;
 
         flickCooldown -= Time.deltaTime;
         if (flickCooldown > 0f) return;

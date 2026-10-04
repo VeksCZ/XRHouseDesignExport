@@ -32,6 +32,7 @@ public class WalkThroughMode : MonoBehaviour
                                             // rooms' floor slabs, or the stairwell edge), not as a fall
     const float HeightFollow = 14f;         // 1/s - how fast the floor height catches up when stepping up/down
     const float DoorAlphaFar = 0.35f, DoorFadeNear = 0.5f, DoorFadeFar = 2.0f;
+    const float WindowGlassAlpha = 0.25f;
     const float TeleportSpeed = 7f;
 
     GameObject root;
@@ -72,6 +73,8 @@ public class WalkThroughMode : MonoBehaviour
 
     // Real door leaves for doors set up in edit mode (see WalkDoors).
     readonly WalkDoors walkDoors = new WalkDoors();
+    // Furniture of the scan (95_Data_Furniture.json - bathroom fittings etc.).
+    readonly FurnitureInModel furniture = new FurnitureInModel();
     readonly List<Renderer> windowPanels = new List<Renderer>(); // replaced by real sashes for windows set up in edit mode
 
     /// <summary>(Re)builds everything that comes from the user's edits: stairs and door leaves.</summary>
@@ -81,6 +84,16 @@ public class WalkThroughMode : MonoBehaviour
         // The scanned-mesh models already contain the real stairs and doorways as scanned.
         if (walkModel != WalkModel.Anchor) return;
         stairs.Apply(walkVisual, yaw, center, walkRooms, HouseEditsStore.Current, true, WalkLayer, shaded: true);
+        // Where you may fall: the drawn openings (model space XZ, a little beyond their edges).
+        openingRects.Clear();
+        Quaternion g = Quaternion.Euler(0, yaw, 0);
+        foreach (var h in HouseEditsStore.Current.holes)
+        {
+            if (!StairGeometry.HoleWorld(h, walkRooms, out var a, out var b)) continue;
+            Vector3 ma = g * (a - center), mb = g * (b - center);
+            openingRects.Add(Rect.MinMaxRect(Mathf.Min(ma.x, mb.x) - 0.15f, Mathf.Min(ma.z, mb.z) - 0.15f,
+                                             Mathf.Max(ma.x, mb.x) + 0.15f, Mathf.Max(ma.z, mb.z) + 0.15f));
+        }
         walkDoors.Build(walkVisual, yaw, center, walkRooms, HouseEditsStore.Current, WalkLayer, doors.Select(d => d.r).Concat(windowPanels));
         Physics.SyncTransforms();
     }
@@ -220,6 +233,7 @@ public class WalkThroughMode : MonoBehaviour
         if (!root || walkRooms == null) return false;
         stairs.Dispose();
         walkDoors.Clear();
+        furniture.Clear();
         if (walkVisual)
         {
             foreach (var mf in walkVisual.GetComponentsInChildren<MeshFilter>(true)) if (mf.sharedMesh) Destroy(mf.sharedMesh);
@@ -251,6 +265,7 @@ public class WalkThroughMode : MonoBehaviour
         PrepareParts();
         long tColliders = sw.ElapsedMilliseconds;
         ApplyStairs();
+        furniture.Apply(walkVisual, yaw, center, walkRooms, HouseEditsStore.CurrentScan, WalkLayer);
         Physics.SyncTransforms();
         Debug.Log($"TIMING walk {walkModel}: model {tModel} ms, meshes {tMeshes - tModel} ms, colliders {tColliders - tMeshes} ms, " +
                   $"stairs+doors {sw.ElapsedMilliseconds - tColliders} ms");
@@ -264,6 +279,7 @@ public class WalkThroughMode : MonoBehaviour
         if (Active == this) Active = null;
         stairs.Dispose();
         walkDoors.Clear();
+        furniture.Clear();
         walkVisual = null; walkRooms = null;
         if (root)
         {
@@ -302,6 +318,15 @@ public class WalkThroughMode : MonoBehaviour
     {
         modelRoot = root ? root.transform : null; modelYaw = yaw; modelCenter = center;
         return isOn && root;
+    }
+
+    /// <summary>Puts a floor point given in the scan's world frame under your feet, the model kept in its real-world
+    /// orientation (desktop app: jump to a place; tests).</summary>
+    public void PlaceAtScanPoint(Vector3 scanFloorPoint)
+    {
+        if (!isOn || !root) return;
+        Place(Quaternion.Euler(0, yaw, 0) * (scanFloorPoint - center), Quaternion.Inverse(Quaternion.Euler(0, yaw, 0)));
+        blink = 1f;
     }
 
     /// <summary>Physics hit against the walk-through's own walls/floors (for occlusion checks by edit tools).</summary>
@@ -350,7 +375,18 @@ public class WalkThroughMode : MonoBehaviour
             mf.gameObject.layer = WalkLayer;
             var mr = mf.GetComponent<MeshRenderer>();
             bool isDoor = mr && mr.sharedMaterial && mr.sharedMaterial.name == "DOOR";
-            if (mr && mr.sharedMaterial && mr.sharedMaterial.name == "WINDOW") windowPanels.Add(mr);
+            if (mr && mr.sharedMaterial && mr.sharedMaterial.name == "WINDOW")
+            {
+                // Every window is glass from the start (only the opening ones need setting up - they then get real
+                // sashes instead of this pane). Still solid to walk into.
+                windowPanels.Add(mr);
+                if (seeThrough != null && mf.sharedMesh)
+                {
+                    Destroy(mr.sharedMaterial);
+                    if (mf.sharedMesh.colors.Length == 0) mf.sharedMesh.colors = WhiteColors(mf.sharedMesh.vertexCount);
+                    mr.sharedMaterial = new Material(seeThrough) { name = "WINDOW_GLASS", color = new Color(0.75f, 0.88f, 1f, WindowGlassAlpha) };
+                }
+            }
             if (isDoor)
             {
                 if (seeThrough != null && mf.sharedMesh)
@@ -435,7 +471,7 @@ public class WalkThroughMode : MonoBehaviour
     void HandleMove(float dt)
     {
         Vector2 s = desktop ? desktop.Move : OVRInput.Get(OVRInput.Axis2D.PrimaryThumbstick, OVRInput.Controller.LTouch);
-        if (s.sqrMagnitude < 0.04f) return;
+        if (s.sqrMagnitude < 0.04f || (!desktop && StairEditTool.StickCapture)) return;
         float speed = moveSpeed * (desktop ? desktop.SpeedMultiplier : 1f);
         Vector3 fwd = Vector3.ProjectOnPlane(head.forward, Vector3.up);
         if (fwd.sqrMagnitude < 1e-4f) fwd = Vector3.ProjectOnPlane(head.up, Vector3.up); // looking straight down
@@ -462,6 +498,14 @@ public class WalkThroughMode : MonoBehaviour
             Vector3 dir = move / dist;
             if (!Physics.CapsuleCast(p1, p2, BodyRadius, dir, out var hit, dist + Skin, WalkMask, QueryTriggerInteraction.Ignore))
                 return move;
+            {
+                Quaternion gInv = Quaternion.Inverse(Quaternion.Euler(0, yaw, 0));
+                Vector3 S(Vector3 w) => gInv * root.transform.InverseTransformPoint(w) + center;
+                var bnd = hit.collider.bounds;
+                LastBlocker = $"{hit.collider.name} ({hit.collider.transform.parent?.name}) at {hit.point.y - TargetFloorY:0.00} m above feet, " +
+                              $"point {S(hit.point)}, normal {hit.normal}, collider {S(bnd.min)}..{S(bnd.max)}, capsule {S(p1)}..{S(p2)} r {BodyRadius}, " +
+                              $"iter {i} move {dist:0.000} hitDist {hit.distance:0.000} dir {dir}";
+            }
             Vector3 n = hit.normal; n.y = 0f;
             if (i == 2 || n.sqrMagnitude < 1e-4f) return dir * Mathf.Max(0f, hit.distance - Skin);
             move = Vector3.ProjectOnPlane(move, n.normalized);
@@ -469,21 +513,57 @@ public class WalkThroughMode : MonoBehaviour
         return move;
     }
 
-    /// <summary>Keeps the model's floor under you at TargetFloorY - walking onto a step/stair raises you, off
-    /// one lowers you. Big drops are ignored (gap between slabs, stairwell edge) - see StepDown.</summary>
+    /// <summary>What stopped the last move (diagnostics / desktop tests).</summary>
+    public string LastBlocker { get; private set; } = "";
+
+    float fallSpeed;
+    const float FallRing = 0.3f;     // a narrower gap than this all round you (doorway between slabs) is no hole
+
     void FollowFloor(float dt)
     {
-        if (!ProbeFloor(out float floorY)) return;
+        if (!ProbeFloor(out float floorY))
+        {
+            Fall(dt);
+            return;
+        }
+        fallSpeed = 0f;
         float delta = TargetFloorY - floorY;
         if (Mathf.Abs(delta) < 0.0005f) return;
         root.transform.position += Vector3.up * (delta * (1f - Mathf.Exp(-HeightFollow * dt)));
         Physics.SyncTransforms();
     }
 
-    bool ProbeFloor(out float y)
+    /// <summary>No floor within a step under you, inside a drawn opening, and none anywhere within FallRing around
+    /// you either (not just the gap under a doorway) - with a floor further down: fall onto it.</summary>
+    readonly List<Rect> openingRects = new List<Rect>();
+
+    void Fall(float dt)
+    {
+        Vector3 hp = head.position;
+        // Only ever through an opening the user drew - never through a gap in the scan or out of a wall your head
+        // went into (in the headset you walk for real, and a wall can't stop you).
+        Vector3 m = walkVisual ? walkVisual.transform.InverseTransformPoint(hp) : Vector3.zero;
+        if (!walkVisual || !openingRects.Any(r => r.Contains(new Vector2(m.x, m.z)))) { fallSpeed = 0f; return; }
+        for (int i = 0; i < 8; i++)
+        {
+            Vector3 off = Quaternion.Euler(0, i * 45f, 0) * Vector3.forward * FallRing;
+            if (ProbeFloorAt(hp + off, out _)) { fallSpeed = 0f; return; } // just a gap - stay at this height
+        }
+        Vector3 origin = new Vector3(hp.x, TargetFloorY, hp.z);
+        if (!Physics.SphereCast(origin, 0.1f, Vector3.down, out var hit, 10f, WalkMask, QueryTriggerInteraction.Ignore) || hit.normal.y < 0.5f)
+        { fallSpeed = 0f; return; } // nothing below (edge of the model) - stay
+        fallSpeed = Mathf.Min(fallSpeed + 9.81f * dt, 12f);
+        float drop = Mathf.Min(fallSpeed * dt, TargetFloorY - hit.point.y);
+        if (drop <= 0f) return;
+        root.transform.position += Vector3.up * drop; // the world rises == you fall
+        Physics.SyncTransforms();
+    }
+
+    bool ProbeFloor(out float y) => ProbeFloorAt(head.position, out y);
+
+    bool ProbeFloorAt(Vector3 hp, out float y)
     {
         y = 0f;
-        Vector3 hp = head.position;
         Vector3 origin = new Vector3(hp.x, TargetFloorY + StepUp + 0.1f, hp.z);
         float dist = StepUp + 0.1f + StepDown;
         if (Physics.Raycast(origin, Vector3.down, out var hit, dist, WalkMask, QueryTriggerInteraction.Ignore) && hit.normal.y > 0.5f)
@@ -498,6 +578,7 @@ public class WalkThroughMode : MonoBehaviour
     void HandleSnapTurn()
     {
         if (aiming || desktop) return; // desktop: the mouse turns the rig itself
+        if (StairEditTool.StickCapture) { turnArmed = false; return; }
         float x = OVRInput.Get(OVRInput.Axis2D.PrimaryThumbstick, OVRInput.Controller.RTouch).x;
         if (turnArmed && Mathf.Abs(x) > 0.7f)
         {
@@ -513,6 +594,12 @@ public class WalkThroughMode : MonoBehaviour
     {
         if (desktop) return;
         Vector2 r = OVRInput.Get(OVRInput.Axis2D.PrimaryThumbstick, OVRInput.Controller.RTouch);
+        if (StairEditTool.StickCapture)
+        {
+            // The sticks adjust a stair - drop any aim without teleporting.
+            if (aiming) { aiming = false; teleportValid = false; ShowArc(false); }
+            return;
+        }
         if (!aiming)
         {
             if (r.y > 0.7f && Mathf.Abs(r.x) < 0.5f) aiming = true;
