@@ -429,8 +429,9 @@ public class XRMenu : MonoBehaviour
     void OnNextFloor()
     {
         if (walk == null || !walk.IsOn) { AddLog("Next floor: only while walking (Walk)."); return; }
-        string s = walk.NextFloor();
-        if (s != null) { AddLog(s); SetStatus(s); }
+        string s = walk.NextFloor() ?? "Next floor: no position yet - try again";
+        AddLog(s); SetStatus(s);
+        Debug.Log($"[XRMenu] Next floor: {s}");
     }
 
     async void TryEnterWalkFromDollhouse()

@@ -80,11 +80,12 @@ public static class Furniture
             if (key.StartsWith("room_")) key = key.Substring(5);
             var room = rooms.FirstOrDefault(r => DoorCatalog.RoomId(r).ToLowerInvariant().StartsWith(key));
             if (room == null || !TryRoomBox(room, g, center, out var box)) { Debug.LogWarning($"[Furniture] room '{rs["room"]}' not found"); continue; }
-            var rm = new XRRoomModel { roomName = "Furniture_" + key };
             int k = 0;
             foreach (var item in (rs["items"] as JArray ?? new JArray()).OfType<JObject>())
             {
                 k++;
+                var rm = new XRRoomModel { roomName = ItemName(key, k - 1) };
+                model.rooms.Add(rm);
                 string type = (string)item["type"] ?? "box";
                 if (!Defaults.TryGetValue(type, out var def)) { Debug.LogWarning($"[Furniture] unknown type '{type}'"); continue; }
                 float w = F(item, "w", def.w), d = F(item, "d", def.d);
@@ -108,7 +109,6 @@ public static class Furniture
                     rm.parts.Add(Box((string)item["name"] ?? $"{type}_{k}", mat, xa, xb, yb + y0, yb + y1, za, zb));
                 }
             }
-            model.rooms.Add(rm);
         }
         foreach (var er in ExtraRooms(spec, rooms, g, center))
         {
@@ -179,6 +179,80 @@ public static class Furniture
             faces.Add((W(xm, er.z1), gi * Vector3.forward, er.x1 - er.x0));
         }
         return faces;
+    }
+
+    // ---------- moving items (walk-through: grab, drag, rotate) ----------
+
+    const string ItemPrefix = "FurnItem:";
+
+    /// <summary>GameObject name of one item's group: room key + index in that room's items.</summary>
+    public static string ItemName(string roomKey, int index) => $"{ItemPrefix}{roomKey}#{index}";
+
+    public static bool TryParseItem(string goName, out string roomKey, out int index)
+    {
+        roomKey = null; index = -1;
+        if (goName == null || !goName.StartsWith(ItemPrefix)) return false;
+        int hash = goName.LastIndexOf('#');
+        if (hash < 0 || !int.TryParse(goName.Substring(hash + 1), out index)) return false;
+        roomKey = goName.Substring(ItemPrefix.Length, hash - ItemPrefix.Length);
+        return true;
+    }
+
+    static bool FindItem(JObject spec, List<MRUKRoom> rooms, Quaternion g, Vector3 center, string key, int index, out JObject item, out RoomBox box)
+    {
+        item = null; box = default;
+        foreach (var rs in (spec?["rooms"] as JArray ?? new JArray()).OfType<JObject>())
+        {
+            string k = ((string)rs["room"] ?? "").ToLowerInvariant();
+            if (k.StartsWith("room_")) k = k.Substring(5);
+            if (k != key) continue;
+            var items = rs["items"] as JArray;
+            if (items == null || index < 0 || index >= items.Count || items[index] is not JObject it) return false;
+            var room = rooms.FirstOrDefault(r => DoorCatalog.RoomId(r).ToLowerInvariant().StartsWith(key));
+            if (room == null || !TryRoomBox(room, g, center, out box)) return false;
+            item = it;
+            return true;
+        }
+        return false;
+    }
+
+    /// <summary>Moves an item by (dx, dz) in GLB axes: it gets an absolute corner ("x"/"z") instead of along/gap.</summary>
+    public static bool MoveItem(JObject spec, List<MRUKRoom> rooms, float yaw, Vector3 center, string key, int index, float dx, float dz)
+    {
+        if (!FindItem(spec, rooms, Quaternion.Euler(0, yaw, 0), center, key, index, out var item, out var box)) return false;
+        var (ox, oz) = Place(box, item)(0f, 0f);
+        item["x"] = Math.Round(ox + dx, 3);
+        item["z"] = Math.Round(oz + dz, 3);
+        item.Remove("along"); item.Remove("gap");
+        return true;
+    }
+
+    /// <summary>Turns an item 90 degrees about the middle of its footprint (its back goes to the next wall direction).</summary>
+    public static bool RotateItem(JObject spec, List<MRUKRoom> rooms, float yaw, Vector3 center, string key, int index)
+    {
+        if (!FindItem(spec, rooms, Quaternion.Euler(0, yaw, 0), center, key, index, out var item, out var box)) return false;
+        string type = (string)item["type"] ?? "box";
+        var def = Defaults.TryGetValue(type, out var dd) ? dd : (0.6f, 0.6f, 0.85f);
+        float w = F(item, "w", def.Item1), d = F(item, "d", def.Item2);
+        var (cx, cz) = Place(box, item)(w / 2f, d / 2f);
+        string wall = (string)item["wall"] ?? "-z";
+        string next = wall switch { "-z" => "+x", "+x" => "+z", "+z" => "-x", _ => "-z" };
+        var turned = new JObject { ["wall"] = next, ["x"] = 0f, ["z"] = 0f };
+        var (rx, rz) = Place(box, turned)(w / 2f, d / 2f);   // middle relative to a corner at (0,0)
+        item["wall"] = next;
+        item["x"] = Math.Round(cx - rx, 3);
+        item["z"] = Math.Round(cz - rz, 3);
+        item.Remove("along"); item.Remove("gap");
+        return true;
+    }
+
+    /// <summary>Writes the spec back to the scan's furniture file.</summary>
+    public static bool Save(string scanName, JObject spec)
+    {
+        string path = MRUKSceneCache.FurniturePath(scanName);
+        if (string.IsNullOrEmpty(path) || spec == null) return false;
+        try { File.WriteAllText(path, spec.ToString(Newtonsoft.Json.Formatting.Indented)); return true; }
+        catch (Exception ex) { Debug.LogWarning($"[Furniture] save {path}: {ex.Message}"); return false; }
     }
 
     static float F(JObject o, string k, float def) => o[k] != null && o[k].Type != JTokenType.Null ? (float)o[k] : def;
@@ -556,12 +630,38 @@ public class FurnitureInModel
 {
     GameObject go;
     readonly List<Material> mats = new List<Material>();
+    GameObject lastVisual; float lastYaw; Vector3 lastCenter; List<MRUKRoom> lastRooms; string lastScan; int lastLayer;
+
+    /// <summary>The spec the furniture was last built from (moving items edits it, then Save + Reload).</summary>
+    public JObject Spec { get; private set; }
+    public string ScanName => lastScan;
+
+    /// <summary>Rebuilds from the current Spec (after an item was moved/turned).</summary>
+    public void Reload()
+    {
+        if (lastVisual && Spec != null) Build(lastVisual, lastYaw, lastCenter, lastRooms, lastScan, lastLayer, Spec);
+    }
+
+    /// <summary>The item group a hit collider belongs to (null if it isn't a movable piece of furniture).</summary>
+    public Transform ItemOf(Collider c, out string roomKey, out int index)
+    {
+        roomKey = null; index = -1;
+        for (var t = c ? c.transform : null; t && go && t != go.transform; t = t.parent)
+            if (Furniture.TryParseItem(t.name, out roomKey, out index)) return t;
+        return null;
+    }
 
     public void Apply(GameObject visual, float yaw, Vector3 center, List<MRUKRoom> rooms, string scanName, int layer)
     {
+        Build(visual, yaw, center, rooms, scanName, layer, string.IsNullOrEmpty(scanName) ? null : Furniture.Load(scanName));
+    }
+
+    void Build(GameObject visual, float yaw, Vector3 center, List<MRUKRoom> rooms, string scanName, int layer, JObject spec)
+    {
         Clear();
+        lastVisual = visual; lastYaw = yaw; lastCenter = center; lastRooms = rooms; lastScan = scanName; lastLayer = layer;
+        Spec = spec;
         if (!visual || string.IsNullOrEmpty(scanName)) return;
-        var spec = Furniture.Load(scanName);
         if (spec == null) return;
         var model = Furniture.Build(spec, rooms, yaw, center);
         if (model.rooms.Count == 0) return;

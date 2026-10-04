@@ -172,12 +172,26 @@ public partial class DesktopWalkApp : MonoBehaviour
             return;
         }
 
+        // Furniture: G picks up what the crosshair points at (it follows your view over the floor), G / click puts it
+        // down (saved), R turns it 90 degrees, Backspace puts it back where it was.
+        if (walk.IsMovingFurniture)
+        {
+            walk.DragFurniture(CenterRay());
+            if (kb.gKey.wasPressedThisFrame || (mouse != null && mouse.leftButton.wasPressedThisFrame)) floorInfo = walk.DropFurniture() ?? "";
+            else if (kb.rKey.wasPressedThisFrame) floorInfo = walk.RotateFurniture(CenterRay()) ?? "";
+            else if (kb.backspaceKey.wasPressedThisFrame) { walk.DropFurniture(false); floorInfo = "Put back"; }
+            return;
+        }
+        if (kb.gKey.wasPressedThisFrame) floorInfo = walk.TryGrabFurniture(CenterRay()) ? "Moving - G/click put down, R turn, Backspace cancel" : "No furniture there";
+        if (kb.rKey.wasPressedThisFrame) floorInfo = walk.RotateFurniture(CenterRay()) ?? "No furniture there";
         if (mouse != null && mouse.leftButton.wasPressedThisFrame) walk.TryToggleDoor();
         if (kb.fKey.wasPressedThisFrame || kb.pageUpKey.wasPressedThisFrame) floorInfo = walk.NextFloor() ?? "";
         if (kb.mKey.wasPressedThisFrame) _ = CycleModel();
         if (kb.hKey.wasPressedThisFrame) showHelp = !showHelp;
         if (kb.f5Key.wasPressedThisFrame && loadedScan != null) _ = Load(loadedScan);
     }
+
+    Ray CenterRay() => rig && rig.Head ? new Ray(rig.Head.position, rig.Head.forward) : default;
 
     async Task CycleModel()
     {
@@ -259,7 +273,7 @@ public partial class DesktopWalkApp : MonoBehaviour
     {
         string text = $"{loadedScan}  ·  {walk.ModelLabel.Replace("Walk: ", "")}" + (floorInfo != "" ? "  ·  " + floorInfo : "");
         if (showHelp)
-            text += "\nWASD move · mouse look · Shift run · Ctrl slow · click door open/close · F next floor · M model · F5 reload · Esc menu · H hide";
+            text += "\nWASD move · mouse look · Shift run · Ctrl slow · click door open/close · G move furniture· R turn it· F next floor · M model · F5 reload · Esc menu · H hide";
         float bh = showHelp ? 74 : 44;
         GUI.Box(new Rect(12, h - bh - 12, 1100, bh), GUIContent.none, box);
         GUI.Label(new Rect(26, h - bh - 4, 1080, bh), text, small);

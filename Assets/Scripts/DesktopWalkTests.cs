@@ -46,6 +46,8 @@ public partial class DesktopWalkApp
                     "doorinfo" => DumpDoors(),
                     "roomplan" => DumpRoomPlan(Arg("-room")),
                     "probe" => Probe(Arg("-rays") ?? ""),
+                    "floors" => await TestFloors(outDir),
+                    "move" => await TestMove(),
                     _ => false,
                 };
             }
@@ -317,6 +319,52 @@ public partial class DesktopWalkApp
             }
         }
         return true;
+    }
+
+    /// <summary>-grab "x,y,z,dx,dy,dz" picks the furniture that ray hits, -to "..." drags it along that ray, then
+    /// drops it (saved) - or -turn turns it instead. GLB axes. NB writes the scan's furniture file.</summary>
+    async Task<bool> TestMove()
+    {
+        if (!walk.TryGetModelFrame(out var root, out _, out _)) return false;
+        Ray R(string a)
+        {
+            var f = a.Split(',').Select(s => float.Parse(s.Trim(), CultureInfo.InvariantCulture)).ToArray();
+            Vector3 o = root.TransformPoint(new Vector3(f[0], f[1], -f[2]));
+            return new Ray(o, (root.TransformPoint(new Vector3(f[0] + f[3], f[1] + f[4], -(f[2] + f[5]))) - o).normalized);
+        }
+        if (Environment.GetCommandLineArgs().Contains("-turn")) { Debug.Log($"TEST turn: {walk.RotateFurniture(R(Arg("-grab")))}"); return true; }
+        if (!walk.TryGrabFurniture(R(Arg("-grab")))) { Debug.Log("TEST move: nothing grabbed"); return false; }
+        walk.DragFurniture(R(Arg("-to")));
+        await Frames(5);
+        Debug.Log($"TEST move: {walk.DropFurniture()}");
+        return true;
+    }
+
+    /// <summary>Next floor (F) three times: where you end up right after the jump and a second later.</summary>
+    async Task<bool> TestFloors(string outDir)
+    {
+        bool ok = true;
+        // -start "x,y,z" (GLB axes): stand there first
+        if (Arg("-start") != null && walk.TryGetModelFrame(out _, out float sy, out var sc))
+        {
+            var f = Arg("-start").Split(',').Select(s => float.Parse(s.Trim(), CultureInfo.InvariantCulture)).ToArray();
+            await StandAt(Quaternion.Inverse(Quaternion.Euler(0, sy, 0)) * new Vector3(f[0], f[1], -f[2]) + sc, 0f, 10f);
+            await Frames(60);
+        }
+        for (int i = 0; i < 4; i++)
+        {
+            string r = walk.NextFloor();
+            await Frames(2);
+            walk.TryGetModelFrame(out var root, out _, out _);
+            Vector3 Feet() { var m = root.InverseTransformPoint(rig.transform.position); return new Vector3(m.x, m.y, -m.z); }
+            var a = Feet();
+            await Frames(90);
+            var b = Feet();
+            Debug.Log($"TEST floor {i}: '{r}' after jump ({a.x:0.00},{a.y:0.00},{a.z:0.00}) 1.5 s later ({b.x:0.00},{b.y:0.00},{b.z:0.00})");
+            if (r == null || Mathf.Abs(a.y - b.y) > 0.5f) ok = false;
+            await Shot(Path.Combine(outDir, $"floor_{i}.png"));
+        }
+        return ok;
     }
 
     static string Short(string s) => string.IsNullOrEmpty(s) ? "-" : s.Substring(0, Math.Min(8, s.Length));

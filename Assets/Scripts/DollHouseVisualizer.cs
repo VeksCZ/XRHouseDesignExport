@@ -50,6 +50,7 @@ public class DollHouseVisualizer : MonoBehaviour
     private readonly StairsInModel stairs = new StairsInModel();
     private GameObject visualGo;
     private List<MRUKRoom> lastRooms;
+    readonly FurnitureInModel furniture = new FurnitureInModel();
     void OnEnable() { HouseEditsStore.Changed += OnEditsChanged; }
     void OnDisable() { HouseEditsStore.Changed -= OnEditsChanged; }
     string walledUp = "";
@@ -224,12 +225,15 @@ public class DollHouseVisualizer : MonoBehaviour
         XRHouseModel m = null;
 
         try {
+            // rooms drawn from the furniture spec (not scanned) make the walls next to them thin, as when walking
+            XRModelFactory.ExtraFaces = Furniture.ExtraFaces(Furniture.Load(HouseEditsStore.CurrentScan), rooms, yaw, c);
             if (mode == DollhouseMode.AnchorAnalytical) m = XRModelFactory.CreateAnchorAnalytical(rooms, yaw, c);
             // Same baked dimension lines as the exported model (thin bars that scale with the model, so they
             // read as fine lines at any zoom); only the numbers are added separately below as billboarded text.
             else if (mode == DollhouseMode.AnchorWithDimensions) m = XRModelFactory.CreateAnchorAnalyticalWithDimensions(rooms, yaw, c, withText: false);
             else if (mode == DollhouseMode.MeshAnalytical) m = await XRModelFactory.CreateMeshAnalytical(rooms, yaw, c, forDollhouse: true);
             else if (mode == DollhouseMode.RawMesh) m = await XRModelFactory.CreateRawScan(rooms, yaw, c, forDollhouse: true);
+            XRModelFactory.ExtraFaces = null;
 
             if (m != null) {
                 var visual = UnityModelLoader.LoadToScene(m);
@@ -238,6 +242,10 @@ public class DollHouseVisualizer : MonoBehaviour
                     AddCol(visual);
                     visualGo = visual; lastRooms = rooms;
                     ApplyStairs();
+                    // furniture and the rooms the scan couldn't take (same spec as the walk-through)
+                    furniture.Clear();
+                    if (mode == DollhouseMode.AnchorAnalytical || mode == DollhouseMode.AnchorWithDimensions)
+                        furniture.Apply(visual, yaw, c, rooms, HouseEditsStore.CurrentScan, visual.layer);
                     // Registers it with the XR Interaction Toolkit purely so the ray hovers it as a valid
                     // target (turns green and clips at its surface - see XRMenu.StyleRay); the actual grab is
                     // still the same custom grip+raycast logic in Update() below.

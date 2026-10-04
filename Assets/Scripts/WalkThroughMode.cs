@@ -130,6 +130,7 @@ public class WalkThroughMode : MonoBehaviour
         }
         Place(Quaternion.Euler(0, yaw, 0) * (target - center), root.transform.rotation);
         blink = 1f;
+        Debug.Log($"[Walk] Next floor: feet {feetY:0.00} (level {cur + 1}) -> level {next + 1} at {level:0.00}, target {target}, {(hereFloor != null ? "straight above/below" : "largest room")}");
         return $"Floor {next + 1}/{levels.Count}";
     }
 
@@ -139,6 +140,104 @@ public class WalkThroughMode : MonoBehaviour
         if (!isOn || !rightHand) return false;
         return Physics.Raycast(rightHand.position, rightHand.forward, out var hit, 6f, WalkMask, QueryTriggerInteraction.Collide)
                && walkDoors.Toggle(hit.collider);
+    }
+
+    // ---------- moving furniture: grab what the ray points at, drag it over the floor, turn it 90 degrees ----------
+
+    Transform moving; string movingKey; int movingIndex;
+    Vector3 grabPoint, movingStart;   // model space: where the ray first hit it, and the item's start offset
+    float grabY;                      // model-space height of the drag plane (the grab point's)
+
+    public bool IsMovingFurniture => moving;
+
+    /// <summary>Picks the piece of furniture the ray hits (world ray). False if it hits something else first.</summary>
+    public bool TryGrabFurniture(Ray ray)
+    {
+        if (!isOn || !walkVisual || moving) return false;
+        if (!Physics.Raycast(ray, out var hit, 8f, WalkMask, QueryTriggerInteraction.Ignore)) return false;
+        var item = furniture.ItemOf(hit.collider, out movingKey, out movingIndex);
+        if (!item) return false;
+        moving = item;
+        grabPoint = walkVisual.transform.InverseTransformPoint(hit.point);
+        grabY = grabPoint.y;
+        movingStart = moving.localPosition;
+        return true;
+    }
+
+    /// <summary>Follows the ray over the horizontal plane through the grab point.</summary>
+    public void DragFurniture(Ray ray)
+    {
+        if (!moving || !walkVisual) return;
+        var t = walkVisual.transform;
+        Vector3 o = t.InverseTransformPoint(ray.origin), d = t.InverseTransformDirection(ray.direction);
+        if (Mathf.Abs(d.y) < 1e-4f) return;
+        float k = (grabY - o.y) / d.y;
+        if (k <= 0f || k > 15f) return;   // pointing above the horizon
+        Vector3 p = o + d * k;
+        Vector3 delta = p - grabPoint; delta.y = 0f;
+        moving.localPosition = movingStart + delta;
+    }
+
+    /// <summary>Puts it down where it is (saved) - or back where it was.</summary>
+    public string DropFurniture(bool keep = true)
+    {
+        if (!moving) return null;
+        Vector3 delta = moving.localPosition - movingStart;
+        var spec = furniture.Spec;
+        moving.localPosition = movingStart;
+        moving = null;
+        if (!keep || delta.sqrMagnitude < 1e-6f || spec == null) return null;
+        // model space -> GLB axes (Z mirrored)
+        if (!Furniture.MoveItem(spec, walkRooms, yaw, center, movingKey, movingIndex, delta.x, -delta.z)) return "Can't move this one";
+        Furniture.Save(furniture.ScanName, spec);
+        furniture.Reload();
+        Physics.SyncTransforms();
+        return $"Moved {delta.magnitude:0.00} m";
+    }
+
+    /// <summary>Turns the held item (or the one under the ray) 90 degrees; a held item stays held.</summary>
+    public string RotateFurniture(Ray ray)
+    {
+        bool held = moving;
+        if (!held && !TryGrabFurniture(ray)) return null;
+        string key = movingKey; int index = movingIndex;
+        Vector3 delta = moving.localPosition - movingStart;
+        moving.localPosition = movingStart;
+        moving = null;
+        var spec = furniture.Spec;
+        if (spec == null) return null;
+        if (delta.sqrMagnitude > 1e-6f) Furniture.MoveItem(spec, walkRooms, yaw, center, key, index, delta.x, -delta.z);
+        if (!Furniture.RotateItem(spec, walkRooms, yaw, center, key, index)) return "Can't turn this one";
+        Furniture.Save(furniture.ScanName, spec);
+        furniture.Reload();
+        Physics.SyncTransforms();
+        if (held) TryGrabFurniture(ray);   // keep holding the rebuilt item
+        return "Turned 90°";
+    }
+
+    /// <summary>Quest: right grip on a piece of furniture holds it, release puts it down, right stick click turns it.</summary>
+    void HandleFurnitureGrab()
+    {
+        if (desktop || !rightHand) return;
+        var ray = new Ray(rightHand.position, rightHand.forward);
+        if (!moving)
+        {
+            if (GrabLock.GripPressed && TryGrabFurniture(ray))
+            {
+                if (GrabLock.TryTake(this)) OVRInput.SetControllerVibration(0.3f, 0.15f, OVRInput.Controller.RTouch);
+                else DropFurniture(false);
+            }
+            return;
+        }
+        if (!OVRInput.Get(OVRInput.Button.PrimaryHandTrigger, OVRInput.Controller.RTouch))
+        {
+            uiLog?.AddLog(DropFurniture() ?? "Furniture: put back");
+            GrabLock.Release(this);
+            OVRInput.SetControllerVibration(0f, 0f, OVRInput.Controller.RTouch);
+            return;
+        }
+        DragFurniture(ray);
+        if (OVRInput.GetDown(OVRInput.Button.PrimaryThumbstick, OVRInput.Controller.RTouch)) uiLog?.AddLog(RotateFurniture(ray));
     }
 
     /// <summary>Opens/closes every door (desktop scripted tests).</summary>
@@ -481,6 +580,7 @@ public class WalkThroughMode : MonoBehaviour
         HandleSnapTurn();
         HandleMove(dt);
         FollowFloor(dt);
+        HandleFurnitureGrab();
         if (walkVisual && walkDoors.Tick(walkVisual.transform.InverseTransformPoint(head.position), dt, EditModeController.AnyOn)) Physics.SyncTransforms();
         UpdateDoors();
         UpdateFade(dt);
