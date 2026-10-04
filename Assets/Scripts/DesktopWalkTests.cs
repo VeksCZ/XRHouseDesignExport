@@ -85,6 +85,27 @@ public partial class DesktopWalkApp
         var list = (Arg("-views") ?? "").Split(new[] { ';' }, StringSplitOptions.RemoveEmptyEntries);
         int i = 0;
         if (Environment.GetCommandLineArgs().Contains("-opendoors")) { walk.SetAllDoors(true); await Frames(90); } // swing time
+        // -ustair "x,y,z,hx,hz,side,width" (GLB axes): adds a U stair (StairGeometry.UShape) from bottom-step middle
+        // (x,y,z) heading (hx,hz) to the edits - NB saved to the scan's edits file like any edit
+        if (Arg("-ustair") != null && walk.TryGetModelFrame(out _, out float uy, out var uc))
+        {
+            var f = Arg("-ustair").Split(',').Select(s => float.Parse(s.Trim(), CultureInfo.InvariantCulture)).ToArray();
+            Quaternion gi = Quaternion.Inverse(Quaternion.Euler(0, uy, 0));
+            var rooms = Rooms();
+            Vector3 p0 = gi * new Vector3(f[0], f[1], -f[2]) + uc;
+            Vector3 dir = gi * new Vector3(f[3], 0f, -f[4]);
+            float rise = StairGeometry.TopFloorY(rooms, p0.y) - p0.y;
+            var (all, risers) = StairGeometry.UShape(p0, dir, f[6], rise, 3, 3, (int)f[5]);
+            var room = DoorCatalog.FindRoomAt(rooms, p0 + Vector3.up * 0.05f);
+            var s = new StairEdit
+            {
+                id = Guid.NewGuid().ToString("N"), roomUuid = DoorCatalog.RoomId(room), width = f[6], risers = risers,
+                localPoints = all.Select(p => new Vector3Data(room != null ? room.transform.InverseTransformPoint(p) : p)).ToList(),
+            };
+            HouseEditsStore.Apply(e => { e.stairs.Clear(); e.stairs.Add(s); });
+            await Frames(30);
+            DumpRoomPlan("zzzz");
+        }
         // -glbviews "x,y,z,tx,tz,pitch;..." - the furniture spec's frame (GLB axes: model space, Z mirrored): stand at
         // floor point (x,y,z), look towards (tx,tz).
         if (Arg("-glbviews") != null && walk.TryGetModelFrame(out _, out float yw, out var ctr))
@@ -250,6 +271,17 @@ public partial class DesktopWalkApp
                 float sill = c.y - d.height / 2f - y;
                 Debug.Log($"TEST    {(d.isWindow ? "window" : "door")} wall {side} along {along - d.width / 2f:0.00}..{along + d.width / 2f:0.00} sill {sill:0.00} top {sill + d.height:0.00} (w {d.width:0.00})");
             }
+        }
+        // drawn openings and stairs, same GLB axes
+        string G(Vector3 w) { Vector3 m = g * (w - center); return $"({m.x:0.00},{m.y:0.00},{-m.z:0.00})"; }
+        var edits = HouseEditsStore.Current;
+        foreach (var h in edits?.holes ?? new List<HoleEdit>())
+            if (StairGeometry.HoleWorld(h, rooms, out var a, out var b)) Debug.Log($"TEST hole {Short(h.id)} {G(a)} - {G(b)}");
+        foreach (var s in edits?.stairs ?? new List<StairEdit>())
+        {
+            var r = StairGeometry.Resolve(s, rooms);
+            Debug.Log($"TEST stair {Short(s.id)} width {s.width:0.00} risers [{string.Join(",", s.risers ?? new List<int>())}] points {string.Join(" ", StairGeometry.WorldPoints(s, rooms).Select(G))}" +
+                      (r != null ? $" bottom {r.bottomY - center.y:0.00} top {r.topY - center.y:0.00} rise {r.rise * 100f:0.0} cm" : ""));
         }
         return true;
     }

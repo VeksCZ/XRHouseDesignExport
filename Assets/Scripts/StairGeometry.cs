@@ -13,6 +13,9 @@ using Meta.XR.MRUtilityKit;
 public static class StairGeometry
 {
     public const float DefaultRiser = 0.175f;
+    public const float DefaultTread = 0.28f;
+
+    public static float TreadOf(StairEdit s) => s != null && s.tread > 0.15f ? s.tread : DefaultTread;
     static readonly Color StairColor = new Color(0.72f, 0.62f, 0.48f);
 
     /// <summary>A stair resolved into scan-world geometry.</summary>
@@ -22,6 +25,9 @@ public static class StairGeometry
         public float bottomY, topY, width, rise;
         public readonly List<(Vector3 start, Vector3 end, Vector3 dir, int risers, float y0)> flights = new List<(Vector3, Vector3, Vector3, int, float)>();
         public readonly List<(Vector3 center, Vector3 dir, float y)> landings = new List<(Vector3, Vector3, float)>();
+        /// <summary>Flat stretches of a leg longer than its steps (they extend the landing next to them).</summary>
+        public readonly List<(Vector3 start, Vector3 end, Vector3 dir, float y)> flats = new List<(Vector3, Vector3, Vector3, float)>();
+        public float tread;
         /// <summary>Plan rectangles (4 corners each, scan world, y ignored) - the stairwell footprint.</summary>
         public readonly List<Vector3[]> footprint = new List<Vector3[]>();
     }
@@ -74,50 +80,88 @@ public static class StairGeometry
         return result;
     }
 
-    /// <summary>Riser counts for a new stair: floor-to-floor / ~17.5 cm, shared out by flight length.</summary>
-    public static List<int> DefaultRisers(List<Vector3> pts, float width, float rise)
+    /// <summary>Total risers for a floor-to-floor height (~17.5 cm each).</summary>
+    public static int TotalRisers(float rise) => Mathf.Max(1, Mathf.RoundToInt(rise / DefaultRiser));
+
+    /// <summary>Riser counts for a new stair: floor-to-floor / ~17.5 cm in total, each flight as many steps as fit
+    /// its leg at the standard tread, the longest flight taking up the difference.</summary>
+    public static List<int> DefaultRisers(List<Vector3> pts, float width, float rise, float tread = DefaultTread)
     {
         var lens = FlightLengths(pts, width);
-        int total = Mathf.Max(1, Mathf.RoundToInt(rise / DefaultRiser));
-        float sum = lens.Sum();
-        var n = lens.Select(l => sum > 0.01f && l > 0.15f ? Mathf.RoundToInt(total * l / sum) : 0).ToList();
+        int total = TotalRisers(rise);
+        var n = lens.Select(l => Mathf.Max(0, Mathf.FloorToInt(l / tread + 0.25f))).ToList();
         int diff = total - n.Sum();
         if (n.Count > 0)
         {
             int longest = lens.IndexOf(lens.Max());
             n[longest] = Mathf.Max(0, n[longest] + diff);
+            if (n.Sum() != total) n[0] += total - n.Sum(); // the longest couldn't give enough back
         }
         return n;
+    }
+
+    /// <summary>A U-shaped stair from the bottom step's middle p0 running along dir: first flight, landing,
+    /// turn (side -1 left / +1 right), middle flight, landing, the same turn again, last flight. The middle flight
+    /// gets whatever the first/last don't need. Points (scan world) and riser counts.</summary>
+    public static (List<Vector3> pts, List<int> risers) UShape(Vector3 p0, Vector3 dir, float width, float rise, int first, int last, int side, float tread = DefaultTread)
+    {
+        int total = TotalRisers(rise);
+        int mid = Mathf.Max(1, total - first - last);
+        dir = Flat(dir).normalized;
+        Vector3 d2 = Quaternion.Euler(0, 90f * side, 0) * dir, d3 = -dir;
+        Vector3 c1 = p0 + dir * (first * tread + width / 2f);
+        Vector3 c2 = c1 + d2 * (width + mid * tread);
+        Vector3 end = c2 + d3 * (width / 2f + last * tread);
+        return (new List<Vector3> { p0, c1, c2, end }, new List<int> { first, mid, last });
     }
 
     public static Resolved Resolve(StairEdit s, List<MRUKRoom> rooms)
     {
         var pts = WorldPoints(s, rooms);
         if (pts.Count < 2) return null;
-        var r = new Resolved { points = pts, width = Mathf.Max(0.5f, s.width), bottomY = pts[0].y };
+        float tread = TreadOf(s);
+        var r = new Resolved { width = Mathf.Max(0.5f, s.width), bottomY = pts[0].y, tread = tread };
         r.topY = TopFloorY(rooms, r.bottomY);
-        var risers = s.risers != null && s.risers.Count == pts.Count - 1 ? s.risers : DefaultRisers(pts, r.width, r.topY - r.bottomY);
+        var risers = s.risers != null && s.risers.Count == pts.Count - 1 ? s.risers : DefaultRisers(pts, r.width, r.topY - r.bottomY, tread);
         int total = Mathf.Max(1, risers.Sum());
         r.rise = (r.topY - r.bottomY) / total;
 
+        // Every step is exactly 'tread' deep: a flight takes risers x tread of its leg. A longer leg gets a flat
+        // stretch - after the steps (it widens the landing they arrive at), but before them on the last flight
+        // (the steps end at the top floor). A leg too short for its steps pushes everything after it along.
         float w = r.width, y = r.bottomY;
         int k = pts.Count - 2;
+        Vector3 shift = Vector3.zero;
+        var moved = new List<Vector3> { pts[0] };
         for (int i = 0; i + 1 < pts.Count; i++)
         {
             Vector3 dir = Flat(pts[i + 1] - pts[i]).normalized;
-            Vector3 start = pts[i] + (i > 0 ? dir * (w / 2f) : Vector3.zero);
-            Vector3 end = pts[i + 1] - (i < k ? dir * (w / 2f) : Vector3.zero);
-            if (Vector3.Dot(end - start, dir) < 0f) end = start;
-            r.flights.Add((start, end, dir, risers[i], y));
-            AddRect(r.footprint, start, end, dir, w);
-            y += risers[i] * r.rise;
+            Vector3 a = pts[i] + shift + (i > 0 ? dir * (w / 2f) : Vector3.zero);
+            Vector3 b = pts[i + 1] + shift - (i < k ? dir * (w / 2f) : Vector3.zero);
+            float leg = Mathf.Max(0f, Vector3.Dot(b - a, dir));
+            int n = risers[i];
+            float steps = n * tread;
+            if (steps > leg) { shift += dir * (steps - leg); leg = steps; b = a + dir * leg; }
+            bool last = i == k;
+            Vector3 s0 = last ? b - dir * steps : a, s1 = s0 + dir * steps;
+            float yTop = y + n * r.rise;
+            if (n > 0) r.flights.Add((s0, s1, dir, n, y));
+            if (leg - steps > 0.01f)
+            {
+                if (last) r.flats.Add((a, s0, dir, y));
+                else r.flats.Add((s1, b, dir, yTop));
+            }
+            AddRect(r.footprint, a, b, dir, w);
+            y = yTop;
+            Vector3 c = pts[i + 1] + shift;
+            moved.Add(c);
             if (i < k)
             {
-                r.landings.Add((pts[i + 1], dir, y));
-                Vector3 c = pts[i + 1];
+                r.landings.Add((c, dir, y));
                 AddRect(r.footprint, c - dir * (w / 2f), c + dir * (w / 2f), dir, w);
             }
         }
+        r.points = moved;
         return r;
     }
 
@@ -156,6 +200,14 @@ public static class StairGeometry
                 Vector3 c = start + dir * (tread * (s + 0.5f));
                 parts.Add(Box("STAIR_STEP", new Vector3(c.x, top - h / 2f, c.z), rot, new Vector3(r.width, h, tread), yaw, center));
             }
+        }
+        foreach (var (a, b, dir, y) in r.flats)
+        {
+            float len = Vector3.Dot(b - a, dir);
+            if (len < 0.01f) continue;
+            Vector3 mid = (a + b) / 2f;
+            parts.Add(Box("STAIR_LANDING", new Vector3(mid.x, y - landingThickness / 2f, mid.z), Quaternion.LookRotation(dir, Vector3.up),
+                new Vector3(r.width, landingThickness, len), yaw, center));
         }
         foreach (var (c, dir, y) in r.landings)
             parts.Add(Box("STAIR_LANDING", new Vector3(c.x, y - landingThickness / 2f, c.z), Quaternion.LookRotation(dir, Vector3.up),

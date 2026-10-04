@@ -15,8 +15,11 @@ using Meta.XR.MRUtilityKit;
 ///  3. point along the stairs to where this flight ends (works through walls - the point is the closest one on the
 ///     flight's own axis to your ray) and pull the trigger;
 ///  4. on the panel: landing + turn left / turn right (then step 3 again for the next flight), or Finish.
-/// A live 3D ghost shows the stair at its real heights all the way. Afterwards the panel adjusts the width and the
-/// steps per flight (the rise per step follows from the floor-to-floor height). Trigger on a stair selects it.
+/// Or, right after step 2: "U stair" builds 3 steps, landing, turn, the rest, landing, turn, 3 steps in one go.
+/// A live 3D ghost shows the stair at its real heights all the way. Every step is the same depth (tread, 28 cm by
+/// default) and the same height (floor-to-floor / ~17.5 cm): a flight is exactly its steps long, anything left of
+/// its leg is flat landing. Afterwards the panel adjusts the width, the step depth and the steps per flight (moving
+/// a step between flights keeps the total, so the step height stays). Trigger on a stair selects it.
 /// </summary>
 public class StairEditTool : MonoBehaviour
 {
@@ -390,7 +393,7 @@ public class StairEditTool : MonoBehaviour
 
     static StairEdit Clone(StairEdit s) => new StairEdit
     {
-        id = s.id, roomUuid = s.roomUuid, width = s.width,
+        id = s.id, roomUuid = s.roomUuid, width = s.width, tread = s.tread,
         localPoints = s.localPoints.Select(p => new Vector3Data(new Vector3(p.x, p.y, p.z))).ToList(),
         risers = new List<int>(s.risers ?? new List<int>()),
     };
@@ -403,7 +406,7 @@ public class StairEditTool : MonoBehaviour
         {
             var s = e.stairs.FirstOrDefault(x => x.id == id);
             if (s == null) return;
-            s.width = p.width; s.localPoints = p.localPoints; s.risers = p.risers;
+            s.width = p.width; s.tread = p.tread; s.localPoints = p.localPoints; s.risers = p.risers;
         });
     }
 
@@ -454,6 +457,13 @@ public class StairEditTool : MonoBehaviour
             Vector3 side = Vector3.Cross(Vector3.up, dir) * (r.width / 2f);
             line.Clear();
             line.Add(At(start - side, y0)); line.Add(At(end - side, y1)); line.Add(At(end + side, y1)); line.Add(At(start + side, y0));
+            Emit(c, true);
+        }
+        foreach (var (a, b, dir, y) in r.flats)
+        {
+            Vector3 side = Vector3.Cross(Vector3.up, dir) * (r.width / 2f);
+            line.Clear();
+            line.Add(At(a - side, y)); line.Add(At(b - side, y)); line.Add(At(b + side, y)); line.Add(At(a + side, y));
             Emit(c, true);
         }
         foreach (var (center, dir, y) in r.landings)
@@ -564,7 +574,7 @@ public class StairEditTool : MonoBehaviour
             : HouseEditsStore.Current.stairs.FirstOrDefault(s => s.id == selectedId);
         if (state == State.Adjusting && sel == null) return;
         int flights = sel != null ? Mathf.Max(0, sel.localPoints.Count - 1) : 0;
-        float ph = Placing ? 60 + 76 + (RowH + Gap) * 2 + 20 : 60 + 50 + 64 + (RowH + Gap) * (2 + flights) + 20;
+        float ph = Placing ? 60 + 76 + (RowH + Gap) * 2 + 20 : 60 + 50 + 64 + (RowH + Gap) * (4 + flights) + 20;
 
         panel = XRUi.CreateWorldCanvas("StairEditPanel", new Vector2(PW, ph), PScale);
         var t = panel.transform;
@@ -594,7 +604,9 @@ public class StairEditTool : MonoBehaviour
             {
                 State.Corner1 => "Trigger on the floor at ONE corner of the bottom step. Next to a wall it snaps onto the wall and the stairs will run along it.",
                 State.Corner2 => "Trigger at the OTHER corner - sets the width (stops on the opposite wall if there is one). The stairs run away from you.",
-                State.FlightEnd => "Point along the stairs to the top of this flight (works through walls) and pull the trigger.",
+                State.FlightEnd => pts.Count == 1
+                    ? "Point along the stairs to the end of this flight and pull the trigger - or build a whole U stair (3 steps, landing, turn, the rest, landing, turn, 3 steps)."
+                    : "Point along the stairs to the end of this flight (works through walls) and pull the trigger.",
                 _ => "Add a landing turning left or right (it snaps against a wall right behind it), or finish here if this is the top.",
             };
             XRUi.CreateText(t, "Title", title, 22, TextAlignmentOptions.MidlineLeft, x0, y, fullW, 44, XRUi.TextColor, FontStyles.Bold);
@@ -609,9 +621,15 @@ public class StairEditTool : MonoBehaviour
                 var fin = XRUi.CreateButton(t, "Finish here", x0 + (bw + Gap) * 2, y, bw, RowH, Finish, 20);
                 XRUi.SetTint(fin, XRUi.ButtonOnColor);
             }
+            else if (state == State.FlightEnd && pts.Count == 1)
+            {
+                // the whole U-shaped stair at once: 3 steps, landing, turn, the rest, landing, same turn, 3 steps
+                float bw = (fullW - Gap) / 2f;
+                XRUi.CreateButton(t, "U stair, turning left", x0, y, bw, RowH, () => UStair(-1), 19);
+                XRUi.CreateButton(t, "U stair, turning right", x0 + bw + Gap, y, bw, RowH, () => UStair(+1), 19);
+            }
             else if (state == State.FlightEnd && hover.HasValue)
             {
-                float len = Vector3.Distance(axisStart, hover.Value);
                 XRUi.CreateText(t, "Len", $"Width {width:0.00} m", 20, TextAlignmentOptions.MidlineLeft, x0, y, fullW, RowH, XRUi.TextColor);
             }
             y += RowH + Gap;
@@ -622,20 +640,21 @@ public class StairEditTool : MonoBehaviour
         }
 
         var r = StairGeometry.Resolve(sel, rooms);
-        string info = r != null ? $"{sel.risers.Sum()} steps x {r.rise * 100f:0.0} cm = {r.topY - r.bottomY:0.00} m" : "";
+        string info = r != null ? $"{sel.risers.Sum()} steps x {r.rise * 100f:0.0} cm = {r.topY - r.bottomY:0.00} m, {Mathf.Atan2(r.rise, r.tread) * Mathf.Rad2Deg:0} deg" : "";
         XRUi.CreateText(t, "Title", $"Stair  {info}", 22, TextAlignmentOptions.MidlineLeft, x0, y, fullW, 44, XRUi.TextColor, FontStyles.Bold);
         y += 52;
         XRUi.CreateText(t, "Sticks", "Hold LEFT grip:  left stick up/down = length of the white flight, sideways = width.  " +
-                        "Right stick up/down = steps (steeper / shallower), sideways = next flight.", 17, TextAlignmentOptions.TopLeft, x0, y, fullW, 58, XRUi.MutedText);
+                        "Right stick up/down = one step more/less here (taken from / given to the longest other flight), sideways = next flight.", 17, TextAlignmentOptions.TopLeft, x0, y, fullW, 58, XRUi.MutedText);
         y += 64;
         WidthRow(t, ref y, sel.width, d => Change(s => s.width = Mathf.Clamp(s.width + d, 0.6f, 2.0f)));
-        var lens = r != null ? StairGeometry.FlightLengths(r.points, r.width) : null;
+        float tr = StairGeometry.TreadOf(sel);
+        ValueRow(t, ref y, $"Step depth {tr * 100f:0} cm", d => Change(s => s.tread = Mathf.Clamp(StairGeometry.TreadOf(s) + d * 0.01f, 0.20f, 0.40f)));
+        ValueRow(t, ref y, $"All steps {sel.risers.Sum()} ({(r != null ? r.rise * 100f : 0f):0.0} cm high)", d => Change(s => SetTotal(s, d)));
         for (int i = 0; i < flights; i++)
         {
             int fi = i;
             int n = i < sel.risers.Count ? sel.risers[i] : 0;
-            string tread = lens != null && n > 0
-                ? $"  {lens[i]:0.00} m, tread {lens[i] / n * 100f:0} cm, {Mathf.Atan2(n * r.rise, lens[i]) * Mathf.Rad2Deg:0} deg" : "";
+            string tread = n > 0 ? $"  {n * tr:0.00} m long" : "  (flat)";
             XRUi.CreateText(t, "Flight" + i, $"{(i == selFlight ? "> " : "")}Flight {i + 1}: {n} steps{tread}", 19,
                             TextAlignmentOptions.MidlineLeft, x0, y, 430, RowH, i == selFlight ? Color.white : XRUi.TextColor);
             XRUi.CreateButton(t, "-", PW - 20 - 2 * 90 - Gap, y, 90, RowH, () => Change(s => SetRisers(s, fi, -1)), 30);
@@ -657,11 +676,62 @@ public class StairEditTool : MonoBehaviour
         y += RowH + Gap;
     }
 
+    void ValueRow(Transform t, ref float y, string label, Action<int> change)
+    {
+        XRUi.CreateText(t, "Value", label, 20, TextAlignmentOptions.MidlineLeft, 20, y, 400, RowH, XRUi.TextColor);
+        XRUi.CreateButton(t, "-", PW - 20 - 2 * 90 - Gap, y, 90, RowH, () => change(-1), 30);
+        XRUi.CreateButton(t, "+", PW - 20 - 90, y, 90, RowH, () => change(+1), 30);
+        y += RowH + Gap;
+    }
+
+    /// <summary>One step more/less on this flight, taken from / given to the other flight with the most steps -
+    /// the total (and so the step height) stays. A single flight just changes the total.</summary>
     static void SetRisers(StairEdit s, int flight, int delta)
     {
         while (s.risers.Count < s.localPoints.Count - 1) s.risers.Add(0);
-        s.risers[flight] = Mathf.Max(0, s.risers[flight] + delta);
-        if (s.risers.Sum() == 0) s.risers[flight] = 1;
+        if (s.risers.Count <= 1) { s.risers[flight] = Mathf.Max(1, s.risers[flight] + delta); return; }
+        int target = s.risers[flight] + delta;
+        if (target < 0) return;
+        int other = -1;
+        for (int j = 0; j < s.risers.Count; j++)
+            if (j != flight && (delta < 0 || s.risers[j] > 0) && (other < 0 || s.risers[j] > s.risers[other])) other = j;
+        if (other < 0) return;
+        s.risers[flight] = target;
+        s.risers[other] -= delta;
+    }
+
+    /// <summary>All steps one more/less (lower/higher steps): the flight with the most steps takes it.</summary>
+    static void SetTotal(StairEdit s, int delta)
+    {
+        while (s.risers.Count < s.localPoints.Count - 1) s.risers.Add(0);
+        if (s.risers.Count == 0) return;
+        int big = s.risers.IndexOf(s.risers.Max());
+        s.risers[big] = Mathf.Max(0, s.risers[big] + delta);
+        if (s.risers.Sum() == 0) s.risers[big] = 1;
+    }
+
+    /// <summary>Builds and saves a whole U-shaped stair from the bottom step placed in steps 1-2.</summary>
+    async void UStair(int side)
+    {
+        if (pts.Count != 1 || dirs.Count != 1) return;
+        float rise = StairGeometry.TopFloorY(rooms, pts[0].y) - pts[0].y;
+        var (all, risers) = StairGeometry.UShape(pts[0], dirs[0], width, rise, 3, 3, side);
+        var room = DoorCatalog.FindRoomAt(rooms, all[0] + Vector3.up * 0.05f);
+        var s = new StairEdit
+        {
+            id = Guid.NewGuid().ToString("N"),
+            roomUuid = DoorCatalog.RoomId(room),
+            width = width,
+            localPoints = all.Select(p => new Vector3Data(room != null ? room.transform.InverseTransformPoint(p) : p)).ToList(),
+            risers = risers,
+        };
+        if (await editMode.Commit(e => e.stairs.Add(s)))
+        {
+            pts.Clear(); dirs.Clear();
+            selectedId = s.id; state = State.Adjusting; selFlight = 1;
+            uiLog?.AddLog($"U stair added: {risers[0]} + {risers[1]} + {risers[2]} steps over {rise:0.00} m. Move steps between flights with +/-.");
+            RebuildPanel();
+        }
     }
 
     void CancelPlacing()

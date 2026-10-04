@@ -48,6 +48,9 @@ public class StairEdit
     public string roomUuid;
     public List<Vector3Data> localPoints = new List<Vector3Data>();
     public float width = 1.0f;
+    /// <summary>Step depth (going) in metres; 0 = StairGeometry.DefaultTread. A flight's steps take exactly
+    /// risers x tread - whatever is left of its leg is flat landing, never stretched steps.</summary>
+    public float tread;
     /// <summary>Risers per flight (points.Count - 1 flights). The rise per step is the floor-to-floor height
     /// divided by their sum, so the landings' heights follow from these counts.</summary>
     public List<int> risers = new List<int>();
