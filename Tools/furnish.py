@@ -156,6 +156,10 @@ MATERIALS = {
     'oak':     ([0.68, 0.56, 0.44, 1.0], 0.0, 0.60, None),
     'steel':   ([0.74, 0.75, 0.77, 1.0], 1.0, 0.25, None),
     'gap':     ([0.35, 0.36, 0.38, 1.0], 0.0, 0.60, None),
+    'plaster': ([0.93, 0.92, 0.90, 1.0], 0.0, 0.80, None),
+    'stone':   ([0.30, 0.30, 0.32, 1.0], 0.0, 0.50, None),
+    'fire':    ([1.00, 0.42, 0.05, 1.0], 0.0, 0.50, None),
+    'ember':   ([1.00, 0.75, 0.10, 1.0], 0.0, 0.50, None),
 }
 
 DEFAULTS = {  # w, d, h
@@ -166,6 +170,8 @@ DEFAULTS = {  # w, d, h
     # wall units ("glass": true = glazed), tall units (oven/microwave/fridge), free-standing island (use x/z)
     'kitchen_base': (1.20, 0.60, 0.90), 'kitchen_wall': (1.20, 0.35, 0.72),
     'kitchen_tall': (0.60, 0.60, 2.15), 'island': (1.30, 0.80, 0.90),
+    # corner fireplace: glazed front + "glass_side"; "h": "ceiling" uses "h_fallback" here (the app measures it)
+    'fireplace': (0.90, 0.60, 2.20),
 }
 
 
@@ -223,6 +229,24 @@ def shape(item, w, d, h):
     t = item['type']; B = []
     if t in ('kitchen_base', 'kitchen_wall', 'kitchen_tall', 'island'):
         return _kitchen(item, t, w, d, h)
+    if t == 'fireplace':
+        left = item.get('glass_side', 'left') == 'left'
+        fb0, fb1, back, cheek, gl = 0.42, 1.02, 0.16, 0.10, 0.008
+        g0, g1 = (0.0, w - cheek) if left else (cheek, w)
+        c0, c1 = g0 + (g1 - g0) * 0.25, g0 + (g1 - g0) * 0.75
+        B += [('stone', (0, w, 0, d, 0, fb0 - 0.05)),
+              ('stone', (-0.03 if left else 0, w if left else w + 0.03, 0, d + 0.03, fb0 - 0.05, fb0)),
+              ('dark', (0, w, 0, back, fb0, fb1)),
+              ('plaster', (w - cheek if left else 0, w if left else cheek, 0, d, fb0, fb1)),
+              ('wood', (c0, c1, back + 0.10, back + 0.20, fb0, fb0 + 0.07)),
+              ('fire', (c0 + 0.04, c1 - 0.04, back + 0.11, back + 0.19, fb0 + 0.07, fb0 + 0.24)),
+              ('ember', (c0 + 0.12, c1 - 0.12, back + 0.13, back + 0.17, fb0 + 0.24, fb0 + 0.34)),
+              ('glass', (g0, g1, d - gl, d, fb0, fb1)),
+              ('glass', (0, gl, back, d, fb0, fb1) if left else (w - gl, w, back, d, fb0, fb1)),
+              ('dark', (0, 0.02, d - 0.02, d, fb0, fb1) if left else (w - 0.02, w, d - 0.02, d, fb0, fb1)),
+              ('dark', (0, w, 0, d, fb1, fb1 + 0.04)),
+              ('plaster', (0, w, 0, d, fb1 + 0.04, h))]
+        return B, item.get('y', 0.0)
     if t == 'bathtub':
         r = 0.07  # rim thickness
         B += [('tiles', (0, w, 0, d, 0, h - 0.02)),                                   # tiled front/side panel block
@@ -238,7 +262,14 @@ def shape(item, w, d, h):
             # that side: from the left end for "front", from the wall for "left"/"right")
             sd = side if isinstance(side, dict) else {'side': side}
             a0 = sd.get('from', 0.0)
-            if sd['side'] == 'front': B.append(('glass', (a0, sd.get('to', w), d - g, d, tray, h)))
+            if sd['side'] == 'front' and sd.get('sliding'):
+                # fixed panel on the outer track, sliding panel on the inner track, top rail, handle at the open end
+                a1 = sd.get('to', w); mid = (a0 + a1) / 2; rail = 0.03
+                B += [('glass', (a0, mid + 0.05, d - g, d, tray, h - rail)),
+                      ('glass', (mid - 0.05, a1, d - 2 * g - 0.012, d - g - 0.012, tray, h - rail)),
+                      ('chrome', (a0, a1, d - 0.04, d, h - rail, h)),
+                      ('chrome', (a1 - 0.10, a1 - 0.08, d - g - 0.012, d + 0.02, 0.95, 1.25))]
+            elif sd['side'] == 'front': B.append(('glass', (a0, sd.get('to', w), d - g, d, tray, h)))
             elif sd['side'] == 'left': B.append(('glass', (0, g, a0, sd.get('to', d), tray, h)))
             elif sd['side'] == 'right': B.append(('glass', (w - g, w, a0, sd.get('to', d), tray, h)))
         B.append(('chrome', (w / 2 - 0.08, w / 2 + 0.08, 0.0, 0.25, h - 0.02, h)))      # rain head
@@ -258,7 +289,7 @@ def shape(item, w, d, h):
                       ('chrome', (c - 0.02, c + 0.02, 0.03, 0.15, top, top + 0.18))]
         if item.get('mirror'):
             mw = item.get('mirror_w', w); m0 = item.get('mirror_y', top + 0.25)
-            B.append(('mirror', ((w - mw) / 2, (w + mw) / 2, 0, 0.02, m0, m0 + item.get('mirror_h', 0.80))))
+            mo = item.get('mirror_off', 0.0); B.append(('mirror', ((w - mw) / 2, (w + mw) / 2, mo, mo + 0.02, m0, m0 + item.get('mirror_h', 0.80))))
     elif t == 'wc':
         pre = item.get('prewall', 0.20)
         if pre > 0: B.append(('tiles', (-0.10, w + 0.10, 0, pre, 0, h)))
@@ -275,7 +306,7 @@ def shape(item, w, d, h):
         B += [('chrome', (0, 0.03, 0.02, d, y0, y0 + h)), ('chrome', (w - 0.03, w, 0.02, d, y0, y0 + h))]
         return B, 0.0
     elif t == 'mirror':
-        y0 = item.get('y', 1.10); B.append(('mirror', (0, w, 0, d, y0, y0 + h))); return B, 0.0
+        y0 = item.get('y', 1.10); mo = item.get('mirror_off', 0.0); B.append(('mirror', (0, w, mo, mo + d, y0, y0 + h))); return B, 0.0
     elif t == 'cabinet':
         y0 = item.get('y', 1.40); B.append(('wood', (0, w, 0, d, y0, y0 + h))); return B, 0.0
     else:  # box: "color" is a material name (wood, ceramic, tiles, ...) or "#rrggbb"
@@ -333,6 +364,8 @@ def furnish(js, binc, rooms, spec):
             if t not in DEFAULTS: raise SystemExit(f'unknown type {t!r} (known: {", ".join(DEFAULTS)})')
             dw, dd, dh = DEFAULTS[t]
             w, d, h = item.get('w', dw), item.get('d', dd), item.get('h', dh)
+            if h == 'ceiling':  # the app measures the room's ceiling; the export has no ceiling data here
+                h = item.get('h_fallback', 2.6)
             boxes, lift = shape(item, w, d, h)
             to_xz = place(room, item, w, d)
             by_mat, rect = {}, None
@@ -396,7 +429,7 @@ def svg_room(path, rname, room, items):
           f'<text x="{W / 2:.0f}" y="{Z(room["zmax"]) + 18:.0f}" text-anchor="middle" fill="#c00">+z</text>',
           f'<text x="{X(room["xmin"]) - 6:.0f}" y="{H / 2:.0f}" text-anchor="end" fill="#c00">-x</text>',
           f'<text x="{X(room["xmax"]) + 6:.0f}" y="{H / 2:.0f}" fill="#c00">+x ({d_:.2f} m)</text>',
-          f'<text x="8" y="{H + 28:.0f}">{rname}: floor {room["area"]:.1f} m², brown = door, blue = window</text>', '</svg>']
+          f'<text x="8" y="{H + 28:.0f}">{rname}: floor {room["area"]:.1f} mĂ‚Ë›, brown = door, blue = window</text>', '</svg>']
     open(path, 'w', encoding='utf-8').write('\n'.join(o))
 
 # --------------------------------------------------------------------------------------------------------------- main

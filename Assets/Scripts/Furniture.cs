@@ -31,7 +31,10 @@ public static class Furniture
     {
         { "ceramic", new Color(0.96f, 0.96f, 0.95f) }, { "water", new Color(0.80f, 0.86f, 0.90f) },
         { "glass", new Color(0.70f, 0.85f, 0.95f, 0.30f) }, { "wood", new Color(0.62f, 0.48f, 0.34f) },
-        { "mirror", new Color(0.85f, 0.90f, 0.95f) }, { "chrome", new Color(0.80f, 0.80f, 0.82f) },
+        { "mirror", new Color(0.62f, 0.69f, 0.76f) }, { "sheen", new Color(0.86f, 0.90f, 0.94f) },
+        { "chrome", new Color(0.80f, 0.80f, 0.82f) }, { "plaster", new Color(0.93f, 0.92f, 0.90f) },
+        { "stone", new Color(0.30f, 0.30f, 0.32f) }, { "fire", new Color(1.00f, 0.42f, 0.05f) },
+        { "ember", new Color(1.00f, 0.75f, 0.10f) },
         { "tiles", new Color(0.88f, 0.88f, 0.86f) }, { "dark", new Color(0.25f, 0.25f, 0.27f) },
         { "fronts", new Color(0.66f, 0.68f, 0.70f) }, { "oak", new Color(0.68f, 0.56f, 0.44f) },
         { "steel", new Color(0.74f, 0.75f, 0.77f) }, { "gap", new Color(0.35f, 0.36f, 0.38f) },
@@ -46,6 +49,9 @@ public static class Furniture
         // (oven/microwave/fridge), a free-standing island (place it with "x"/"z").
         { "kitchen_base", (1.20f, 0.60f, 0.90f) }, { "kitchen_wall", (1.20f, 0.35f, 0.72f) },
         { "kitchen_tall", (0.60f, 0.60f, 2.15f) }, { "island", (1.30f, 0.80f, 0.90f) },
+        // Corner fireplace: stone base, firebox glazed on the front and on "glass_side" (left/right), plastered
+        // cladding up to h ("h": "ceiling" = up to the room's ceiling, also for a "box" like a chimney).
+        { "fireplace", (0.90f, 0.60f, 2.20f) },
     };
 
     /// <summary>Glass parts are named so the viewer can make them see-through.</summary>
@@ -74,9 +80,19 @@ public static class Furniture
                 k++;
                 string type = (string)item["type"] ?? "box";
                 if (!Defaults.TryGetValue(type, out var def)) { Debug.LogWarning($"[Furniture] unknown type '{type}'"); continue; }
-                float w = F(item, "w", def.w), d = F(item, "d", def.d), h = F(item, "h", def.h);
-                var boxes = Shape(item, type, w, d, h, out float lift);
+                float w = F(item, "w", def.w), d = F(item, "d", def.d);
                 var toXZ = Place(box, item);
+                float h;
+                if (item["h"]?.Type == JTokenType.String && (string)item["h"] == "ceiling")
+                {
+                    // up to the ceiling above the item's middle (ceilings can slope), minus its own lift
+                    var (cx, cz) = toXZ(w / 2f, d / 2f);
+                    Vector3 world = Quaternion.Inverse(g) * new Vector3(cx, box.y, -cz) + center;
+                    float ceil = XRModelFactory.SampleCeilingHeight(room.CeilingAnchors, world, world.y + 2.6f) - center.y;
+                    h = Mathf.Max(0.1f, ceil - box.y - F(item, "y", 0f));
+                }
+                else h = F(item, "h", def.h);
+                var boxes = Shape(item, type, w, d, h, out float lift);
                 foreach (var (mat, u0, u1, v0, v1, y0, y1) in boxes)
                 {
                     var (xa, za) = toXZ(u0, v0);
@@ -137,7 +153,18 @@ public static class Furniture
                 {
                     string s = side.Type == JTokenType.String ? (string)side : (string)side["side"];
                     float a0 = side.Type == JTokenType.Object ? F((JObject)side, "from", 0f) : 0f;
-                    if (s == "front") B.Add(("glass", a0, side.Type == JTokenType.Object ? F((JObject)side, "to", w) : w, d - gl, d, tray, h));
+                    bool sliding = side.Type == JTokenType.Object && side["sliding"] != null && (bool)side["sliding"];
+                    if (s == "front" && sliding)
+                    {
+                        // fixed panel on the outer track from the wall end, sliding panel on the inner track
+                        // (opens towards u=0 over the fixed one), top rail, handle at the open end
+                        float a1 = F((JObject)side, "to", w), mid = (a0 + a1) / 2f, rail = 0.03f;
+                        B.Add(("glass", a0, mid + 0.05f, d - gl, d, tray, h - rail));
+                        B.Add(("glass", mid - 0.05f, a1, d - 2 * gl - 0.012f, d - gl - 0.012f, tray, h - rail));
+                        B.Add(("chrome", a0, a1, d - 0.04f, d, h - rail, h));
+                        B.Add(("chrome", a1 - 0.10f, a1 - 0.08f, d - gl - 0.012f, d + 0.02f, 0.95f, 1.25f));
+                    }
+                    else if (s == "front") B.Add(("glass", a0, side.Type == JTokenType.Object ? F((JObject)side, "to", w) : w, d - gl, d, tray, h));
                     else if (s == "left") B.Add(("glass", 0, gl, a0, side.Type == JTokenType.Object ? F((JObject)side, "to", d) : d, tray, h));
                     else if (s == "right") B.Add(("glass", w - gl, w, a0, side.Type == JTokenType.Object ? F((JObject)side, "to", d) : d, tray, h));
                 }
@@ -169,7 +196,7 @@ public static class Furniture
                 if (item["mirror"] != null && (bool)item["mirror"])
                 {
                     float mw = F(item, "mirror_w", w), m0 = F(item, "mirror_y", top + 0.25f);
-                    B.Add(("mirror", (w - mw) / 2, (w + mw) / 2, 0, 0.02f, m0, m0 + F(item, "mirror_h", 0.80f)));
+                    Mirror(B, (w - mw) / 2, (w + mw) / 2, m0, m0 + F(item, "mirror_h", 0.80f), F(item, "mirror_off", 0.05f));
                 }
                 break;
             }
@@ -193,7 +220,28 @@ public static class Furniture
                 lift = 0f;
                 break;
             }
-            case "mirror": { float y0 = F(item, "y", 1.10f); B.Add(("mirror", 0, w, 0, d, y0, y0 + h)); lift = 0f; break; }
+            case "mirror": { float y0 = F(item, "y", 1.10f); Mirror(B, 0, w, y0, y0 + h, F(item, "mirror_off", 0.05f)); lift = 0f; break; }
+            case "fireplace":
+            {
+                // u=0..w along the wall, the glazed side is open, the other side meets the chimney/wall
+                bool left = ((string)item["glass_side"] ?? "left") == "left";
+                float fb0 = 0.42f, fb1 = 1.02f, back = 0.16f, cheek = 0.10f, gl = 0.008f;
+                float g0 = left ? 0f : cheek, g1 = left ? w - cheek : w;                // glazed span along u
+                B.Add(("stone", 0, w, 0, d, 0, fb0 - 0.05f));                                       // base
+                B.Add(("stone", left ? -0.03f : 0, left ? w : w + 0.03f, 0, d + 0.03f, fb0 - 0.05f, fb0)); // ledge
+                B.Add(("dark", 0, w, 0, back, fb0, fb1));                                             // firebox back
+                B.Add(("plaster", left ? w - cheek : 0, left ? w : cheek, 0, d, fb0, fb1));           // closed side
+                float c0 = g0 + (g1 - g0) * 0.25f, c1 = g0 + (g1 - g0) * 0.75f;
+                B.Add(("wood", c0, c1, back + 0.10f, back + 0.20f, fb0, fb0 + 0.07f));                // logs
+                B.Add(("fire", c0 + 0.04f, c1 - 0.04f, back + 0.11f, back + 0.19f, fb0 + 0.07f, fb0 + 0.24f));
+                B.Add(("ember", c0 + 0.12f, c1 - 0.12f, back + 0.13f, back + 0.17f, fb0 + 0.24f, fb0 + 0.34f));
+                B.Add(("glass", g0, g1, d - gl, d, fb0, fb1));                                        // front glass
+                if (left) B.Add(("glass", 0, gl, back, d, fb0, fb1)); else B.Add(("glass", w - gl, w, back, d, fb0, fb1));
+                B.Add(("dark", left ? 0 : w - 0.02f, left ? 0.02f : w, d - 0.02f, d, fb0, fb1));      // corner post
+                B.Add(("dark", 0, w, 0, d, fb1, fb1 + 0.04f));                                        // frame band
+                B.Add(("plaster", 0, w, 0, d, fb1 + 0.04f, h));                                       // cladding
+                break;
+            }
             case "cabinet": { float y0 = F(item, "y", 1.40f); B.Add(("wood", 0, w, 0, d, y0, y0 + h)); lift = 0f; break; }
             case "kitchen_base":
             {
@@ -269,6 +317,20 @@ public static class Furniture
         if (item[key] is not JArray r || r.Count < 2) return false;
         a = (float)r[0]; b = (float)r[1];
         return b > a;
+    }
+
+    /// <summary>A wall mirror: thin dark frame, silvery-blue glass and two light streaks, so it reads as a mirror
+    /// against a white wall (the walk-through has no reflections).</summary>
+    static void Mirror(List<(string, float, float, float, float, float, float)> B, float u0, float u1, float y0, float y1, float v = 0.05f)
+    {
+        // the floor rectangle's edge can sit a few cm inside the drawn wall (a neighbour room's wall may even
+        // overlap it), so stand the mirror off it by v ("mirror_off")
+        const float f = 0.015f;
+        float w = u1 - u0;
+        B.Add(("dark", u0, u1, 0, v + 0.015f, y0, y1));
+        B.Add(("mirror", u0 + f, u1 - f, v, v + 0.02f, y0 + f, y1 - f));
+        B.Add(("sheen", u0 + w * 0.16f, u0 + w * 0.20f, v + 0.02f, v + 0.021f, y0 + 0.06f, y1 - 0.06f));
+        B.Add(("sheen", u0 + w * 0.24f, u0 + w * 0.255f, v + 0.02f, v + 0.021f, y0 + 0.06f, y1 - 0.06f));
     }
 
     /// <summary>Thin dark lines on a run's front face every ~unit wide (door/drawer gaps).</summary>
