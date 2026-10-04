@@ -136,6 +136,18 @@ public static class DesktopBuildTools
     {
         // Marker for the Quest build (MRUKEditorTools.BuildInternal refuses to start meanwhile): both builds share
         // Assets, and this one briefly rewrites the XR settings while AR Foundation moves assets to Assets/XR/Temp.
+        // The running app locks its own files - the build would fail half-way through deleting them.
+        string exeName = Path.GetFileNameWithoutExtension(exe);
+        foreach (var running in Process.GetProcessesByName(exeName))
+        {
+            string path = null;
+            try { path = running.MainModule?.FileName; } catch { }
+            if (path == null || string.Equals(Path.GetFullPath(path), Path.GetFullPath(exe), StringComparison.OrdinalIgnoreCase))
+            {
+                Debug.LogError($"WINDOWS BUILD FAILED: {exe} is running - close it first.");
+                return false;
+            }
+        }
         string marker = Path.Combine(Path.GetDirectoryName(exe), MRUKPathUtility.DesktopBuildMarker);
         Directory.CreateDirectory(Path.GetDirectoryName(exe));
         File.WriteAllText(marker, DateTime.Now.ToString("s"));

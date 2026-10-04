@@ -152,17 +152,77 @@ MATERIALS = {
     'chrome':  ([0.80, 0.80, 0.82, 1.0], 1.0, 0.20, None),
     'tiles':   ([0.88, 0.88, 0.86, 1.0], 0.0, 0.40, None),
     'dark':    ([0.25, 0.25, 0.27, 1.0], 0.0, 0.50, None),
+    'fronts':  ([0.66, 0.68, 0.70, 1.0], 0.0, 0.40, None),
+    'oak':     ([0.68, 0.56, 0.44, 1.0], 0.0, 0.60, None),
+    'steel':   ([0.74, 0.75, 0.77, 1.0], 1.0, 0.25, None),
+    'gap':     ([0.35, 0.36, 0.38, 1.0], 0.0, 0.60, None),
 }
 
 DEFAULTS = {  # w, d, h
     'bathtub': (1.70, 0.75, 0.58), 'shower': (0.90, 0.90, 2.00), 'washbasin': (0.80, 0.48, 0.85),
     'wc': (0.40, 0.56, 1.15), 'washer': (0.60, 0.60, 0.85), 'radiator': (0.50, 0.10, 1.20),
     'mirror': (0.80, 0.02, 0.80), 'cabinet': (0.60, 0.20, 0.70), 'box': (0.60, 0.60, 0.85),
+    # kitchen (keep in step with Furniture.cs): base run with worktop (sink/hob/dishwasher as [from, to] along it),
+    # wall units ("glass": true = glazed), tall units (oven/microwave/fridge), free-standing island (use x/z)
+    'kitchen_base': (1.20, 0.60, 0.90), 'kitchen_wall': (1.20, 0.35, 0.72),
+    'kitchen_tall': (0.60, 0.60, 2.15), 'island': (1.30, 0.80, 0.90),
 }
+
+
+def _doors(B, w, d, y0, y1, unit=0.6):
+    """Thin dark lines on a run's front face every ~unit wide (door/drawer gaps)."""
+    n = max(1, round(w / unit))
+    for k in range(1, n):
+        u = w * k / n
+        B.append(('gap', (u - 0.002, u + 0.002, d, d + 0.003, y0 + 0.01, y1 - 0.01)))
+
+
+def _kitchen(item, t, w, d, h):
+    B = []
+    fr = item.get('color', 'fronts')
+    if t == 'kitchen_base':
+        top = item.get('top', 'oak'); plinth = 0.10; wt = 0.04
+        B += [('dark', (0, w, 0, d - 0.06, 0, plinth)), (fr, (0, w, 0, d - 0.02, plinth, h - wt)),
+              (top, (0, w, 0, d + 0.02, h - wt, h))]
+        _doors(B, w, d - 0.02, plinth, h - wt)
+        if 'dishwasher' in item:
+            a0, a1 = item['dishwasher']; B.append(('steel', (a0 + 0.005, a1 - 0.005, d - 0.02, d - 0.01, plinth + 0.02, h - wt - 0.02)))
+        if 'sink' in item:
+            a0, a1 = item['sink']; tc = a0 + (a1 - a0) * 0.35
+            B += [('steel', (a0, a1, 0.08, d - 0.08, h - 0.002, h + 0.004)),
+                  ('water', (a0 + 0.04, a0 + (a1 - a0) * 0.62, 0.12, d - 0.12, h + 0.004, h + 0.006)),
+                  ('chrome', (tc - 0.02, tc + 0.02, 0.03, 0.07, h, h + 0.30)),
+                  ('chrome', (tc - 0.015, tc + 0.015, 0.05, 0.24, h + 0.27, h + 0.30))]
+        if 'hob' in item:
+            a0, a1 = item['hob']; B.append(('dark', (a0, a1, 0.05, d - 0.03, h, h + 0.006)))
+        return B, item.get('y', 0.0)
+    if t == 'kitchen_wall':
+        y0 = item.get('y', 1.45); glass = item.get('glass', False)
+        B.append((fr, (0, w, 0, d - (0.02 if glass else 0), y0, y0 + h)))
+        if glass: B.append(('glass', (0, w, d - 0.02, d, y0, y0 + h)))
+        else: _doors(B, w, d, y0, y0 + h)
+        return B, 0.0
+    if t == 'kitchen_tall':
+        B += [('dark', (0, w, 0, d - 0.06, 0, 0.10)), (fr, (0, w, 0, d, 0.10, h))]
+        if item.get('oven'):
+            B += [('steel', (0.03, w - 0.03, d, d + 0.01, 0.80, 1.40)), ('dark', (0.08, w - 0.08, d + 0.01, d + 0.012, 0.88, 1.28))]
+        if item.get('microwave'):
+            B += [('steel', (0.03, w - 0.03, d, d + 0.01, 1.45, 1.85)), ('dark', (0.06, w * 0.68, d + 0.01, d + 0.012, 1.50, 1.80))]
+        if item.get('fridge'):
+            B.append(('gap', (0, w, d, d + 0.004, 0.88, 0.90)))
+        B.append(('gap', (0, 0.004, d, d + 0.004, 0.10, h)))
+        return B, item.get('y', 0.0)
+    # island
+    side = 0.04; wt = 0.04
+    B += [('oak', (0, w, 0, d, h - wt, h)), ('oak', (0, side, 0, d, 0, h - wt)), ('oak', (w - side, w, 0, d, 0, h - wt)),
+          (fr, (side, w - side, 0.05, d - 0.05, 0.10, h - wt)), ('dark', (side, w - side, 0.10, d - 0.10, 0, 0.10))]
+    return B, item.get('y', 0.0)
 
 
 def shape(item, w, d, h):
     t = item['type']; B = []
+    if t in ('kitchen_base', 'kitchen_wall', 'kitchen_tall', 'island'):
+        return _kitchen(item, t, w, d, h)
     if t == 'bathtub':
         r = 0.07  # rim thickness
         B += [('tiles', (0, w, 0, d, 0, h - 0.02)),                                   # tiled front/side panel block

@@ -43,6 +43,8 @@ public partial class DesktopWalkApp
                     "stairs" => await TestStairs(outDir),
                     "fall" => await TestFall(outDir),
                     "holes" => await TestHoles(outDir),
+                    "doorinfo" => DumpDoors(),
+                    "roomplan" => DumpRoomPlan(Arg("-room")),
                     _ => false,
                 };
             }
@@ -82,6 +84,21 @@ public partial class DesktopWalkApp
     {
         var list = (Arg("-views") ?? "").Split(new[] { ';' }, StringSplitOptions.RemoveEmptyEntries);
         int i = 0;
+        // -glbviews "x,y,z,tx,tz,pitch;..." - the furniture spec's frame (GLB axes: model space, Z mirrored): stand at
+        // floor point (x,y,z), look towards (tx,tz).
+        if (Arg("-glbviews") != null && walk.TryGetModelFrame(out _, out float yw, out var ctr))
+        {
+            Quaternion gi = Quaternion.Inverse(Quaternion.Euler(0, yw, 0));
+            foreach (var v in Arg("-glbviews").Split(new[] { ';' }, StringSplitOptions.RemoveEmptyEntries))
+            {
+                var f = v.Split(',').Select(s => float.Parse(s.Trim(), CultureInfo.InvariantCulture)).ToArray();
+                Vector3 pos = gi * new Vector3(f[0], f[1], -f[2]) + ctr;
+                Vector3 dir = gi * new Vector3(f[3] - f[0], 0f, -(f[4] - f[2]));
+                await StandAt(pos, Yaw(dir), f.Length > 5 ? f[5] : 15f);
+                await Shot(Path.Combine(outDir, $"view_{i++}.png"));
+            }
+            return i > 0;
+        }
         foreach (var v in list)
         {
             var f = v.Split(',').Select(s => float.Parse(s.Trim(), CultureInfo.InvariantCulture)).ToArray();
@@ -175,6 +192,70 @@ public partial class DesktopWalkApp
         }
         finally { rig.ForcedMove = null; }
     }
+
+    /// <summary>Every doorway: its anchors (one per room that captured it), position, size, the edit it maps to, and
+    /// what each single anchor maps to on its own and whether it counts as walled up.</summary>
+    bool DumpDoors()
+    {
+        var all = MRUK.Instance.Rooms;
+        var rooms = Rooms();
+        var edits = HouseEditsStore.Current;
+        foreach (var d in DoorCatalog.Build(rooms).OrderBy(x => x.center.y).ThenBy(x => x.center.x))
+        {
+            var e = DoorCatalog.FindEdit(edits, d, rooms);
+            Debug.Log($"TEST doorway {d.uuid.Substring(0, 8)} {(d.isWindow ? "WINDOW" : "DOOR")} c=({d.center.x:0.00},{d.center.y:0.00},{d.center.z:0.00}) " +
+                      $"right=({d.right.x:0.00},{d.right.z:0.00}) w={d.width:0.00} h={d.height:0.00} anchors={d.anchors.Count} edit={(e != null ? e.kind + " " + Short(e.anchorUuid) : "-")} " +
+                      $"front={NameOf(d.roomFront)} back={NameOf(d.roomBack)}");
+            foreach (var a in d.anchors)
+            {
+                var ae = DoorCatalog.FindEdit(edits, a, all);
+                DoorCatalog.Frame(a, out var c, out _, out _, out float w, out float h);
+                Debug.Log($"TEST    anchor {a.Anchor.Uuid.ToString().Substring(0, 8)} room={NameOf(a.Room)} c=({c.x:0.00},{c.y:0.00},{c.z:0.00}) w={w:0.00} " +
+                          $"ownEdit={(ae != null ? ae.kind + " " + Short(ae.anchorUuid) : "-")} walledUp={DoorCatalog.IsWalledUp(a)}");
+            }
+        }
+        foreach (var e in edits.doors)
+            Debug.Log($"TEST edit {e.kind} anchor={Short(e.anchorUuid)} room={Short(e.roomUuid)} local=({e.localPos?.x:0.00},{e.localPos?.y:0.00},{e.localPos?.z:0.00})");
+        return true;
+    }
+
+    /// <summary>A room in the furniture spec's frame (GLB axes: model space, Z mirrored): its floor box, and every door
+    /// and window of it as wall side ("-x"/"+x"/"-z"/"+z") + "along" range + sill/top heights above the floor.</summary>
+    bool DumpRoomPlan(string key)
+    {
+        if (!walk.TryGetModelFrame(out _, out float yaw, out var center)) return false;
+        Quaternion g = Quaternion.Euler(0, yaw, 0);
+        var rooms = Rooms();
+        foreach (var room in rooms.Where(r => key == null || DoorCatalog.RoomId(r).StartsWith(key, StringComparison.OrdinalIgnoreCase)))
+        {
+            float xmin = float.MaxValue, xmax = float.MinValue, zmin = float.MaxValue, zmax = float.MinValue, y = float.MaxValue;
+            var poly = new List<string>();
+            foreach (var f in room.FloorAnchors)
+                foreach (var p2 in f.PlaneBoundary2D)
+                {
+                    Vector3 m = g * (f.transform.TransformPoint(new Vector3(p2.x, p2.y, 0f)) - center);
+                    xmin = Mathf.Min(xmin, m.x); xmax = Mathf.Max(xmax, m.x); zmin = Mathf.Min(zmin, -m.z); zmax = Mathf.Max(zmax, -m.z); y = Mathf.Min(y, m.y);
+                    poly.Add($"({m.x:0.00},{-m.z:0.00})");
+                }
+            Debug.Log($"TEST room {NameOf(room)}: x {xmin:0.00}..{xmax:0.00} ({xmax - xmin:0.00}) z {zmin:0.00}..{zmax:0.00} ({zmax - zmin:0.00}) floor y {y:0.00} poly {string.Join(" ", poly)}");
+            foreach (var d in DoorCatalog.Build(rooms).Where(d => d.anchors.Any(a => a.Room == room)))
+            {
+                Vector3 c = g * (d.center - center), r = g * d.right;
+                float cx = c.x, cz = -c.z;
+                string side = Mathf.Abs(r.x) > Mathf.Abs(r.z)
+                    ? (Mathf.Abs(cz - zmin) < Mathf.Abs(cz - zmax) ? "-z" : "+z")
+                    : (Mathf.Abs(cx - xmin) < Mathf.Abs(cx - xmax) ? "-x" : "+x");
+                float along = side == "-z" || side == "+z" ? cx - xmin : cz - zmin;
+                float sill = c.y - d.height / 2f - y;
+                Debug.Log($"TEST    {(d.isWindow ? "window" : "door")} wall {side} along {along - d.width / 2f:0.00}..{along + d.width / 2f:0.00} sill {sill:0.00} top {sill + d.height:0.00} (w {d.width:0.00})");
+            }
+        }
+        return true;
+    }
+
+    static string Short(string s) => string.IsNullOrEmpty(s) ? "-" : s.Substring(0, Math.Min(8, s.Length));
+
+    static string NameOf(MRUKRoom r) => r == null ? "-" : (RoomNames.TryGet(DoorCatalog.RoomId(r), out var n) ? n : DoorCatalog.RoomId(r).Substring(0, 4).ToUpperInvariant());
 
     /// <summary>Every drawn opening seen from below (looking up) and from the floor above (looking down into it),
     /// with a list of every renderer whose bounds reach into the opening - there should be none but the stairs.</summary>

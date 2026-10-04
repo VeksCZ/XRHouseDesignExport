@@ -59,9 +59,19 @@ public static class DoorCatalog
         {
             bool isWindow = !MRUKDataProcessor.IsDoor(a);
             Frame(a, out var c, out var r, out var n, out float w, out float h);
-            var same = result.FirstOrDefault(d => d.isWindow == isWindow && SameDoorway(d, c, n));
+            float bottom = c.y - h / 2f;
+            var same = result.FirstOrDefault(d => SameDoorway(d, c, n)
+                && (d.isWindow == isWindow || Mathf.Abs(d.FloorY - bottom) < 0.2f)); // door vs door-sized "window" down to the floor
             if (same != null)
             {
+                // One room may capture a door as a WINDOW_FRAME (a door-sized "window" on the other face of the same
+                // wall) - it's one opening, and the door wins, else a glass sash stood right in front of the leaf.
+                if (same.isWindow && !isWindow)
+                {
+                    same.isWindow = false;
+                    same.anchor = a; same.uuid = a.Anchor.Uuid.ToString();
+                    same.right = r; same.normal = n; same.width = w; same.height = h;
+                }
                 // The other room's view of the same doorway: use the middle of the wall between the two faces.
                 if (!same.anchors.Contains(a))
                 {

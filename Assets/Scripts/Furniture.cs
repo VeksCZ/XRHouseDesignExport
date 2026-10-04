@@ -33,6 +33,8 @@ public static class Furniture
         { "glass", new Color(0.70f, 0.85f, 0.95f, 0.30f) }, { "wood", new Color(0.62f, 0.48f, 0.34f) },
         { "mirror", new Color(0.85f, 0.90f, 0.95f) }, { "chrome", new Color(0.80f, 0.80f, 0.82f) },
         { "tiles", new Color(0.88f, 0.88f, 0.86f) }, { "dark", new Color(0.25f, 0.25f, 0.27f) },
+        { "fronts", new Color(0.66f, 0.68f, 0.70f) }, { "oak", new Color(0.68f, 0.56f, 0.44f) },
+        { "steel", new Color(0.74f, 0.75f, 0.77f) }, { "gap", new Color(0.35f, 0.36f, 0.38f) },
     };
 
     static readonly Dictionary<string, (float w, float d, float h)> Defaults = new Dictionary<string, (float, float, float)>
@@ -40,6 +42,10 @@ public static class Furniture
         { "bathtub", (1.70f, 0.75f, 0.58f) }, { "shower", (0.90f, 0.90f, 2.00f) }, { "washbasin", (0.80f, 0.48f, 0.85f) },
         { "wc", (0.40f, 0.56f, 1.15f) }, { "washer", (0.60f, 0.60f, 0.85f) }, { "radiator", (0.50f, 0.10f, 1.20f) },
         { "mirror", (0.80f, 0.02f, 0.80f) }, { "cabinet", (0.60f, 0.20f, 0.70f) }, { "box", (0.60f, 0.60f, 0.85f) },
+        // Kitchen: a run of base units with its worktop (sink/hob/dishwasher by u-range), wall units, tall units
+        // (oven/microwave/fridge), a free-standing island (place it with "x"/"z").
+        { "kitchen_base", (1.20f, 0.60f, 0.90f) }, { "kitchen_wall", (1.20f, 0.35f, 0.72f) },
+        { "kitchen_tall", (0.60f, 0.60f, 2.15f) }, { "island", (1.30f, 0.80f, 0.90f) },
     };
 
     /// <summary>Glass parts are named so the viewer can make them see-through.</summary>
@@ -189,9 +195,91 @@ public static class Furniture
             }
             case "mirror": { float y0 = F(item, "y", 1.10f); B.Add(("mirror", 0, w, 0, d, y0, y0 + h)); lift = 0f; break; }
             case "cabinet": { float y0 = F(item, "y", 1.40f); B.Add(("wood", 0, w, 0, d, y0, y0 + h)); lift = 0f; break; }
+            case "kitchen_base":
+            {
+                string fr = (string)item["color"] ?? "fronts", top = (string)item["top"] ?? "oak";
+                const float plinth = 0.10f, wt = 0.04f;
+                B.Add(("dark", 0, w, 0, d - 0.06f, 0, plinth));                        // recessed plinth
+                B.Add((fr, 0, w, 0, d - 0.02f, plinth, h - wt));                         // carcass + fronts
+                B.Add((top, 0, w, 0, d + 0.02f, h - wt, h));                             // worktop, a little overhang
+                Doors(B, w, d - 0.02f, plinth, h - wt, 0.6f);                            // door/drawer gaps
+                if (Range(item, "dishwasher", out float a0, out float a1))
+                    B.Add(("steel", a0 + 0.005f, a1 - 0.005f, d - 0.02f, d - 0.01f, plinth + 0.02f, h - wt - 0.02f));
+                if (Range(item, "sink", out a0, out a1))
+                {
+                    B.Add(("steel", a0, a1, 0.08f, d - 0.08f, h - 0.002f, h + 0.004f));                    // rim
+                    B.Add(("water", a0 + 0.04f, a0 + (a1 - a0) * 0.62f, 0.12f, d - 0.12f, h + 0.004f, h + 0.006f)); // bowl
+                    float tc = a0 + (a1 - a0) * 0.35f;
+                    B.Add(("chrome", tc - 0.02f, tc + 0.02f, 0.03f, 0.07f, h, h + 0.30f));                 // tap
+                    B.Add(("chrome", tc - 0.015f, tc + 0.015f, 0.05f, 0.24f, h + 0.27f, h + 0.30f));
+                }
+                if (Range(item, "hob", out a0, out a1))
+                    B.Add(("dark", a0, a1, 0.05f, d - 0.03f, h, h + 0.006f));
+                break;
+            }
+            case "kitchen_wall":
+            {
+                float y0 = F(item, "y", 1.45f);
+                bool glass = item["glass"] != null && (bool)item["glass"];
+                B.Add(((string)item["color"] ?? "fronts", 0, w, 0, d - (glass ? 0.02f : 0f), y0, y0 + h));
+                if (glass) B.Add(("glass", 0, w, d - 0.02f, d, y0, y0 + h));
+                else Doors(B, w, d, y0, y0 + h, 0.6f);
+                lift = 0f;
+                break;
+            }
+            case "kitchen_tall":
+            {
+                string fr = (string)item["color"] ?? "fronts";
+                B.Add(("dark", 0, w, 0, d - 0.06f, 0, 0.10f));
+                B.Add((fr, 0, w, 0, d, 0.10f, h));
+                if (item["oven"] != null && (bool)item["oven"])
+                {
+                    B.Add(("steel", 0.03f, w - 0.03f, d, d + 0.01f, 0.80f, 1.40f));
+                    B.Add(("dark", 0.08f, w - 0.08f, d + 0.01f, d + 0.012f, 0.88f, 1.28f));
+                }
+                if (item["microwave"] != null && (bool)item["microwave"])
+                {
+                    B.Add(("steel", 0.03f, w - 0.03f, d, d + 0.01f, 1.45f, 1.85f));
+                    B.Add(("dark", 0.06f, w * 0.68f, d + 0.01f, d + 0.012f, 1.50f, 1.80f));
+                }
+                if (item["fridge"] != null && (bool)item["fridge"])
+                    B.Add(("gap", 0, w, d, d + 0.004f, 0.88f, 0.90f));                   // fridge / freezer split
+                B.Add(("gap", 0, 0.004f, d, d + 0.004f, 0.10f, h));                      // edge line
+                break;
+            }
+            case "island":
+            {
+                // u = its width, v = its depth; give it "x"/"z" (GLB axes) to stand free in the room.
+                const float side = 0.04f, wt = 0.04f;
+                B.Add(("oak", 0, w, 0, d, h - wt, h));                                   // top
+                B.Add(("oak", 0, side, 0, d, 0, h - wt)); B.Add(("oak", w - side, w, 0, d, 0, h - wt)); // side panels
+                B.Add(((string)item["color"] ?? "fronts", side, w - side, 0.05f, d - 0.05f, 0.10f, h - wt));
+                B.Add(("dark", side, w - side, 0.10f, d - 0.10f, 0, 0.10f));
+                break;
+            }
             default: B.Add(((string)item["color"] ?? "wood", 0, w, 0, d, 0, h)); break;
         }
         return B;
+    }
+
+    /// <summary>"key": [from, to] along the item (u), if present.</summary>
+    static bool Range(JObject item, string key, out float a, out float b)
+    {
+        a = b = 0f;
+        if (item[key] is not JArray r || r.Count < 2) return false;
+        a = (float)r[0]; b = (float)r[1];
+        return b > a;
+    }
+
+    /// <summary>Thin dark lines on a run's front face every ~unit wide (door/drawer gaps).</summary>
+    static void Doors(List<(string, float, float, float, float, float, float)> B, float w, float d, float y0, float y1, float unit)
+    {
+        int n = Mathf.Max(1, Mathf.RoundToInt(w / unit));
+        for (int i = 1; i < n; i++)
+        {
+            float u = w * i / n;
+            B.Add(("gap", u - 0.002f, u + 0.002f, d, d + 0.003f, y0 + 0.01f, y1 - 0.01f));
+        }
     }
 
     /// <summary>Local (u, v) -> GLB-axes (x, z), as furnish.py's place().</summary>
