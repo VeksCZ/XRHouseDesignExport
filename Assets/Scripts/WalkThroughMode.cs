@@ -128,10 +128,45 @@ public class WalkThroughMode : MonoBehaviour
                 .OrderByDescending(f => f.PlaneRect.Value.width * f.PlaneRect.Value.height).First();
             target = biggest.transform.position;
         }
+        // Straight above can be the stairwell opening drawn in the ceiling - you'd land there and fall straight back
+        // down. Step out of it to its nearest edge that still has floor of that story (else the largest room).
+        bool moved = OutOfOpening(ref target, floors, level);
         Place(Quaternion.Euler(0, yaw, 0) * (target - center), root.transform.rotation);
         blink = 1f;
-        Debug.Log($"[Walk] Next floor: feet {feetY:0.00} (level {cur + 1}) -> level {next + 1} at {level:0.00}, target {target}, {(hereFloor != null ? "straight above/below" : "largest room")}");
+        Debug.Log($"[Walk] Next floor: feet {feetY:0.00} (level {cur + 1}) -> level {next + 1} at {level:0.00}, target {target}, " +
+                  $"{(hereFloor != null ? "straight above/below" : "largest room")}{(moved ? ", moved out of the stair opening" : "")}");
         return $"Floor {next + 1}/{levels.Count}";
+    }
+
+    /// <summary>If a scan-world floor point lies in a drawn floor opening (where Fall would drop you), moves it just
+    /// past the opening's nearest edge where that story has floor - or to its largest room. True if it moved.</summary>
+    bool OutOfOpening(ref Vector3 target, List<MRUKAnchor> floors, float level)
+    {
+        Quaternion g = Quaternion.Euler(0, yaw, 0), gi = Quaternion.Inverse(g);
+        Vector3 m = g * (target - center);
+        var hole = openingRects.FirstOrDefault(r => r.Contains(new Vector2(m.x, m.z)));
+        if (hole.width <= 0f) return false;
+        const float margin = 0.4f;
+        var options = new[]
+        {
+            new Vector2(hole.xMin - margin, m.z), new Vector2(hole.xMax + margin, m.z),
+            new Vector2(m.x, hole.yMin - margin), new Vector2(m.x, hole.yMax + margin),
+        }.OrderBy(p => (p - new Vector2(m.x, m.z)).sqrMagnitude);
+        foreach (var p in options)
+        {
+            if (openingRects.Any(r => r.Contains(p))) continue;
+            Vector3 w = gi * new Vector3(p.x, m.y, p.y) + center;
+            var room = DoorCatalog.FindRoomAt(walkRooms, new Vector3(w.x, level + 0.05f, w.z));
+            var f = room?.FloorAnchors.FirstOrDefault(a => a != null && Mathf.Abs(a.transform.position.y - level) < 0.5f);
+            if (f == null) continue;
+            target = new Vector3(w.x, f.transform.position.y, w.z);
+            return true;
+        }
+        var biggest = floors.Where(f => Mathf.Abs(f.transform.position.y - level) < 0.5f)
+            .OrderByDescending(f => f.PlaneRect.Value.width * f.PlaneRect.Value.height).FirstOrDefault();
+        if (biggest == null) return false;
+        target = biggest.transform.position;
+        return true;
     }
 
     /// <summary>Right trigger while walking: opens/closes the door leaf under the ray. False if none.</summary>
