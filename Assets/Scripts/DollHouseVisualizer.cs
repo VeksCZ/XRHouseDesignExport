@@ -246,6 +246,7 @@ public class DollHouseVisualizer : MonoBehaviour
                     // furniture and the rooms the scan couldn't take (same spec as the walk-through)
                     furniture.Clear();
                     furniture.RoofAlpha = 0.25f; // looked into from above: roofs only hinted
+                    furniture.WithSite = false;  // no garden around the little house
                     if (mode == DollhouseMode.AnchorAnalytical || mode == DollhouseMode.AnchorWithDimensions)
                         furniture.Apply(visual, yaw, c, rooms, HouseEditsStore.CurrentScan, visual.layer);
                     // Registers it with the XR Interaction Toolkit purely so the ray hovers it as a valid

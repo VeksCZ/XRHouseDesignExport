@@ -48,6 +48,10 @@ public partial class DesktopWalkApp
                     "probe" => Probe(Arg("-rays") ?? ""),
                     "floors" => await TestFloors(outDir),
                     "move" => await TestMove(),
+                    "measure" => await TestMeasure(outDir),
+                    "jump" => await TestJump(),
+                    "sun" => await TestSun(outDir),
+                    "ceilfit" => CeilFit(),
                     _ => false,
                 };
             }
@@ -366,6 +370,112 @@ public partial class DesktopWalkApp
             await Shot(Path.Combine(outDir, $"floor_{i}.png"));
         }
         return ok;
+    }
+
+    /// <summary>GLB axes (model space, Z mirrored) -> scan world.</summary>
+    Vector3 GlbToWorld(Vector3 g)
+    {
+        walk.TryGetModelFrame(out _, out float yw, out var c);
+        return Quaternion.Inverse(Quaternion.Euler(0, yw, 0)) * new Vector3(g.x, g.y, -g.z) + c;
+    }
+
+    static Vector3 V3(string t)
+    {
+        var f = t.Split(',').Select(x => float.Parse(x.Trim(), CultureInfo.InvariantCulture)).ToArray();
+        return new Vector3(f[0], f[1], f[2]);
+    }
+
+    /// <summary>-start "x,y,z" (GLB floor point), -points "a;b" (GLB points to measure between, aimed at from the
+    /// head): the tape measure's result, and a shot of it.</summary>
+    async Task<bool> TestMeasure(string outDir)
+    {
+        if (Arg("-start") != null)
+        {
+            Vector3 st = GlbToWorld(V3(Arg("-start")));
+            float yaw = Arg("-lookat") != null ? Yaw(GlbToWorld(V3(Arg("-lookat"))) - st) : float.Parse(Arg("-yaw") ?? "0", CultureInfo.InvariantCulture);
+            await StandAt(st, yaw, float.Parse(Arg("-pitch") ?? "10", CultureInfo.InvariantCulture));
+            await Frames(30);
+        }
+        walk.TryGetModelFrame(out var root, out _, out _);
+        string r = null;
+        foreach (var t in (Arg("-points") ?? "").Split(new[] { ';' }, StringSplitOptions.RemoveEmptyEntries))
+        {
+            Vector3 w = root.TransformPoint(Vector3.Scale(V3(t), new Vector3(1, 1, -1)));
+            Vector3 h = rig.Head.position;
+            r = walk.MeasureClick(new Ray(h, (w - h).normalized));
+            Debug.Log($"TEST measure click at {t}: {r}");
+            await Frames(5);
+        }
+        await Shot(Path.Combine(outDir, "measure.png"));
+        return r != null && r.Contains(" m");
+    }
+
+    /// <summary>-at "2026-06-21 15:00;..." (local times), -start/-lookat (GLB): one shot per time.</summary>
+    async Task<bool> TestSun(string outDir)
+    {
+        if (Arg("-start") != null)
+        {
+            Vector3 st = GlbToWorld(V3(Arg("-start")));
+            float yaw = Arg("-lookat") != null ? Yaw(GlbToWorld(V3(Arg("-lookat"))) - st) : 0f;
+            await StandAt(st, yaw, float.Parse(Arg("-pitch") ?? "25", CultureInfo.InvariantCulture));
+            await Frames(30);
+        }
+        int i = 0; bool ok = true;
+        foreach (var t in (Arg("-at") ?? "2026-06-21 12:00").Split(new[] { ';' }, StringSplitOptions.RemoveEmptyEntries))
+        {
+            var local = DateTime.ParseExact(t.Trim(), "yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture);
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+            string r = walk.SunAt(local);
+            Debug.Log($"TEST sun {t}: {r} ({sw.ElapsedMilliseconds} ms)");
+            ok &= r != null;
+            await Frames(5);
+            await Shot(Path.Combine(outDir, $"sun_{i++}.png"));
+        }
+        return ok;
+    }
+
+    /// <summary>-to "x,y,z" (GLB): the minimap's teleport to that point; where you stand after it and a second later.</summary>
+    async Task<bool> TestJump()
+    {
+        walk.TryGetModelFrame(out var root, out _, out _);
+        Vector3 w = GlbToWorld(V3(Arg("-to") ?? "0,0,0"));
+        string r = walk.TeleportToScanPoint(w, w.y);
+        await Frames(2);
+        Vector3 Feet() { var m = root.InverseTransformPoint(rig.transform.position); return new Vector3(m.x, m.y, -m.z); }
+        var a = Feet(); await Frames(90); var b = Feet();
+        Debug.Log($"TEST jump: '{r}' at ({a.x:0.00},{a.y:0.00},{a.z:0.00}), 1.5 s later ({b.x:0.00},{b.y:0.00},{b.z:0.00})");
+        return r != null && r.StartsWith("Teleported") && Mathf.Abs(a.y - b.y) < 0.3f;
+    }
+
+    /// <summary>Every room's ceiling fitted to the scanned mesh (CeilingFit) next to the scanned flat one and the
+    /// one in use now (spec), at the room's middle and its -z/+z ends - heights above the room's floor.</summary>
+    bool CeilFit()
+    {
+        var rooms = Rooms();
+        if (!walk.TryGetModelFrame(out _, out float yw, out var c)) return false;
+        Quaternion g = Quaternion.Euler(0, yw, 0);
+        CeilingFit.ResetCache();
+        int n = 0;
+        foreach (var r in rooms)
+        {
+            var f = r.FloorAnchors.FirstOrDefault(a => a != null && a.PlaneBoundary2D != null);
+            if (f == null) continue;
+            var pts = f.PlaneBoundary2D.Select(p => g * (f.transform.position + f.transform.rotation * new Vector3(p.x, p.y, 0) - c)).ToList();
+            float x0 = pts.Min(p => p.x), x1 = pts.Max(p => p.x), z0 = pts.Min(p => -p.z), z1 = pts.Max(p => -p.z);
+            float fy = f.transform.position.y - c.y;
+            float xm = (x0 + x1) / 2f, zm = (z0 + z1) / 2f;
+            float Used(float x, float z) => XRModelFactory.SampleCeilingHeight(r.CeilingAnchors, Quaternion.Inverse(g) * new Vector3(x, 0, -z) + c, 0f) - c.y - fy;
+            string id = DoorCatalog.RoomId(r); id = id.Substring(0, Math.Min(4, id.Length));
+            if (CeilingFit.Fit(r, g, c, out var fit))
+            {
+                n++;
+                Debug.Log($"TEST ceil {id}: mesh {fit.HeightAt(xm, z0) - fy:0.00} (z {z0:0.0}) / {fit.HeightAt(xm, zm) - fy:0.00} / {fit.HeightAt(xm, z1) - fy:0.00} (z {z1:0.0}), " +
+                          $"x-slope {fit.bx:0.000} z-slope {fit.bz:0.000}, rms {fit.rms * 100:0} cm, coverage {fit.coverage:P0} | in use {Used(xm, z0):0.00} / {Used(xm, zm):0.00} / {Used(xm, z1):0.00}");
+            }
+            else Debug.Log($"TEST ceil {id}: no fit | in use {Used(xm, z0):0.00} / {Used(xm, zm):0.00} / {Used(xm, z1):0.00}");
+        }
+        CeilingFit.ResetCache();
+        return n > 0;
     }
 
     static string Short(string s) => string.IsNullOrEmpty(s) ? "-" : s.Substring(0, Math.Min(8, s.Length));

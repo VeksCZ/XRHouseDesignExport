@@ -40,7 +40,8 @@ public static class Furniture
         { "tiles", new Color(0.88f, 0.88f, 0.86f) }, { "dark", new Color(0.25f, 0.25f, 0.27f) },
         { "fronts", new Color(0.66f, 0.68f, 0.70f) }, { "oak", new Color(0.68f, 0.56f, 0.44f) },
         { "steel", new Color(0.74f, 0.75f, 0.77f) }, { "gap", new Color(0.35f, 0.36f, 0.38f) },
-        { "roof", new Color(0.27f, 0.28f, 0.30f) }, { "brick", new Color(0.62f, 0.36f, 0.28f) },
+        { "roof", new Color(0.27f, 0.28f, 0.30f) }, { "wall", new Color(0.93f, 0.93f, 0.91f) },
+        { "floor", new Color(0.80f, 0.72f, 0.60f) }, { "ceiling", new Color(0.97f, 0.97f, 0.96f) }, { "brick", new Color(0.62f, 0.36f, 0.28f) },
     };
 
     static readonly Dictionary<string, (float w, float d, float h)> Defaults = new Dictionary<string, (float, float, float)>
@@ -152,8 +153,28 @@ public static class Furniture
                     F(rf, "z0", 0f), F(rf, "z1", 0f), bot, (x, z) => bot(x, z) + t);
                 part.name = RoofPart;
                 rm.parts.Add(part);
+                // "walls": {"x0","x1","z0","z1","drop","t"} - the house's outer walls carried up from below the
+                // roof, so the space between a lower ceiling and the roof (the attic edge) isn't an open slot
+                if (rf["walls"] is JObject wl)
+                {
+                    float wx0 = F(wl, "x0", 0f), wx1 = F(wl, "x1", 0f), wz0 = F(wl, "z0", 0f), wz1 = F(wl, "z1", 0f);
+                    float drop = F(wl, "drop", 0.8f), wt = F(wl, "t", 0.25f);
+                    Func<float, float, float> wb = (x, z) => bot(x, z) - drop;
+                    foreach (var aw in new[] {
+                        SlopedBox("attic_wall", "wall", wx0, wx0 + wt, wz0, wz1, wb, bot, "WALL"),
+                        SlopedBox("attic_wall", "wall", wx1 - wt, wx1, wz0, wz1, wb, bot, "WALL"),
+                        SlopedBox("attic_wall", "wall", wx0, wx1, wz0, wz0 + wt, wb, bot, "WALL"),
+                        SlopedBox("attic_wall", "wall", wx0, wx1, wz1 - wt, wz1, wb, bot, "WALL") })
+                    { aw.name = RoofPart; rm.parts.Add(aw); }
+                }
             }
             if (rm.parts.Count > 0) model.rooms.Add(rm);
+        }
+        // surroundings (see SiteModel)
+        if (spec["site"] is JObject site)
+        {
+            var srm = SiteModel.Build(site);
+            if (srm.parts.Count > 0) model.rooms.Add(srm);
         }
         return model;
     }
@@ -186,6 +207,24 @@ public static class Furniture
         return false;
     }
 
+    /// <summary>A "ceilings" entry {"rooms": [...], "from": "mesh"} lists this room (fit it to the scanned mesh).</summary>
+    static bool CeilingFromMesh(JObject spec, string key)
+    {
+        if (spec?["ceilings"] is not JArray list || string.IsNullOrEmpty(key)) return false;
+        key = key.ToLowerInvariant();
+        foreach (var c in list.OfType<JObject>())
+        {
+            if ((string)c["from"] != "mesh") continue;
+            foreach (var r in c["rooms"] as JArray ?? new JArray())
+            {
+                string k = ((string)r ?? "").ToLowerInvariant();
+                if (k.StartsWith("room_")) k = k.Substring(5);
+                if (k == "*" || (k.Length > 0 && key.StartsWith(k))) return true;
+            }
+        }
+        return false;
+    }
+
     /// <summary>Makes every model of this scan use the spec's "ceilings" instead of the flat ceilings the headset
     /// stored (walls, caps, ceilings and "h": "ceiling" items all sample XRModelFactory.SampleCeilingHeight). The
     /// planes are in the export's GLB axes, so the same frame (CorrectionYaw + CalculateCenter) is used here
@@ -198,8 +237,24 @@ public static class Furniture
         Vector3 center = DollHouseVisualizer.CalculateCenter(rooms);
         Quaternion g = Quaternion.Euler(0, FloorPlanBuilder.CorrectionYaw(MRUKPlanExtractor.Extract(rooms)), 0);
         var planes = new List<(MRUKRoom room, (float a, float bx, float bz) p)>();
+        CeilingFit.ResetCache();
         foreach (var r in rooms)
-            if (r != null && r.CeilingAnchors != null && TryCeilingPlane(spec, DoorCatalog.RoomId(r), out var p)) planes.Add((r, p));
+        {
+            if (r == null || r.CeilingAnchors == null) continue;
+            string id = DoorCatalog.RoomId(r);
+            if (TryCeilingPlane(spec, id, out var p)) planes.Add((r, p));
+            else if (CeilingFromMesh(spec, id))
+            {
+                // {"rooms": [...], "from": "mesh"}: fitted to the scanned mesh (see CeilingFit)
+                if (CeilingFit.Fit(r, g, center, out var fit) && fit.coverage > 0.15f && fit.rms < 0.15f)
+                {
+                    planes.Add((r, (fit.a, fit.bx, fit.bz)));
+                    Debug.Log($"[Furniture] ceiling of {id.Substring(0, Math.Min(4, id.Length))} from the mesh: y = {fit.a:0.000} + {fit.bx:0.000}x + {fit.bz:0.000}z, rms {fit.rms * 100:0} cm, coverage {fit.coverage:P0}");
+                }
+                else Debug.Log($"[Furniture] ceiling of {id.Substring(0, Math.Min(4, id.Length))}: mesh fit not usable - keeping the scanned one");
+            }
+        }
+        CeilingFit.ResetCache();
         if (planes.Count == 0) return;
         XRModelFactory.CeilingOverride = (anchors, probe) =>
         {
@@ -743,6 +798,9 @@ public class FurnitureInModel
     /// <summary>Below 1 the roofs are see-through (the Dollhouse is looked into from above).</summary>
     public float RoofAlpha = 1f;
 
+    /// <summary>False leaves the surroundings (ground, fences, trees...) out - the Dollhouse.</summary>
+    public bool WithSite = true;
+
     /// <summary>Rebuilds from the current Spec (after an item was moved/turned).</summary>
     public void Reload()
     {
@@ -771,6 +829,7 @@ public class FurnitureInModel
         if (!visual || string.IsNullOrEmpty(scanName)) return;
         if (spec == null) return;
         var model = Furniture.Build(spec, rooms, yaw, center);
+        if (!WithSite) model.rooms.RemoveAll(r => r.roomName == SiteModel.GroupName);
         if (model.rooms.Count == 0) return;
         go = UnityModelLoader.LoadToScene(model, shaded: true);
         if (!go) return;

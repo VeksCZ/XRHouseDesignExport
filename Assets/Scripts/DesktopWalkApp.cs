@@ -186,6 +186,13 @@ public partial class DesktopWalkApp : MonoBehaviour
         if (kb.rKey.wasPressedThisFrame) floorInfo = walk.RotateFurniture(CenterRay()) ?? "No furniture there";
         if (mouse != null && mouse.leftButton.wasPressedThisFrame) walk.TryToggleDoor();
         if (kb.fKey.wasPressedThisFrame || kb.pageUpKey.wasPressedThisFrame) floorInfo = walk.NextFloor() ?? "";
+        if (kb.tKey.wasPressedThisFrame) floorInfo = walk.MeasureClick(CenterRay()) ?? "Measure: nothing there";
+        if (kb.deleteKey.wasPressedThisFrame) { walk.ClearMeasure(); floorInfo = ""; }
+        if (kb.uKey.wasPressedThisFrame) floorInfo = walk.ToggleSun() ?? "";
+        if (kb.leftBracketKey.wasPressedThisFrame) floorInfo = walk.SunStep(-0.5, 0) ?? "";
+        if (kb.rightBracketKey.wasPressedThisFrame) floorInfo = walk.SunStep(0.5, 0) ?? "";
+        if (kb.commaKey.wasPressedThisFrame) floorInfo = walk.SunStep(0, -1) ?? "";
+        if (kb.periodKey.wasPressedThisFrame) floorInfo = walk.SunStep(0, 1) ?? "";
         if (kb.mKey.wasPressedThisFrame) _ = CycleModel();
         if (kb.hKey.wasPressedThisFrame) showHelp = !showHelp;
         if (kb.f5Key.wasPressedThisFrame && loadedScan != null) _ = Load(loadedScan);
@@ -273,7 +280,7 @@ public partial class DesktopWalkApp : MonoBehaviour
     {
         string text = $"{loadedScan}  ·  {walk.ModelLabel.Replace("Walk: ", "")}" + (floorInfo != "" ? "  ·  " + floorInfo : "");
         if (showHelp)
-            text += "\nWASD move · mouse look · Shift run · Ctrl slow · click door open/close · G move furniture· R turn it· F next floor · M model · F5 reload · Esc menu · H hide";
+            text += "\nWASD move · mouse look · Shift run · Ctrl slow · click door open/close · G move furniture· R turn it· T measure (Del clear)· U sun [ ] time , . month· F next floor · M model · F5 reload · Esc menu · H hide";
         float bh = showHelp ? 74 : 44;
         GUI.Box(new Rect(12, h - bh - 12, 1100, bh), GUIContent.none, box);
         GUI.Label(new Rect(26, h - bh - 4, 1080, bh), text, small);

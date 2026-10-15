@@ -138,6 +138,23 @@ public class WalkThroughMode : MonoBehaviour
         return $"Floor {next + 1}/{levels.Count}";
     }
 
+    /// <summary>Teleports onto the floor of the room at a scan-world point on the storey at levelY (minimap
+    /// click), keeping your facing. Never into a stair opening. Returns a status line (null when not walking).</summary>
+    public string TeleportToScanPoint(Vector3 scanPoint, float levelY)
+    {
+        if (!isOn || walkRooms == null || !root) return null;
+        var room = DoorCatalog.FindRoomAt(walkRooms, new Vector3(scanPoint.x, levelY + 0.05f, scanPoint.z));
+        var f = room?.FloorAnchors.FirstOrDefault(a => a != null && Mathf.Abs(a.transform.position.y - levelY) < 0.6f);
+        if (f == null) return "Minimap: no room there";
+        var target = new Vector3(scanPoint.x, f.transform.position.y, scanPoint.z);
+        var floors = walkRooms.SelectMany(r => r.FloorAnchors).Where(a => a != null && a.PlaneRect.HasValue).ToList();
+        OutOfOpening(ref target, floors, f.transform.position.y);
+        Place(Quaternion.Euler(0, yaw, 0) * (target - center), root.transform.rotation);
+        blink = 1f;
+        Debug.Log($"[Walk] Minimap teleport to {target} ({MRUKDataProcessor.GetRoomLabel(room)})");
+        return "Teleported: " + MRUKDataProcessor.GetRoomLabel(room);
+    }
+
     /// <summary>If a scan-world floor point lies in a drawn floor opening (where Fall would drop you), moves it just
     /// past the opening's nearest edge where that story has floor - or to its largest room. True if it moved.</summary>
     bool OutOfOpening(ref Vector3 target, List<MRUKAnchor> floors, float level)
@@ -253,6 +270,104 @@ public class WalkThroughMode : MonoBehaviour
     EditModeController editMode;
 
     bool FurnitureTool => editMode && editMode.IsOn && editMode.CurrentTool == EditModeController.Tool.Furniture;
+    bool MeasureTool => editMode && editMode.IsOn && editMode.CurrentTool == EditModeController.Tool.Measure;
+
+    // ---------- sun (Quest: edit mode, Sun tool - right stick left/right = time, up/down = month; desktop: U, [ ], , .) ----------
+    readonly WalkSun sun = new WalkSun();
+    bool SunTool => editMode && editMode.IsOn && editMode.CurrentTool == EditModeController.Tool.Sun;
+    bool sunStickArmed = true;
+
+    public string ToggleSun()
+    {
+        if (!isOn) return null;
+        sun.SetOn(!sun.On);
+        if (sun.On) RebuildSun();
+        return sun.Status;
+    }
+
+    public string SunStep(double hours, int months)
+    {
+        if (!isOn) return null;
+        if (!sun.On) sun.SetOn(true);
+        sun.Step(hours, months);
+        RebuildSun();
+        return sun.Status;
+    }
+
+    public string SunStatus => sun.Status;
+
+    /// <summary>Sun on at a given local date/time (scripted tests).</summary>
+    public string SunAt(System.DateTime local)
+    {
+        if (!isOn) return null;
+        sun.SetOn(true);
+        sun.Local = local;
+        RebuildSun();
+        return sun.Status;
+    }
+
+    /// <summary>Site from the spec ("site": {"lat", "lon", "north": [x, z]}), every window of the model, and the
+    /// sunny patches for the current time.</summary>
+    void RebuildSun()
+    {
+        if (!walkVisual || walkRooms == null) return;
+        var site = Furniture.Load(HouseEditsStore.CurrentScan)?["site"] as Newtonsoft.Json.Linq.JObject;
+        if (site != null)
+        {
+            if (site["lat"] != null) sun.Lat = (double)site["lat"];
+            if (site["lon"] != null) sun.Lon = (double)site["lon"];
+            if (site["north"] is Newtonsoft.Json.Linq.JArray n && n.Count >= 2) sun.NorthGlb = new Vector2((float)n[0], (float)n[1]);
+        }
+        Quaternion g = Quaternion.Euler(0, yaw, 0);
+        var wins = new List<(Vector3, Quaternion, float, float)>();
+        var seen = new List<Vector3>();
+        foreach (var a in walkRooms.SelectMany(r => r.Anchors))
+        {
+            if (a == null || !a.PlaneRect.HasValue || !a.Label.ToString().Contains("WINDOW") || XRModelFactory.RemovedOpening(a)) continue;
+            if (seen.Any(p => Vector3.Distance(p, a.transform.position) < 0.15f)) continue;
+            seen.Add(a.transform.position);
+            wins.Add((g * (a.transform.position - center), g * a.transform.rotation, a.PlaneRect.Value.width, a.PlaneRect.Value.height));
+        }
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        sun.Rebuild(walkVisual.transform, wins, WalkMask);
+        Debug.Log($"[Walk] Sun: {sun.Status}, {wins.Count} windows, {sw.ElapsedMilliseconds} ms");
+    }
+
+    void HandleSun()
+    {
+        if (!desktop)
+        {
+            if (SunTool && !sun.On) { sun.SetOn(true); RebuildSun(); uiLog?.AddLog("Sun: " + sun.Status + " - right stick left/right = time, up/down = month"); }
+            else if (!SunTool && sun.On) sun.SetOn(false);
+            if (SunTool)
+            {
+                Vector2 s = OVRInput.Get(OVRInput.Axis2D.PrimaryThumbstick, OVRInput.Controller.RTouch);
+                if (sunStickArmed && s.magnitude > 0.7f)
+                {
+                    sunStickArmed = false;
+                    if (Mathf.Abs(s.x) > Mathf.Abs(s.y)) SunStep(s.x > 0 ? 0.5 : -0.5, 0);
+                    else SunStep(0, s.y > 0 ? 1 : -1);
+                    uiLog?.AddLog("Sun: " + sun.Status);
+                }
+                else if (s.magnitude < 0.3f) sunStickArmed = true;
+            }
+        }
+        sun.Tick(head);
+    }
+
+    // ---------- tape measure (Quest: edit mode, Measure tool; desktop: T) ----------
+    readonly WalkMeasure measure = new WalkMeasure();
+
+    /// <summary>A measuring click along a world ray: start / end / start over. Null if it hit nothing.</summary>
+    public string MeasureClick(Ray ray) => isOn && walkVisual ? measure.Click(ray, walkVisual.transform, WalkMask) : null;
+    public void ClearMeasure() => measure.Clear();
+
+    void HandleMeasure()
+    {
+        if (!desktop && !MeasureTool) { measure.Clear(); return; }
+        var ray = desktop ? new Ray(head.position, head.forward) : new Ray(rightHand.position, rightHand.forward);
+        measure.Track(ray, WalkMask, head);
+    }
 
     /// <summary>Quest, edit mode, Furniture tool: trigger on a piece picks it up (it follows the ray over the floor),
     /// trigger again puts it down (saved); right stick click turns it 90 degrees. Leaving the tool puts it down.</summary>
@@ -274,7 +389,15 @@ public class WalkThroughMode : MonoBehaviour
 
     void OnEditTrigger()
     {
-        if (!isOn || desktop || !rightHand || !FurnitureTool) return;
+        if (!isOn || desktop || !rightHand) return;
+        if (MeasureTool)
+        {
+            uiLog?.AddLog(MeasureClick(new Ray(rightHand.position, rightHand.forward)) ?? "Measure: point at a wall, floor or furniture");
+            OVRInput.SetControllerVibration(0.3f, 0.15f, OVRInput.Controller.RTouch);
+            Invoke(nameof(StopFurnitureHaptic), 0.05f);
+            return;
+        }
+        if (!FurnitureTool) return;
         if (moving) { uiLog?.AddLog(DropFurniture() ?? "Furniture: put down"); return; }
         if (TryGrabFurniture(new Ray(rightHand.position, rightHand.forward)))
         {
@@ -422,6 +545,7 @@ public class WalkThroughMode : MonoBehaviour
         ApplyStairs();
         furniture.Apply(walkVisual, yaw, center, walkRooms, HouseEditsStore.CurrentScan, WalkLayer);
         Physics.SyncTransforms();
+        if (sun.On) RebuildSun();
         Debug.Log($"TIMING walk {walkModel}: model {tModel} ms, meshes {tMeshes - tModel} ms, colliders {tColliders - tMeshes} ms, " +
                   $"stairs+doors {sw.ElapsedMilliseconds - tColliders} ms");
         return true;
@@ -431,6 +555,7 @@ public class WalkThroughMode : MonoBehaviour
     {
         if (!isOn && !root) return;
         isOn = false; aiming = false;
+        sun.SetOn(false); measure.Clear();
         if (Active == this) Active = null;
         stairs.Dispose();
         walkDoors.Clear();
@@ -629,6 +754,8 @@ public class WalkThroughMode : MonoBehaviour
         HandleMove(dt);
         FollowFloor(dt);
         HandleFurnitureGrab();
+        HandleMeasure();
+        HandleSun();
         if (walkVisual && walkDoors.Tick(walkVisual.transform.InverseTransformPoint(head.position), dt, EditModeController.AnyOn)) Physics.SyncTransforms();
         UpdateDoors();
         UpdateFade(dt);
@@ -744,7 +871,7 @@ public class WalkThroughMode : MonoBehaviour
     void HandleSnapTurn()
     {
         if (aiming || desktop) return; // desktop: the mouse turns the rig itself
-        if (StairEditTool.StickCapture) { turnArmed = false; return; }
+        if (StairEditTool.StickCapture || SunTool) { turnArmed = false; return; }
         float x = OVRInput.Get(OVRInput.Axis2D.PrimaryThumbstick, OVRInput.Controller.RTouch).x;
         if (turnArmed && Mathf.Abs(x) > 0.7f)
         {
@@ -760,9 +887,9 @@ public class WalkThroughMode : MonoBehaviour
     {
         if (desktop) return;
         Vector2 r = OVRInput.Get(OVRInput.Axis2D.PrimaryThumbstick, OVRInput.Controller.RTouch);
-        if (StairEditTool.StickCapture)
+        if (StairEditTool.StickCapture || SunTool)
         {
-            // The sticks adjust a stair - drop any aim without teleporting.
+            // The sticks adjust a stair (or the sun's time) - drop any aim without teleporting.
             if (aiming) { aiming = false; teleportValid = false; ShowArc(false); }
             return;
         }

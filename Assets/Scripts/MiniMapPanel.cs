@@ -234,6 +234,10 @@ public class MiniMapPanel : MonoBehaviour
                 root.transform.position = rightHand.TransformPoint(grabOff);
                 root.transform.rotation = rightHand.rotation * grabRotOff;
             }
+            // trigger on the map while walking: jump into the room you point at (on the storey shown)
+            if (!grabbed && OVRInput.GetDown(OVRInput.Button.PrimaryIndexTrigger, OVRInput.Controller.RTouch)
+                && Physics.Raycast(rightHand.position, rightHand.forward, out RaycastHit th) && th.collider.gameObject == root)
+                uiLog?.AddLog(TeleportFromMap(new Ray(rightHand.position, rightHand.forward)));
         }
 
         if (avatarBody)
@@ -256,6 +260,21 @@ public class MiniMapPanel : MonoBehaviour
             Vector3 facing = Vector3.ProjectOnPlane(headFwd, Vector3.up);
             if (facing.sqrMagnitude > 0.0001f) avatarBody.transform.localRotation = Quaternion.LookRotation(gRot * facing.normalized, Vector3.up);
         }
+    }
+
+    /// <summary>Where a ray meets the shown storey's floor on the map, as a teleport in the walk-through.</summary>
+    public string TeleportFromMap(Ray ray)
+    {
+        if (!root) return "Minimap: off";
+        if (WalkThroughMode.Active == null) return "Minimap: start Walk first, then trigger on a room jumps there";
+        float lvl = levels.Count > 0 ? levels[Mathf.Clamp(shownLevel, 0, levels.Count - 1)] : modelCenter.y;
+        Vector3 local0 = new Vector3(0f, lvl - modelCenter.y, 0f);
+        var plane = new Plane(root.transform.up, root.transform.TransformPoint(local0));
+        if (!plane.Raycast(ray, out float d)) return "Minimap: point at the floor of a room";
+        Vector3 p = root.transform.InverseTransformPoint(ray.GetPoint(d));   // model space (house metres)
+        Vector3 scan = Quaternion.Inverse(Quaternion.Euler(0, modelYaw, 0)) * new Vector3(p.x, local0.y, p.z) + modelCenter;
+        OVRInput.SetControllerVibration(0.3f, 0.2f, OVRInput.Controller.RTouch); Invoke(nameof(StopVib), 0.08f);
+        return WalkThroughMode.Active.TeleportToScanPoint(scan, lvl) ?? "Minimap: not walking";
     }
 
     void StopVib() => OVRInput.SetControllerVibration(0, 0, OVRInput.Controller.RTouch);

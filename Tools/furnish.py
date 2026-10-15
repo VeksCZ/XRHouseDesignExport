@@ -432,6 +432,7 @@ def ceiling_plane(spec, key):
     """The spec's "ceilings" plane (a, bx, bz) - GLB y = a + bx*x + bz*z - for a room id / extra room name."""
     key = key.lower()
     for c in spec.get('ceilings', []):
+        if 'plane' not in c: continue   # "from": "mesh" - fitted in the app (CeilingFit), the export keeps its own
         for r in c.get('rooms', []):
             k = r.lower()
             if k.startswith('room_'): k = k[5:]
@@ -443,6 +444,97 @@ def plane_fn(p):
     return lambda x, z: p[0] + p[1] * x + p[2] * z
 
 # ----------------------------------------------------------------------------------------------------------- building
+
+SITE_COLORS = {'grass': (0.46, 0.62, 0.33), 'bank': (0.50, 0.64, 0.36), 'field': (0.74, 0.66, 0.42),
+               'gravel': (0.66, 0.64, 0.60), 'paving': (0.56, 0.54, 0.53), 'concrete': (0.74, 0.74, 0.72),
+               'hedge': (0.21, 0.38, 0.19), 'crown': (0.33, 0.53, 0.26), 'trunk': (0.42, 0.32, 0.22),
+               'fence': (0.22, 0.28, 0.24), 'barn': (0.78, 0.73, 0.64), 'tiles': (0.55, 0.28, 0.20), 'wood': (0.62, 0.48, 0.34)}
+
+
+def solid(top, bot):
+    """Top/bottom polygons (GLB x, y, z; convex, matching corners) and the sides between them, double-sided."""
+    n = len(top); P = list(top) + list(bot); I = []
+    def tri(a, b, c): I.extend([a, b, c, a, c, b])
+    for i in range(1, n - 1): tri(0, i, i + 1); tri(n, n + i, n + i + 1)
+    for i in range(n):
+        j = (i + 1) % n; tri(i, j, n + j); tri(i, n + j, n + i)
+    # flat normals are not worth it here: per-vertex up/down guess
+    N = [(0.0, 1.0, 0.0)] * n + [(0.0, -1.0, 0.0)] * n
+    return P, N, I
+
+
+def prism(top, bottom):
+    return solid(top, [(x, bottom, z) for x, _, z in top])
+
+
+def strip(a, b, hw, y0, y1):
+    dx, dz = b[0] - a[0], b[1] - a[1]; L = (dx * dx + dz * dz) ** 0.5 or 1; nx, nz = -dz / L * hw, dx / L * hw
+    return prism([(a[0] + nx, y1, a[1] + nz), (b[0] + nx, y1, b[1] + nz), (b[0] - nx, y1, b[1] - nz), (a[0] - nx, y1, a[1] - nz)], y0)
+
+
+def rect(cx, cz, w, d, y):
+    return [(cx - w / 2, y, cz - d / 2), (cx + w / 2, y, cz - d / 2), (cx + w / 2, y, cz + d / 2), (cx - w / 2, y, cz + d / 2)]
+
+
+def add_site(js, binc, site):
+    """The surroundings from the spec's "site" (see SiteModel.cs): one node per piece, under SITE."""
+    if not site: return []
+    gy = site.get('ground_y', 0.0); children = []; mats = {}
+    def mat(name):
+        if name not in mats:
+            c = SITE_COLORS.get(name) or tuple(int(name[i:i + 2], 16) / 255 for i in (1, 3, 5))
+            js['materials'].append({'name': 'SITE_' + name, 'pbrMetallicRoughness': {'baseColorFactor': list(c) + [1.0], 'metallicFactor': 0.0, 'roughnessFactor': 0.9}, 'doubleSided': True})
+            mats[name] = len(js['materials']) - 1
+        return mats[name]
+    def node(label, pieces):
+        prims = [{'attributes': {'POSITION': add_accessor(js, binc, P, 'VEC3'), 'NORMAL': add_accessor(js, binc, N, 'VEC3')},
+                  'indices': add_accessor(js, binc, I, 'SCALAR'), 'material': mat(m)} for m, (P, N, I) in pieces]
+        js['meshes'].append({'name': label, 'primitives': prims})
+        js['nodes'].append({'name': label, 'mesh': len(js['meshes']) - 1}); children.append(len(js['nodes']) - 1)
+    g = site.get('ground', {})
+    if g is not False:
+        s2 = (g.get('size', 160) if isinstance(g, dict) else 160) / 2
+        node('ground', [((g.get('color') if isinstance(g, dict) else None) or 'grass', prism(rect(0, 0, 2 * s2, 2 * s2, gy), gy - 0.2))])
+    for a in site.get('areas', []):
+        top = a.get('y', gy + 0.02)
+        pts = [(q[0], q[1], q[2]) if len(q) >= 3 else (q[0], top, q[1]) for q in a['poly']]
+        node(a.get('name', 'area'), [(a.get('color', 'concrete'), prism(pts, min(q[1] for q in pts) - a.get('t', 0.1)))])
+    for k, f in enumerate(site.get('fences', [])):
+        h = f.get('h', 1.8); sp = f.get('post', 2.5); line = f['line']; pieces = []
+        for a, b in zip(line, line[1:]):
+            pieces.append((f.get('color', 'fence'), strip(a, b, 0.02, gy, gy + h)))
+            L = ((b[0] - a[0]) ** 2 + (b[1] - a[1]) ** 2) ** 0.5; n = max(1, int(-(-L // sp)))
+            for i in range(n + 1):
+                t = i / n; pieces.append((f.get('color', 'fence'), prism(rect(a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, 0.06, 0.06, gy + h + 0.05), gy - 0.05)))
+        node(f'fence_{k + 1}', pieces)
+    for k, hd in enumerate(site.get('hedges', [])):
+        line = hd['line']
+        node(f'hedge_{k + 1}', [(hd.get('color', 'hedge'), strip(a, b, hd.get('w', 1.4) / 2, gy, gy + hd.get('h', 2.4))) for a, b in zip(line, line[1:])])
+    import math
+    for k, t in enumerate(site.get('trees', [])):
+        x, z = t['at']; h = t.get('h', 4.0); r = t.get('r', 1.5)
+        crown = [(x + r * math.cos(i * math.pi / 4 + math.pi / 8), gy + h, z + r * math.sin(i * math.pi / 4 + math.pi / 8)) for i in range(8)]
+        node(f'tree_{k + 1}', [('trunk', prism(rect(x, z, 0.18, 0.18, gy + h * 0.45), gy)), (t.get('color', 'crown'), prism(crown, gy + h * 0.35))])
+    for b in site.get('buildings', []):
+        x0, x1, z0, z1 = b['x0'], b['x1'], b['z0'], b['z1']; eave = gy + b.get('eave', 3.5); ridge = gy + b.get('ridge', 6.5); o = 0.4; t = 0.2
+        pieces = [(b.get('color', 'barn'), prism([(x0, eave, z0), (x1, eave, z0), (x1, eave, z1), (x0, eave, z1)], gy))]
+        along_z = b.get('ridge_along', 'z' if (z1 - z0) >= (x1 - x0) else 'x') == 'z'
+        if along_z:
+            xm = (x0 + x1) / 2; kk = (ridge - eave) / ((x1 - x0) / 2); f = lambda x, z: ridge - kk * abs(x - xm)
+            halves = [(x0 - o, xm, z0 - o, z1 + o), (xm, x1 + o, z0 - o, z1 + o)]
+            gables = [[(x0, eave, zz), (x1, eave, zz), (xm, ridge, zz)] for zz in (z0, z1)]
+        else:
+            zm = (z0 + z1) / 2; kk = (ridge - eave) / ((z1 - z0) / 2); f = lambda x, z: ridge - kk * abs(z - zm)
+            halves = [(x0 - o, x1 + o, z0 - o, zm), (x0 - o, x1 + o, zm, z1 + o)]
+            gables = [[(xx, eave, z0), (xx, eave, z1), (xx, ridge, zm)] for xx in (x0, x1)]
+        for (a0, a1, c0, c1) in halves:
+            top = [(a0, f(a0, c0) + t, c0), (a1, f(a1, c0) + t, c0), (a1, f(a1, c1) + t, c1), (a0, f(a0, c1) + t, c1)]
+            pieces.append((b.get('roof', 'tiles'), solid(top, [(x, y - t, z) for x, y, z in top])))
+        for gtri in gables:
+            pieces.append((b.get('color', 'barn'), (gtri, [(0.0, 0.0, 1.0)] * 3, [0, 1, 2, 0, 2, 1])))
+        node(b.get('name', 'building'), pieces)
+    return children
+
 
 def furnish(js, binc, rooms, spec):
     mat_index = {}
@@ -535,9 +627,24 @@ def furnish(js, binc, rooms, spec):
         prim = {'attributes': {'POSITION': add_accessor(js, binc, P, 'VEC3'), 'NORMAL': add_accessor(js, binc, N, 'VEC3')},
                 'indices': add_accessor(js, binc, I, 'SCALAR'), 'material': mat_index[mat]}
         label = 'ROOF_' + rf.get('name', 'roof')
-        js['meshes'].append({'name': label, 'primitives': [prim]})
+        prims = [prim]
+        wl = rf.get('walls')
+        if wl:   # the outer walls carried up under the roof (attic edge)
+            wx0, wx1, wz0, wz1 = wl['x0'], wl['x1'], wl['z0'], wl['z1']; drop = wl.get('drop', 0.8); wt = wl.get('t', 0.25)
+            wb = lambda x, z, bot=bot, drop=drop: bot(x, z) - drop
+            P, N, I = [], [], []
+            for b in ((wx0, wx0 + wt, wz0, wz1), (wx1 - wt, wx1, wz0, wz1), (wx0, wx1, wz0, wz0 + wt), (wx0, wx1, wz1 - wt, wz1)):
+                p2, n2, i2 = sloped_mesh(*b, wb, bot)
+                base = len(P); P += p2; N += n2; I += [k + base for k in i2]
+            prims.append({'attributes': {'POSITION': add_accessor(js, binc, P, 'VEC3'), 'NORMAL': add_accessor(js, binc, N, 'VEC3')},
+                          'indices': add_accessor(js, binc, I, 'SCALAR'), 'material': mat_index['wall']})
+        js['meshes'].append({'name': label, 'primitives': prims})
         js['nodes'].append({'name': label, 'mesh': len(js['meshes']) - 1})
         roof_children.append(len(js['nodes']) - 1)
+    site_children = add_site(js, binc, spec.get('site'))
+    if site_children:
+        js['nodes'].append({'name': 'SITE', 'children': site_children})
+        js['scenes'][js.get('scene', 0)]['nodes'].append(len(js['nodes']) - 1)
     if roof_children:
         js['nodes'].append({'name': 'ROOFS', 'children': roof_children})
         js['scenes'][js.get('scene', 0)]['nodes'].append(len(js['nodes']) - 1)
