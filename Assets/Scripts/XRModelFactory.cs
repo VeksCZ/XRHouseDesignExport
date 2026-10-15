@@ -70,7 +70,7 @@ public static class XRModelFactory
                     }
                 }
                 // wallRot*forward points into this room, so the opposite room (if scanned) is on the -forward side.
-                float wallThickness = EstimateWallThickness(room, rooms, wallPos, -(wallRot * Vector3.forward), wW, wallRot * Vector3.right, 0.25f, out float wallShift, wH);
+                float wallThickness = EstimateWallThickness(room, rooms, wallPos, -(wallRot * Vector3.forward), wW, wallRot * Vector3.right, ExteriorWallThickness, out float wallShift, wH);
                 Vector3 wallOff = WallBoxOffset(wallThickness, wallShift, 1f); // behind the face, not centred on it
                 var wallHoles = uniqueOpenings.Where(o => {
                     Vector3 lp = Quaternion.Inverse(wallRot) * (o.transform.position - wallPos);
@@ -298,7 +298,7 @@ public static class XRModelFactory
                     Vector3 segDir = (wP2 - wP1).normalized;
                     Quaternion segRot = Quaternion.LookRotation(Vector3.Cross(segDir, Vector3.up), Vector3.up);
                     Vector3 segMid = (wP1 + wP2) / 2f + Vector3.up * (hMin/2f);
-                    float wallThickness = EstimateWallThickness(room, rooms, segMid, segRot * Vector3.forward, segLen, segDir, 0.25f, out float wallShift, hMin);
+                    float wallThickness = EstimateWallThickness(room, rooms, segMid, segRot * Vector3.forward, segLen, segDir, ExteriorWallThickness, out float wallShift, hMin);
                     Vector3 wallOff = WallBoxOffset(wallThickness, wallShift, -1f); // local +Z points out of the room here
 
                     var holes = uniqueOpenings.Where(o => {
@@ -502,6 +502,10 @@ return model;
     /// <summary>Ceilings from the furniture spec ("ceilings"): (a room's CeilingAnchors, world probe) -> world Y, or
     /// null to keep the scanned one. Installed per scan by Furniture.InstallCeilings.</summary>
     public static System.Func<IEnumerable<MRUKAnchor>, Vector3, float?> CeilingOverride;
+
+    /// <summary>Thickness of a wall with no scanned room behind it (the outer walls) - the spec's
+    /// "walls": {"exterior": m} (Furniture.InstallCeilings), else a typical 25 cm.</summary>
+    public static float ExteriorWallThickness = 0.25f;
 
     /// <summary>Local offset in metres (wall-box space; <paramref name="inwardZ"/> = +1 when the box's local +Z
     /// points into the room, -1 when it points out) that puts a wall box of this thickness behind its face instead

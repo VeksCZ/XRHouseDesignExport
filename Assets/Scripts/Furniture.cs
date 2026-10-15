@@ -233,6 +233,7 @@ public static class Furniture
     {
         XRModelFactory.CeilingOverride = null;
         var spec = string.IsNullOrEmpty(scanName) ? null : Load(scanName);
+        XRModelFactory.ExteriorWallThickness = spec?["walls"] is JObject wj ? F(wj, "exterior", 0.25f) : 0.25f;
         if (spec?["ceilings"] is not JArray || rooms == null || rooms.Count == 0) return;
         Vector3 center = DollHouseVisualizer.CalculateCenter(rooms);
         Quaternion g = Quaternion.Euler(0, FloorPlanBuilder.CorrectionYaw(MRUKPlanExtractor.Extract(rooms)), 0);
