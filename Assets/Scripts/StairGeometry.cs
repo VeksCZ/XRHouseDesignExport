@@ -122,7 +122,7 @@ public static class StairGeometry
     {
         var list = new List<(Vector3, Quaternion, Vector3)>();
         if (edits?.stairs == null) return list;
-        const float below = 0.30f, above = 2.20f, inset = 0.05f;
+        const float below = 0.0f, above = 2.20f, inset = 0.05f;   // the wall stays up to the steps (closed under them)
         foreach (var s in edits.stairs)
         {
             var r = Resolve(s, rooms);

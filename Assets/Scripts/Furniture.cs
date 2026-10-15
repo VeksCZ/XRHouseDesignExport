@@ -122,6 +122,15 @@ public static class Furniture
             // "ceiling_x0/x1/z0/z1": a part of the room without its own ceiling (under the stairs)
             rm.parts.Add(SlopedBox(er.name + "_ceiling", "ceiling", F(er.spec, "ceiling_x0", er.x0), F(er.spec, "ceiling_x1", er.x1),
                 F(er.spec, "ceiling_z0", er.z0), F(er.spec, "ceiling_z1", er.z1), ceilAt, (x, z) => ceilAt(x, z) + slab, "CEILING"));
+            // "low_ceilings": [{"x0","x1","z0","z1","h"}] - a lowered part (e.g. under the stairs), closed up to the
+            // room's own ceiling along its x0 edge
+            foreach (var lc in (er.spec["low_ceilings"] as JArray ?? new JArray()).OfType<JObject>())
+            {
+                float lx0 = F(lc, "x0", er.x0), lx1 = F(lc, "x1", er.x1), lz0 = F(lc, "z0", er.z0), lz1 = F(lc, "z1", er.z1);
+                float ly = er.floor + F(lc, "h", 2.4f);
+                rm.parts.Add(Box(er.name + "_ceiling_low", "ceiling", lx0, lx1, ly, ly + slab, lz0, lz1, "CEILING"));
+                rm.parts.Add(SlopedBox(er.name + "_bulkhead", "wall", lx0 - 0.02f, lx0 + 0.02f, lz0, lz1, (x, z) => ly, (x, z) => ceilAt(x, z) + slab, "WALL"));
+            }
             foreach (var wl in er.spec["walls"] as JArray ?? new JArray())
             {
                 string side = wl.Type == JTokenType.String ? (string)wl : (string)wl["side"];
