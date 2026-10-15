@@ -82,6 +82,7 @@ public class WalkThroughMode : MonoBehaviour
     readonly WalkDoors walkDoors = new WalkDoors();
     // Furniture of the scan (95_Data_Furniture.json - bathroom fittings etc.).
     readonly FurnitureInModel furniture = new FurnitureInModel();
+    readonly StairRailing railing = new StairRailing();
     readonly List<Renderer> windowPanels = new List<Renderer>(); // replaced by real sashes for windows set up in edit mode
 
     /// <summary>(Re)builds everything that comes from the user's edits: stairs and door leaves.</summary>
@@ -91,6 +92,8 @@ public class WalkThroughMode : MonoBehaviour
         // The scanned-mesh models already contain the real stairs and doorways as scanned.
         if (walkModel != WalkModel.Anchor) return;
         stairs.Apply(walkVisual, yaw, center, walkRooms, HouseEditsStore.Current, true, WalkLayer, shaded: true);
+        Physics.SyncTransforms();
+        railing.Build(walkVisual.transform, yaw, center, walkRooms, HouseEditsStore.Current, WalkLayer, WalkMask);   // wooden railings
         // Where you may fall: the drawn openings (model space XZ, a little beyond their edges).
         openingRects.Clear();
         Quaternion g = Quaternion.Euler(0, yaw, 0);
