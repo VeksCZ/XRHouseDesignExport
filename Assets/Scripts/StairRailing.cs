@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using UnityEngine;
@@ -69,12 +69,15 @@ public class StairRailing
                 // nosing line: the front edge of each tread; slats stand on the tread they're over
                 Func<float, float> nose = t => y0 + rise + t / tread * rise;
                 Func<float, float> treadTop = t => y0 + Mathf.Min(n, Mathf.Floor(t / tread) + 1) * rise;
+                // the top flight's railing runs level with the one round the opening upstairs
+                bool lastFlight = i == r.flights.Count - 1;
+                float levelTop = r.topY - center.y + EdgeHeight;
                 foreach (int side in new[] { -1, 1 })
                 {
                     Vector3 off = right * side * (w / 2f - 0.03f);
-                    RailRun(a + off, b + off, right * side, t => treadTop(t), t => nose(t) + StairHeight, null);
+                    RailRun(a + off, b + off, right * side, t => treadTop(t), t => lastFlight ? levelTop : nose(t) + StairHeight, null);
                 }
-                if (i == r.flights.Count - 1) arrivals.Add((b, right, w));
+                if (lastFlight) arrivals.Add((b, right, w));
             }
             for (int i = 0; i < r.landings.Count; i++)
             {
@@ -175,7 +178,7 @@ public class StairRailing
         {
             float t = len * k / n;
             Vector3 p = a + d * t;
-            bool blocked = (skip != null && skip(p)) || WallAt(p, foot(t));
+            bool blocked = (skip != null && skip(p)) || WallAt(p, foot(t), outward);
             if (blocked) { Flush(); continue; }
             run.Add((t, p));
             float f = foot(t), tp = top(t);
@@ -186,16 +189,18 @@ public class StairRailing
     }
 
     /// <summary>A wall already stands where a slat would (checked at knee and chest height).</summary>
-    bool WallAt(Vector3 modelP, float footY)
+    bool WallAt(Vector3 modelP, float footY, Vector3 outward)
     {
-        foreach (float h in new[] { 0.45f, 0.85f })
+        static bool IsWall(Collider c) { string nm = c.name; return nm == "WALL" || nm == "WallSeg" || nm == "WallCap" || nm.EndsWith("_wall") || nm.Contains("attic"); }
+        Vector3 outW = model.TransformDirection(outward).normalized;
+        foreach (float h in new[] { 0.3f, 0.6f, 0.9f })
         {
             Vector3 w = model.TransformPoint(new Vector3(modelP.x, footY + h, modelP.z));
-            foreach (var c in Physics.OverlapSphere(w, 0.06f, mask, QueryTriggerInteraction.Ignore))
-            {
-                string nm = c.name;
-                if (nm == "WALL" || nm == "WallSeg" || nm == "WallCap" || nm.EndsWith("_wall") || nm.Contains("attic")) return true;
-            }
+            if (Physics.OverlapSphere(w, 0.06f, mask, QueryTriggerInteraction.Ignore).Any(IsWall)) return true;
+            // a wall face just beyond the edge (the stair or opening runs along it)
+            Vector3 from = w - outW * 0.10f;
+            foreach (var hit in Physics.RaycastAll(from, outW, 0.32f, mask, QueryTriggerInteraction.Ignore))
+                if (IsWall(hit.collider)) return true;
         }
         return false;
     }
