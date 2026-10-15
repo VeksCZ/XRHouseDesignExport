@@ -62,9 +62,15 @@ public class WalkThroughMode : MonoBehaviour
         // A doorway walled up / reopened changes the base model itself - rebuild it in place; anything else only
         // needs the edit-driven parts (stairs, openings, door leaves) re-applied.
         string sig = DoorCatalog.WalledUpSignature(HouseEditsStore.Current);
-        if (sig != walledUp && !rebuilding) { walledUp = sig; _ = RebuildInPlace(); }
+        // walls walled up / reopened, or a stair changed (walls stop under the stairs): rebuild the base model
+        if ((sig != walledUp || (walkModel == WalkModel.Anchor && StairSignature() != stairSig)) && !rebuilding) { walledUp = sig; _ = RebuildInPlace(); }
         else ApplyStairs();
     }
+
+    string stairSig = "";
+    static string StairSignature() => string.Join(";", HouseEditsStore.Current.stairs.Select(s =>
+        s.width.ToString("0.00") + "/" + s.tread.ToString("0.00") + "/" + string.Join(",", s.risers) + "/" +
+        string.Join(",", s.localPoints.Select(p => $"{p.x:0.00},{p.z:0.00}"))));
 
     async System.Threading.Tasks.Task RebuildInPlace()
     {
@@ -526,8 +532,10 @@ public class WalkThroughMode : MonoBehaviour
             // rooms drawn from the furniture spec (not scanned): walls next to them are built thin, as against a
             // scanned neighbour
             XRModelFactory.ExtraFaces = Furniture.ExtraFaces(Furniture.Load(HouseEditsStore.CurrentScan), walkRooms, yaw, center);
+            XRModelFactory.WallCuts = StairGeometry.WallCuts(HouseEditsStore.Current, walkRooms);   // walls stop under the stairs
+            stairSig = StairSignature();
             try { model = XRModelFactory.CreateAnchorAnalytical(walkRooms, yaw, center); }
-            finally { XRModelFactory.ExtraFaces = null; }
+            finally { XRModelFactory.ExtraFaces = null; XRModelFactory.WallCuts = null; }
             XRModelFactory.AddCeilings(model, walkRooms); // walking inside, a ceiling is what tells you you're indoors
         }
         else if (walkModel == WalkModel.Mesh) model = await XRModelFactory.CreateMeshAnalytical(walkRooms, yaw, center, forDollhouse: false);

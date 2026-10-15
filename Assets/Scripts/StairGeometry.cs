@@ -115,6 +115,35 @@ public static class StairGeometry
         return (new List<Vector3> { p0, c1, c2, end }, new List<int> { first, mid, last });
     }
 
+    /// <summary>The space every step and landing of the stairs needs (from just under its top to well above it), as
+    /// world boxes for XRModelFactory.WallCuts - a wall the stairs pass over (a room reaching in under the upper
+    /// flight) stops under them instead of cutting through.</summary>
+    public static List<(Vector3 c, Quaternion r, Vector3 half)> WallCuts(HouseEdits edits, List<MRUKRoom> rooms)
+    {
+        var list = new List<(Vector3, Quaternion, Vector3)>();
+        if (edits?.stairs == null) return list;
+        const float below = 0.30f, above = 2.20f, inset = 0.05f;
+        foreach (var s in edits.stairs)
+        {
+            var r = Resolve(s, rooms);
+            if (r == null) continue;
+            float hw = r.width / 2f - inset;
+            foreach (var (s0, s1, dir, n, y) in r.flights)
+            {
+                var rot = Quaternion.LookRotation(dir, Vector3.up);
+                for (int k = 0; k < n; k++)
+                {
+                    float top = y + (k + 1) * r.rise;
+                    Vector3 mid = s0 + dir * (r.tread * (k + 0.5f));
+                    list.Add((new Vector3(mid.x, top + (above - below) / 2f, mid.z), rot, new Vector3(hw, (above + below) / 2f, r.tread / 2f)));
+                }
+            }
+            foreach (var (c, dir, y) in r.landings)
+                list.Add((new Vector3(c.x, y + (above - below) / 2f, c.z), Quaternion.LookRotation(dir, Vector3.up), new Vector3(hw, (above + below) / 2f, hw)));
+        }
+        return list;
+    }
+
     public static Resolved Resolve(StairEdit s, List<MRUKRoom> rooms)
     {
         var pts = WorldPoints(s, rooms);

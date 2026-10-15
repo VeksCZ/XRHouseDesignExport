@@ -119,7 +119,9 @@ public static class Furniture
             const float slab = 0.05f;
             rm.parts.Add(Box(er.name + "_floor", "floor", er.x0, er.x1, er.floor - slab, er.floor, er.z0, er.z1, "FLOOR"));
             var ceilAt = er.CeilAt;
-            rm.parts.Add(SlopedBox(er.name + "_ceiling", "ceiling", er.x0, er.x1, er.z0, er.z1, ceilAt, (x, z) => ceilAt(x, z) + slab, "CEILING"));
+            // "ceiling_x0/x1/z0/z1": a part of the room without its own ceiling (under the stairs)
+            rm.parts.Add(SlopedBox(er.name + "_ceiling", "ceiling", F(er.spec, "ceiling_x0", er.x0), F(er.spec, "ceiling_x1", er.x1),
+                F(er.spec, "ceiling_z0", er.z0), F(er.spec, "ceiling_z1", er.z1), ceilAt, (x, z) => ceilAt(x, z) + slab, "CEILING"));
             foreach (var wl in er.spec["walls"] as JArray ?? new JArray())
             {
                 string side = wl.Type == JTokenType.String ? (string)wl : (string)wl["side"];

@@ -50,6 +50,7 @@ public partial class DesktopWalkApp
                     "move" => await TestMove(),
                     "measure" => await TestMeasure(outDir),
                     "jump" => await TestJump(),
+                    "setstair" => SetStair(),
                     "sun" => await TestSun(outDir),
                     "ceilfit" => CeilFit(),
                     _ => false,
@@ -408,6 +409,51 @@ public partial class DesktopWalkApp
         }
         await Shot(Path.Combine(outDir, "measure.png"));
         return r != null && r.Contains(" m");
+    }
+
+    /// <summary>Writes a stair and floor openings given in GLB axes to the scan's edits (replacing the old ones):
+    /// -stair "width|tread|r1,r2,..|x,z;x,z;..." (walking line from the bottom step's middle; the bottom floor's
+    /// height is taken from the room there), -holes "x0,z0,x1,z1;..." (rectangles in the storey above).</summary>
+    bool SetStair()
+    {
+        var rooms = Rooms();
+        if (!walk.TryGetModelFrame(out _, out float yw, out var c) || rooms.Count == 0) return false;
+        Quaternion gi = Quaternion.Inverse(Quaternion.Euler(0, yw, 0));
+        Vector3 W(float x, float y, float z) => gi * new Vector3(x, y, -z) + c;   // GLB -> scan world
+        float F(string v) => float.Parse(v.Trim(), CultureInfo.InvariantCulture);
+        var parts = (Arg("-stair") ?? "").Split('|');
+        if (parts.Length < 4) return false;
+        var xz = parts[3].Split(new[] { ';' }, StringSplitOptions.RemoveEmptyEntries).Select(t => t.Split(',')).Select(a => (F(a[0]), F(a[1]))).ToList();
+        // the bottom room and its floor height under the first point
+        Vector3 probe = W(xz[0].Item1, 0f, xz[0].Item2);
+        MRUKRoom bottom = null; float by = float.MaxValue;
+        foreach (var r in rooms)
+            foreach (var f in r.FloorAnchors)
+                if (f != null && DoorCatalog.FindRoomAt(rooms, new Vector3(probe.x, f.transform.position.y + 0.05f, probe.z)) == r && f.transform.position.y < by)
+                { bottom = r; by = f.transform.position.y; }
+        if (bottom == null) { Debug.Log("TEST setstair: no room under the first point"); return false; }
+        var pts = xz.Select(p => { var w = W(p.Item1, 0f, p.Item2); w.y = by; return w; }).ToList();
+        var s = new StairEdit
+        {
+            id = Guid.NewGuid().ToString("N"), roomUuid = DoorCatalog.RoomId(bottom), width = F(parts[0]), tread = F(parts[1]),
+            risers = parts[2].Split(',').Select(v => int.Parse(v.Trim())).ToList(),
+            localPoints = pts.Select(p => new Vector3Data(bottom.transform.InverseTransformPoint(p))).ToList(),
+        };
+        float top = StairGeometry.TopFloorY(rooms, by);
+        var holes = new List<HoleEdit>();
+        foreach (var h in (Arg("-holes") ?? "").Split(new[] { ';' }, StringSplitOptions.RemoveEmptyEntries))
+        {
+            var v = h.Split(',').Select(F).ToArray();
+            Vector3 a = W(v[0], 0f, v[1]), b = W(v[2], 0f, v[3]);
+            a.y = b.y = top;
+            var room = DoorCatalog.FindRoomAt(rooms, (a + b) / 2f + Vector3.up * 0.05f);
+            if (room == null) { Debug.Log($"TEST setstair: no room above for hole {h}"); continue; }
+            holes.Add(new HoleEdit { id = Guid.NewGuid().ToString("N"), roomUuid = DoorCatalog.RoomId(room),
+                localA = new Vector3Data(room.transform.InverseTransformPoint(a)), localB = new Vector3Data(room.transform.InverseTransformPoint(b)) });
+        }
+        HouseEditsStore.Apply(e => { e.stairs.Clear(); e.stairs.Add(s); if (holes.Count > 0) { e.holes.Clear(); e.holes.AddRange(holes); } });
+        Debug.Log($"TEST setstair: bottom {DoorCatalog.RoomId(bottom).Substring(0, 4)} at y {by - c.y:0.00} (GLB), rise {top - by:0.00}, {s.risers.Sum()} risers, {holes.Count} hole(s)");
+        return true;
     }
 
     /// <summary>-at "2026-06-21 15:00;..." (local times), -start/-lookat (GLB): one shot per time.</summary>

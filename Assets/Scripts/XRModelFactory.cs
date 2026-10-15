@@ -33,8 +33,9 @@ public static class XRModelFactory
             .ToList();
         var uniqueOpenings = new List<MRUKAnchor>();
         foreach (var o in allOpenings)
-            if (!uniqueOpenings.Any(existing => Vector3.Distance(o.transform.position, existing.transform.position) < 0.15f))
+            if (!uniqueOpenings.Any(existing => SameOpening(o, existing)))
                 uniqueOpenings.Add(o);
+        FitOpenings(allOpenings, uniqueOpenings);
         var openingsPlacedAnywhere = new HashSet<MRUKAnchor>();
 
         foreach (var room in rooms) {
@@ -73,18 +74,23 @@ public static class XRModelFactory
                 float wallThickness = EstimateWallThickness(room, rooms, wallPos, -(wallRot * Vector3.forward), wW, wallRot * Vector3.right, ExteriorWallThickness, out float wallShift, wH);
                 Vector3 wallOff = WallBoxOffset(wallThickness, wallShift, 1f); // behind the face, not centred on it
                 var wallHoles = uniqueOpenings.Where(o => {
-                    Vector3 lp = Quaternion.Inverse(wallRot) * (o.transform.position - wallPos);
+                    Vector3 lp = Quaternion.Inverse(wallRot) * (OPos(o) - wallPos);
                     return Mathf.Abs(lp.z) < 0.25f && Mathf.Abs(lp.x) < (wW / 2f + 0.1f) && Mathf.Abs(lp.y) < (wH / 2f + 0.1f);
                 }).ToList();
+                var cuts = CutRects(wallPos, wallRot, wW, wH);   // where a stair passes through this wall
 
-                if (wallHoles.Count > 0) {
+                if (wallHoles.Count > 0 || cuts.Count > 0) {
                     var xC = new List<float> { -wW/2f, wW/2f };
                     var yC = new List<float> { -wH/2f, wH/2f };
                     foreach(var h in wallHoles) {
-                        Vector3 lp = Quaternion.Inverse(wallRot) * (h.transform.position - wallPos);
-                        float hw = h.PlaneRect.Value.width/2f, hh = h.PlaneRect.Value.height/2f;
+                        Vector3 lp = Quaternion.Inverse(wallRot) * (OPos(h) - wallPos);
+                        float hw = OW(h)/2f, hh = h.PlaneRect.Value.height/2f;
                         xC.Add(Mathf.Clamp(lp.x - hw, -wW/2f, wW/2f)); xC.Add(Mathf.Clamp(lp.x + hw, -wW/2f, wW/2f));
                         yC.Add(Mathf.Clamp(lp.y - hh, -wH/2f, wH/2f)); yC.Add(Mathf.Clamp(lp.y + hh, -wH/2f, wH/2f));
+                    }
+                    foreach (var k in cuts) {
+                        xC.Add(Mathf.Clamp(k.cx - k.hw, -wW/2f, wW/2f)); xC.Add(Mathf.Clamp(k.cx + k.hw, -wW/2f, wW/2f));
+                        yC.Add(Mathf.Clamp(k.cy - k.hh, -wH/2f, wH/2f)); yC.Add(Mathf.Clamp(k.cy + k.hh, -wH/2f, wH/2f));
                     }
                     var sX = xC.Distinct().OrderBy(x => x).ToList();
                     var sY = yC.Distinct().OrderBy(y => y).ToList();
@@ -94,10 +100,10 @@ public static class XRModelFactory
                             if (x2-x1 < 0.01f || y2-y1 < 0.01f) continue;
                             float midX = (x1+x2)/2f, midY = (y1+y2)/2f;
                             bool isHole = wallHoles.Any(h => {
-                                Vector3 lp = Quaternion.Inverse(wallRot) * (h.transform.position - wallPos);
-                                float hw = h.PlaneRect.Value.width/2f, hh = h.PlaneRect.Value.height/2f;
+                                Vector3 lp = Quaternion.Inverse(wallRot) * (OPos(h) - wallPos);
+                                float hw = OW(h)/2f, hh = h.PlaneRect.Value.height/2f;
                                 return midX > lp.x-hw+0.01f && midX < lp.x+hw-0.01f && midY > lp.y-hh+0.01f && midY < lp.y+hh-0.01f;
-                            });
+                            }) || cuts.Any(k => midX > k.cx - k.hw && midX < k.cx + k.hw && midY > k.cy - k.hh && midY < k.cy + k.hh);
                             if (!isHole) rm.parts.Add(CreateBoxPart("WallSeg", wallPos + wallRot * new Vector3(midX, midY, 0), wallRot, new Vector3(x2-x1, y2-y1, wallThickness), "WALL", center, rotation, wallOff));
                         }
                     }
@@ -130,15 +136,15 @@ public static class XRModelFactory
                     if (!openingsPlaced.Add(h)) continue;
                     openingsPlacedAnywhere.Add(h);
                     bool isD = MRUKDataProcessor.IsDoor(h);
-                    Vector3 lp = Quaternion.Inverse(wallRot) * (h.transform.position - wallPos);
+                    Vector3 lp = Quaternion.Inverse(wallRot) * (OPos(h) - wallPos);
                     Vector3 openingPos = wallPos + wallRot * new Vector3(lp.x, lp.y, 0);
-                    rm.parts.Add(CreateBoxPart(h.Label.ToString(), openingPos, wallRot, new Vector3(h.PlaneRect.Value.width, h.PlaneRect.Value.height, isD ? 0.10f : 0.12f), isD ? "DOOR" : "WINDOW", center, rotation));
+                    rm.parts.Add(CreateBoxPart(h.Label.ToString(), openingPos, wallRot, new Vector3(OW(h), h.PlaneRect.Value.height, isD ? 0.10f : 0.12f), isD ? "DOOR" : "WINDOW", center, rotation));
                     float ceilAt = SampleCeilingHeight(room.CeilingAnchors, openingPos, floorY + wH) - floorY;
-                    AddOpeningDimensionLabels(model.dimensions, openingPos, wallRot, h.PlaneRect.Value.width, h.PlaneRect.Value.height, floorY, ceilAt, wallThickness, center, gRotForLabels);
+                    AddOpeningDimensionLabels(model.dimensions, openingPos, wallRot, OW(h), h.PlaneRect.Value.height, floorY, ceilAt, wallThickness, center, gRotForLabels);
                 }
                 AddWallChain(model.dimensions, wallPos, wallRot, wW, wallHoles.Select(hh => {
-                    Vector3 lp = Quaternion.Inverse(wallRot) * (hh.transform.position - wallPos);
-                    return (lp.x - hh.PlaneRect.Value.width / 2f, lp.x + hh.PlaneRect.Value.width / 2f);
+                    Vector3 lp = Quaternion.Inverse(wallRot) * (OPos(hh) - wallPos);
+                    return (lp.x - OW(hh) / 2f, lp.x + OW(hh) / 2f);
                 }).ToList(), floorY, wallThickness, center, gRotForLabels);
             }
             model.rooms.Add(rm);
@@ -149,7 +155,7 @@ public static class XRModelFactory
             bool isD = MRUKDataProcessor.IsDoor(o);
             Quaternion openingRot = SnapToPerpendicular(o.transform.rotation, rotation);
             var bucket = model.rooms.Count > 0 ? model.rooms[0] : null;
-            bucket?.parts.Add(CreateBoxPart(o.Label.ToString(), o.transform.position, openingRot, new Vector3(o.PlaneRect.Value.width, o.PlaneRect.Value.height, isD ? 0.10f : 0.12f), isD ? "DOOR" : "WINDOW", center, rotation));
+            bucket?.parts.Add(CreateBoxPart(o.Label.ToString(), OPos(o), openingRot, new Vector3(OW(o), o.PlaneRect.Value.height, isD ? 0.10f : 0.12f), isD ? "DOOR" : "WINDOW", center, rotation));
         }
         return model;
     }
@@ -231,8 +237,9 @@ public static class XRModelFactory
             .ToList();
         var uniqueOpenings = new List<MRUKAnchor>();
         foreach (var o in allOpenings) {
-            if (!uniqueOpenings.Any(existing => Vector3.Distance(o.transform.position, existing.transform.position) < 0.15f))
+            if (!uniqueOpenings.Any(existing => SameOpening(o, existing)))
                 uniqueOpenings.Add(o);
+        FitOpenings(allOpenings, uniqueOpenings);
         }
 
         var addedOpeningsAnywhere = new HashSet<Guid>();
@@ -302,7 +309,7 @@ public static class XRModelFactory
                     Vector3 wallOff = WallBoxOffset(wallThickness, wallShift, -1f); // local +Z points out of the room here
 
                     var holes = uniqueOpenings.Where(o => {
-                        Vector3 lp = Quaternion.Inverse(segRot) * (o.transform.position - segMid);
+                        Vector3 lp = Quaternion.Inverse(segRot) * (OPos(o) - segMid);
                         return Mathf.Abs(lp.z) < 0.3f && Mathf.Abs(lp.x) < (segLen/2f + 0.1f);
                     }).ToList();
 
@@ -311,8 +318,8 @@ public static class XRModelFactory
                         var xC = new List<float> { -segLen/2f, segLen/2f };
                         var yC = new List<float> { -hMin/2f, hMin/2f };
                         foreach(var ho in holes) {
-                            Vector3 lp = Quaternion.Inverse(segRot) * (ho.transform.position - segMid);
-                            float hw = ho.PlaneRect.Value.width/2f, hh = ho.PlaneRect.Value.height/2f;
+                            Vector3 lp = Quaternion.Inverse(segRot) * (OPos(ho) - segMid);
+                            float hw = OW(ho)/2f, hh = ho.PlaneRect.Value.height/2f;
                             xC.Add(Mathf.Clamp(lp.x - hw, -segLen/2f, segLen/2f)); xC.Add(Mathf.Clamp(lp.x + hw, -segLen/2f, segLen/2f));
                             yC.Add(Mathf.Clamp(lp.y - hh, -hMin/2f, hMin/2f)); yC.Add(Mathf.Clamp(lp.y + hh, -hMin/2f, hMin/2f));
                         }
@@ -324,8 +331,8 @@ public static class XRModelFactory
                                 if (x2-x1 < 0.005f || y2-y1 < 0.005f) continue;
                                 float midX = (x1+x2)/2f, midY = (y1+y2)/2f;
                                 bool isHole = holes.Any(ho => {
-                                    Vector3 lp = Quaternion.Inverse(segRot) * (ho.transform.position - segMid);
-                                    float hw = ho.PlaneRect.Value.width/2f, hh = ho.PlaneRect.Value.height/2f;
+                                    Vector3 lp = Quaternion.Inverse(segRot) * (OPos(ho) - segMid);
+                                    float hw = OW(ho)/2f, hh = ho.PlaneRect.Value.height/2f;
                                     return midX > lp.x-hw+0.005f && midX < lp.x+hw-0.005f && midY > lp.y-hh+0.005f && midY < lp.y+hh-0.005f;
                                 });
                                 if (!isHole) rm.parts.Add(CreateBoxPart("WallSeg", segMid + segRot * new Vector3(midX, midY, 0), segRot, new Vector3(x2-x1, y2-y1, wallThickness), "WALL", center, rotation, wallOff));
@@ -347,7 +354,7 @@ public static class XRModelFactory
             // One box per opening that actually got a hole cut in this room (once per room, not per floor island).
             foreach (var o in roomOpenings) {
                 bool isD = MRUKDataProcessor.IsDoor(o);
-                rm.parts.Add(CreateBoxPart(o.Label.ToString(), o.transform.position, o.transform.rotation, new Vector3(o.PlaneRect.Value.width, o.PlaneRect.Value.height, isD ? 0.12f : 0.14f), isD ? "DOOR" : "WINDOW", center, rotation));
+                rm.parts.Add(CreateBoxPart(o.Label.ToString(), OPos(o), o.transform.rotation, new Vector3(OW(o), o.PlaneRect.Value.height, isD ? 0.12f : 0.14f), isD ? "DOOR" : "WINDOW", center, rotation));
                 addedOpeningsAnywhere.Add(o.Anchor.Uuid);
             }
             model.rooms.Add(rm);
@@ -356,7 +363,7 @@ public static class XRModelFactory
         foreach (var o in uniqueOpenings.Where(o => !addedOpeningsAnywhere.Contains(o.Anchor.Uuid))) {
             bool isD = MRUKDataProcessor.IsDoor(o);
             var bucket = model.rooms.Count > 0 ? model.rooms[0] : null;
-            bucket?.parts.Add(CreateBoxPart(o.Label.ToString(), o.transform.position, o.transform.rotation, new Vector3(o.PlaneRect.Value.width, o.PlaneRect.Value.height, isD ? 0.12f : 0.14f), isD ? "DOOR" : "WINDOW", center, rotation));
+            bucket?.parts.Add(CreateBoxPart(o.Label.ToString(), OPos(o), o.transform.rotation, new Vector3(OW(o), o.PlaneRect.Value.height, isD ? 0.12f : 0.14f), isD ? "DOOR" : "WINDOW", center, rotation));
         }
 return model;
     }
@@ -499,6 +506,39 @@ return model;
     /// scan but drawn from the spec (Furniture.ExtraFaces). Set by the walk-through around building its model.</summary>
     public static List<(Vector3 pos, Vector3 inward, float width)> ExtraFaces;
 
+    // Where each (de-duplicated) opening's hole really goes: a doorway between two scanned rooms has an anchor on
+    // each face, a few cm apart along the wall - the walk-through's door leaf (DoorCatalog) sits at their average,
+    // so the hole does too, or a slit stayed open beside the closed leaf.
+    static readonly Dictionary<MRUKAnchor, Vector3> openingPos = new Dictionary<MRUKAnchor, Vector3>();
+    static Vector3 OPos(MRUKAnchor a) => openingPos.TryGetValue(a, out var p) ? p : a.transform.position;
+    static float OW(MRUKAnchor a) => a.PlaneRect.Value.width;
+
+    /// <summary>Two anchors for one opening: the rooms on either side each scan it on their own face of the wall -
+    /// parallel, at most a wall's thickness apart and a few cm off along it (DoorCatalog matches them the same way).</summary>
+    static bool SameOpening(MRUKAnchor a, MRUKAnchor b)
+    {
+        if (a == b) return true;
+        Vector3 d = b.transform.position - a.transform.position;
+        if (d.magnitude < 0.15f) return true;
+        Vector3 na = a.transform.rotation * Vector3.forward, nb = b.transform.rotation * Vector3.forward;
+        if (Mathf.Abs(Vector3.Dot(na, nb)) < 0.9f) return false;
+        Vector3 ra = a.transform.rotation * Vector3.right;
+        return Mathf.Abs(Vector3.Dot(d, na)) < 0.45f && Mathf.Abs(Vector3.Dot(d, ra)) < 0.25f && Mathf.Abs(d.y) < 0.25f;
+    }
+
+    static void FitOpenings(List<MRUKAnchor> all, List<MRUKAnchor> unique)
+    {
+        openingPos.Clear();
+        foreach (var u in unique)
+        {
+            var mates = all.Where(a => SameOpening(a, u)).ToList();
+            if (mates.Count < 2) continue;
+            Vector3 sum = Vector3.zero;
+            foreach (var m in mates) sum += m.transform.position;
+            openingPos[u] = sum / mates.Count;
+        }
+    }
+
     /// <summary>Ceilings from the furniture spec ("ceilings"): (a room's CeilingAnchors, world probe) -> world Y, or
     /// null to keep the scanned one. Installed per scan by Furniture.InstallCeilings.</summary>
     public static System.Func<IEnumerable<MRUKAnchor>, Vector3, float?> CeilingOverride;
@@ -506,6 +546,33 @@ return model;
     /// <summary>Thickness of a wall with no scanned room behind it (the outer walls) - the spec's
     /// "walls": {"exterior": m} (Furniture.InstallCeilings), else a typical 25 cm.</summary>
     public static float ExteriorWallThickness = 0.25f;
+
+    /// <summary>World boxes (centre, rotation, half extents) a wall must not fill - the space a stair needs where
+    /// it passes over a wall (StairGeometry.WallCuts). Set by the walk-through around building its model.</summary>
+    public static List<(Vector3 c, Quaternion r, Vector3 half)> WallCuts;
+
+    /// <summary>The wall-local rectangles (centre x/y, half width/height) of every WallCuts box this wall's plane
+    /// runs through - only boxes that really cross it, not ones that merely touch its face (a stair along a wall).</summary>
+    static List<(float cx, float cy, float hw, float hh)> CutRects(Vector3 wallPos, Quaternion wallRot, float wW, float wH)
+    {
+        var res = new List<(float, float, float, float)>();
+        if (WallCuts == null) return res;
+        Quaternion inv = Quaternion.Inverse(wallRot);
+        foreach (var (c, r, half) in WallCuts)
+        {
+            float x0 = float.MaxValue, x1 = float.MinValue, y0 = float.MaxValue, y1 = float.MinValue, z0 = float.MaxValue, z1 = float.MinValue;
+            for (int k = 0; k < 8; k++)
+            {
+                Vector3 corner = c + r * Vector3.Scale(half, new Vector3((k & 1) == 0 ? -1 : 1, (k & 2) == 0 ? -1 : 1, (k & 4) == 0 ? -1 : 1));
+                Vector3 l = inv * (corner - wallPos);
+                x0 = Mathf.Min(x0, l.x); x1 = Mathf.Max(x1, l.x); y0 = Mathf.Min(y0, l.y); y1 = Mathf.Max(y1, l.y); z0 = Mathf.Min(z0, l.z); z1 = Mathf.Max(z1, l.z);
+            }
+            if (z0 > -0.03f || z1 < 0.03f) continue;                       // doesn't cross the face
+            if (x1 < -wW / 2f || x0 > wW / 2f || y1 < -wH / 2f || y0 > wH / 2f) continue;
+            res.Add(((x0 + x1) / 2f, (y0 + y1) / 2f, (x1 - x0) / 2f, (y1 - y0) / 2f));
+        }
+        return res;
+    }
 
     /// <summary>Local offset in metres (wall-box space; <paramref name="inwardZ"/> = +1 when the box's local +Z
     /// points into the room, -1 when it points out) that puts a wall box of this thickness behind its face instead
