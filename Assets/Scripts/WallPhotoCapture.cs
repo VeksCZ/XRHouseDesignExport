@@ -28,7 +28,7 @@ using Meta.XR.MRUtilityKit;
 /// a moment looking at something not photographed yet. Every photo's footprint is outlined on the real surfaces
 /// (coverage), so it's easy to see what is still missing.
 ///
-/// Dense (for a Gaussian splat of the bare house): while on, a frame is taken every few centimetres / degrees of
+/// Dense (for a Gaussian splat of the bare house): while on, a frame is taken every ~15 cm / 10 degrees of
 /// head motion as you walk slowly (motion-blur gated), into the session's Dense/ subfolder - hundreds per room. Each
 /// dense frame also carries a grid of seed points (rays hit against the scan, coloured from the photo) for the
 /// splat's initial point cloud. Every photo additionally stores its pose in one fixed "house frame" (the room with the
@@ -50,14 +50,14 @@ public class WallPhotoCapture : MonoBehaviour
     // Auto shot: head still for StillTime (below these speeds), at least MinInterval since the last shot, and the
     // view new: centre ray pointing >NewAngle away from every earlier shot standing nearby, or hitting >NewDistance
     // from every earlier shot's centre hit.
-    const float StillTime = 0.45f, StillDegPerSec = 6f, StillMetersPerSec = 0.05f, MinInterval = 1.2f;
+    const float StillTime = 0.25f, StillDegPerSec = 8f, StillMetersPerSec = 0.06f, MinInterval = 0.6f;
     const float NewAngle = 22f, NewDistance = 0.9f;
-    const int OutlineSteps = 6; // rays per image edge for the coverage outline
 
     public const string DenseFolder = "Dense";
     // Dense: a frame after DenseMove metres or DenseTurn degrees of camera motion, at most every DenseInterval, and
-    // only while the head moves slowly enough for a sharp image.
-    const float DenseMove = 0.12f, DenseTurn = 8f, DenseInterval = 0.3f, DenseMaxDegPerSec = 40f, DenseMaxMetersPerSec = 0.6f;
+    // only while the head turns slowly enough for a sharp image. Same defaults as QuestRoomScan's KeyframeCollector
+    // (0.15 m / 10 deg / 0.25 s / 120 deg/s), which its splat training is tuned on.
+    const float DenseMove = 0.15f, DenseTurn = 10f, DenseInterval = 0.25f, DenseMaxDegPerSec = 120f, DenseMaxMetersPerSec = 1.0f;
     const int SeedCols = 8, SeedRows = 6, MaxPendingWrites = 3;
 
     static readonly Color CoverageColor = new Color(0.25f, 1f, 0.45f, 1f);
@@ -68,8 +68,29 @@ public class WallPhotoCapture : MonoBehaviour
     int nextIndex, denseCount, nextDenseIndex;
     Vector3 lastDensePos; Quaternion lastDenseRot; bool haveDense; float lastDenseTime = -10f;
     readonly List<WallPhotoMeta> shots = new List<WallPhotoMeta>();
-    readonly List<LineRenderer> outlines = new List<LineRenderer>();
-    Material lineMat;
+    // One footprint per photo: a translucent fill on the surfaces it covers plus its outline.
+    class Footprint { public GameObject go; public LineRenderer line; public Mesh mesh; }
+    readonly List<Footprint> footprints = new List<Footprint>();
+    Material lineMat, fillMat;
+    const int FootGrid = 8; // rays per image side for the footprint fill
+#if META_XR_SDK_INSTALLED
+    // GetValidRooms is far too heavy to call per ray (it re-extracts every room's plan, and a room without a floor
+    // makes the Meta SDK log an error with a stack trace each call) - refreshed only when MRUK's room list changes.
+    static List<MRUKRoom> roomCache = new List<MRUKRoom>();
+    static int roomCacheCount = -1;
+    static List<MRUKRoom> Rooms
+    {
+        get
+        {
+            var m = MRUK.Instance;
+            int n = m != null ? m.Rooms.Count : 0;
+            if (n != roomCacheCount) { roomCache = m != null ? MRUKDataProcessor.GetValidRooms(m) : new List<MRUKRoom>(); roomCacheCount = n; }
+            return roomCache;
+        }
+    }
+#endif
+    // Pixel buffers reused between captures (5 MB each at 1280x960 - a fresh one per frame made the GC stall).
+    readonly Stack<byte[]> pixelPool = new Stack<byte[]>();
     Transform head;
 
     // stillness tracking
@@ -77,11 +98,32 @@ public class WallPhotoCapture : MonoBehaviour
     bool preparing, capturing;
     int pendingWrites;
 
+    // Panel: rides above the edit toolbar on the left controller (grip-drag it away and it stays put).
     Canvas panel;
-    TMP_Text countText, statusText;
-    UnityEngine.UI.Button autoButton, denseButton, coverageButton;
-    Vector3 panelPos; Quaternion panelRot; bool panelPlaced;
-    const float PW = 600f, PH = 250f, PScale = 0.0006f, RowH = 62f, Gap = 8f;
+    PanelDrag panelDrag;
+    TMP_Text countText, roomText, statusText;
+    UnityEngine.UI.Button cableButton, denseButton, coverageButton;
+    Transform leftHand;
+    const float PW = 560f, PH = 300f, PScale = 0.00045f, RowH = 62f, Gap = 8f;
+
+    // HUD: one line of live guidance just below the centre of view (why it is or isn't shooting right now).
+    Canvas hud;
+    TMP_Text hudText;
+    UnityEngine.UI.Image hudBar, hudFrame;
+    float flashUntil, tipUntil;
+    string flashText;
+    const string TipPref = "WallPhotos.TipShown";
+
+    // State the HUD explains.
+    enum View { Unknown, Nothing, Covered, Moving, Settling }
+    View view;
+    bool started;
+    float retryAt;
+    readonly Dictionary<string, int> cableByRoom = new Dictionary<string, int>(), denseByRoom = new Dictionary<string, int>();
+    string currentRoomUuid, currentRoomName;
+
+    AudioSource audioSrc;
+    AudioClip shutterClip;
 
 #if META_XR_SDK_INSTALLED
     PassthroughCameraAccess cam;
@@ -102,8 +144,11 @@ public class WallPhotoCapture : MonoBehaviour
         if (editMode != null) editMode.TriggerPressed -= OnTrigger;
         StopCamera();
         ClosePanel();
+        CloseHud();
         ClearOutlines();
         if (lineMat) Destroy(lineMat);
+        if (fillMat) Destroy(fillMat);
+        if (shutterClip) Destroy(shutterClip);
     }
 
     bool Active => editMode != null && editMode.IsOn && editMode.CurrentTool == EditModeController.Tool.Photos;
@@ -112,52 +157,87 @@ public class WallPhotoCapture : MonoBehaviour
     {
         if (!Active)
         {
-            if (wasActive) { wasActive = false; StopCamera(); ClosePanel(); ClearOutlines(); }
+            if (wasActive) { wasActive = false; started = false; StopCamera(); ClosePanel(); CloseHud(); ClearOutlines(); }
             return;
         }
-        if (!wasActive) { wasActive = true; Begin(); }
+        wasActive = true;
+        if (!started && !preparing && Time.time >= retryAt) Begin();
 #if META_XR_SDK_INSTALLED
-        if (cam == null || !cam.IsPlaying) return;
+        if (cam == null || !cam.IsPlaying) { UpdateHud(); return; }
         if (!cameraReady) { cameraReady = true; RefreshPanel(); }
         TrackStillness();
+        TrackRoom();
+        view = View.Unknown;
         if (!shotRequested && !capturing)
         {
             if (dense) { if (pendingWrites < MaxPendingWrites && DenseDue()) shotRequested = requestDense = true; }
-            else if (auto && stillFor >= StillTime && Time.time - lastShotTime >= MinInterval && IsNewView())
-            { shotRequested = true; requestDense = false; }
+            else if (auto)
+            {
+                view = ClassifyView();
+                if (view == View.Settling && stillFor >= StillTime && Time.time - lastShotTime >= MinInterval)
+                { shotRequested = true; requestDense = false; }
+            }
         }
         PumpCapture();
 #endif
+        UpdateHud();
+    }
+
+    void LateUpdate()
+    {
+        FollowHand();
+        PlaceHud();
     }
 
     // ---------- session ----------
 
     async void Begin()
     {
+        var rig = FindFirstObjectByType<OVRCameraRig>();
+        head = rig ? rig.centerEyeAnchor : Camera.main ? Camera.main.transform : null;
+        leftHand = rig ? rig.leftHandAnchor : null;
+        BuildHud();
         if (walk != null && walk.IsOn)
         {
-            uiLog?.AddLog("<color=orange>Photos: leave the walk-through first (A) - photos are taken over passthrough.</color>");
+            // Photos are taken of the real house, over passthrough - step out of the model first.
+            uiLog?.AddLog("Photos: leaving the walk-through (photos are taken over passthrough).");
+            uiLog?.OnToggleWalk();
+            retryAt = Time.time + 1f;
             return;
         }
-        if (preparing) return;
         preparing = true;
         try
         {
-            var rig = FindFirstObjectByType<OVRCameraRig>();
-            head = rig ? rig.centerEyeAnchor : Camera.main ? Camera.main.transform : null;
+            SetHud("Loading the live scan...");
             if (exporter == null || !await exporter.EnsureLiveLoaded(uiLog))
             {
                 uiLog?.AddLog("<color=red>Photos: the live scan could not be loaded - photos need it to line up with the real house.</color>");
+                SetHud("<color=#ff6060>Live scan not available - retrying...</color>");
+                retryAt = Time.time + 5f;
                 return;
             }
             if (!Active) return;
             OpenSession();
             BuildPanel();
             RebuildOutlines();
-            if (!await EnsurePermission()) { SetStatus("<color=red>No camera permission</color>"); return; }
+            SetHud("Asking for camera access...");
+            if (!await EnsurePermission())
+            {
+                SetStatus("<color=red>No camera permission - allow 'Headset cameras' for this app in Settings.</color>");
+                SetHud("<color=#ff6060>Camera permission denied</color>");
+                retryAt = Time.time + 10f;
+                return;
+            }
             if (!Active) return;
             StartCamera();
-            uiLog?.AddLog($"Photos: trigger = photo{(auto ? ", auto shots when you hold your head still" : "")}. Saving to {Path.GetFileName(sessionDir)}.");
+            started = true;
+            if (PlayerPrefs.GetInt(TipPref, 0) == 0)
+            {
+                PlayerPrefs.SetInt(TipPref, 1);
+                PlayerPrefs.Save();
+                tipUntil = Time.time + 9f;
+            }
+            uiLog?.AddLog($"Photos: look at a bare wall and hold still - it shoots by itself; trigger = photo now. Saving to {Path.GetFileName(sessionDir)}.");
         }
         finally { preparing = false; }
     }
@@ -175,18 +255,32 @@ public class WallPhotoCapture : MonoBehaviour
             catch (Exception e) { Debug.LogWarning($"[WallPhotos] skipping {f}: {e.Message}"); }
         }
         nextIndex = shots.Count == 0 ? 1 : shots.Max(s => s.index) + 1;
+        cableByRoom.Clear(); denseByRoom.Clear();
+        foreach (var sh in shots) Count(cableByRoom, sh.roomUuid);
 
         string denseDir = Path.Combine(sessionDir, DenseFolder);
         Directory.CreateDirectory(denseDir);
         var denseIdx = Directory.GetFiles(denseDir, "*.json")
             .Select(f => int.TryParse(Path.GetFileNameWithoutExtension(f), out int i) ? i : 0).ToList();
         denseCount = denseIdx.Count;
+        // Per-room dense counts without parsing every (seed-laden) sidecar: just find its roomUuid.
+        foreach (var f in Directory.GetFiles(denseDir, "*.json"))
+        {
+            try
+            {
+                string txt = File.ReadAllText(f);
+                int i = txt.IndexOf("\"roomUuid\":\"", StringComparison.Ordinal);
+                if (i >= 0) { i += 12; int j = txt.IndexOf('"', i); if (j > i) Count(denseByRoom, txt.Substring(i, j - i)); }
+            }
+            catch { }
+        }
         nextDenseIndex = denseIdx.Count == 0 ? 1 : denseIdx.Max() + 1;
         haveDense = false;
 
 #if META_XR_SDK_INSTALLED
         // The house frame: the room with the smallest UUID - or the one this session already used.
-        var rooms = MRUK.Instance != null ? MRUKDataProcessor.GetValidRooms(MRUK.Instance) : new List<MRUKRoom>();
+        roomCacheCount = -1; // the live scan may have been (re)loaded
+        var rooms = Rooms;
         houseRoomUuid = shots.Select(x => x.houseRoomUuid).FirstOrDefault(u => !string.IsNullOrEmpty(u) && rooms.Any(r => r.Anchor.Uuid.ToString() == u))
                         ?? rooms.Select(r => r.Anchor.Uuid.ToString()).OrderBy(u => u, StringComparer.Ordinal).FirstOrDefault();
 
@@ -306,7 +400,10 @@ public class WallPhotoCapture : MonoBehaviour
         {
             capturing = false;
             if (req.hasError) { if (!isDense) uiLog?.AddLog("<color=red>Photos: camera readback failed.</color>"); return; }
-            byte[] pixels = req.GetData<byte>().ToArray();
+            var data = req.GetData<byte>();
+            byte[] pixels;
+            lock (pixelPool) pixels = pixelPool.Count > 0 && pixelPool.Peek().Length == data.Length ? pixelPool.Pop() : new byte[data.Length];
+            data.CopyTo(pixels);
             int w = req.width, h = req.height;
             meta.imageWidth = w; meta.imageHeight = h;
             for (int i = 0; i < seedUv.Count; i++)
@@ -324,6 +421,7 @@ public class WallPhotoCapture : MonoBehaviour
                 // Rows come bottom-up (Unity texture order), which is what the encoder expects: the JPG is upright,
                 // with viewport (0,0) = its bottom-left pixel.
                 byte[] bytes = ImageConversion.EncodeArrayToJPG(pixels, GraphicsFormat.R8G8B8A8_UNorm, (uint)w, (uint)h, 0, isDense ? 88 : 92);
+                lock (pixelPool) if (pixelPool.Count < MaxPendingWrites + 1) pixelPool.Push(pixels);
                 File.WriteAllBytes(jpg, bytes);
                 File.WriteAllText(json, metaJson); // the JSON last: a photo counts once both exist
             }).ContinueWith(t =>
@@ -336,13 +434,19 @@ public class WallPhotoCapture : MonoBehaviour
             {
                 denseCount++;
                 nextDenseIndex++;
-                if (denseCount % 10 == 0) RefreshPanel();
+                Count(denseByRoom, meta.roomUuid);
+                Click(0.12f);
+                flashUntil = Time.time + 0.12f; flashText = null;
+                if (denseCount % 5 == 0) RefreshPanel();
                 return;
             }
             shots.Add(meta);
             nextIndex++;
+            Count(cableByRoom, meta.roomUuid);
             AddOutline(meta, true);
             Haptic();
+            Click(0.6f);
+            flashUntil = Time.time + 0.9f; flashText = $"<color=#7dff9a>Photo {shots.Count} saved</color>";
             RefreshPanel();
         });
     }
@@ -362,7 +466,7 @@ public class WallPhotoCapture : MonoBehaviour
 
     WallPhotoMeta BuildMeta(Pose pose, DateTime stamp, int w, int h, bool isDense)
     {
-        var rooms = MRUK.Instance != null ? MRUKDataProcessor.GetValidRooms(MRUK.Instance) : new List<MRUKRoom>();
+        var rooms = Rooms;
         var room = rooms.FirstOrDefault(r => r.IsPositionInRoom(pose.position))
                    ?? rooms.OrderBy(r => Vector3.Distance(r.transform.position, pose.position)).FirstOrDefault();
         if (room == null) return null;
@@ -424,7 +528,7 @@ public class WallPhotoCapture : MonoBehaviour
         point = Vector3.zero; label = null;
         float best = float.MaxValue;
         if (MRUK.Instance == null) return false;
-        foreach (var room in MRUKDataProcessor.GetValidRooms(MRUK.Instance))
+        foreach (var room in Rooms)
         {
             if (room.Raycast(ray, 15f, out RaycastHit hit, out MRUKAnchor anchor) && hit.distance < best)
             {
@@ -433,6 +537,17 @@ public class WallPhotoCapture : MonoBehaviour
             }
         }
         return best < float.MaxValue;
+    }
+
+    void TrackRoom()
+    {
+        if (!head || MRUK.Instance == null || Time.frameCount % 15 != 0) return;
+        var room = Rooms.FirstOrDefault(r => r.IsPositionInRoom(head.position));
+        string uuid = room != null ? room.Anchor.Uuid.ToString() : null;
+        if (uuid == currentRoomUuid) return;
+        currentRoomUuid = uuid;
+        currentRoomName = room != null ? MRUKDataProcessor.GetRoomLabel(room) : null;
+        RefreshPanel();
     }
 
     // ---------- auto shot ----------
@@ -445,6 +560,17 @@ public class WallPhotoCapture : MonoBehaviour
         float mps = headMetersPerSec = Vector3.Distance(lastHeadPos, head.position) / dt;
         lastHeadPos = head.position; lastHeadRot = head.rotation;
         stillFor = deg < StillDegPerSec && mps < StillMetersPerSec ? stillFor + dt : 0f;
+    }
+
+    /// <summary>What the auto shot sees right now: nothing scanned, an already covered spot, a new spot while the head
+    /// still moves, or a new spot it is settling on (shoots once stillFor reaches StillTime).</summary>
+    View ClassifyView()
+    {
+        Pose pose = cam.GetCameraPose();
+        var ray = cam.ViewportPointToRay(new Vector2(0.5f, 0.5f), pose);
+        if (!Hit(ray, out _, out _)) return View.Nothing;
+        if (!IsNewView()) return View.Covered;
+        return stillFor > 0 ? View.Settling : View.Moving;
     }
 
     bool IsNewView()
@@ -484,58 +610,104 @@ public class WallPhotoCapture : MonoBehaviour
         for (int i = 0; i < shots.Count; i++) AddOutline(shots[i], i == shots.Count - 1);
     }
 
-    /// <summary>The photo's footprint on the scanned surfaces: rays along the image border, hit against the scan
-    /// (so it wraps around room corners), drawn as one closed line just in front of the surfaces.</summary>
+    /// <summary>The photo's footprint on the scanned surfaces: a grid of rays through the image hit against the scan
+    /// (so it wraps around room corners), drawn as a translucent fill just in front of the surfaces plus its outline -
+    /// easy to see at a glance what is already covered.</summary>
     void AddOutline(WallPhotoMeta s, bool last)
     {
         if (!showCoverage || !ShotWorld(s, out var pos, out var rot)) return;
-        if (last && outlines.Count > 0) SetColor(outlines[outlines.Count - 1], CoverageColor);
-        var pts = new List<Vector3>();
-        OutlineEdge(s, pos, rot, new Vector2(0, 0), new Vector2(1, 0), pts);
-        OutlineEdge(s, pos, rot, new Vector2(1, 0), new Vector2(1, 1), pts);
-        OutlineEdge(s, pos, rot, new Vector2(1, 1), new Vector2(0, 1), pts);
-        OutlineEdge(s, pos, rot, new Vector2(0, 1), new Vector2(0, 0), pts);
-        if (pts.Count < 3) return;
+        if (last && footprints.Count > 0) Recolor(footprints[footprints.Count - 1], CoverageColor);
 
-        if (!lineMat)
+        // Grid of surface points (null where the ray hits nothing scanned).
+        var grid = new Vector3?[FootGrid, FootGrid];
+        for (int j = 0; j < FootGrid; j++)
+            for (int i = 0; i < FootGrid; i++)
+            {
+                var uv = new Vector2(i / (float)(FootGrid - 1), j / (float)(FootGrid - 1));
+                Vector3 dir = rot * new Vector3((uv.x - s.cu) / s.fu, (uv.y - s.cv) / s.fv, 1f).normalized;
+                if (Hit(new Ray(pos, dir), out var p, out _)) grid[i, j] = p - dir * 0.02f;
+            }
+
+        // Outline along the grid's border.
+        var border = new List<Vector3>();
+        void Add(int i, int j) { if (grid[i, j].HasValue) border.Add(grid[i, j].Value); }
+        for (int i = 0; i < FootGrid; i++) Add(i, 0);
+        for (int j = 1; j < FootGrid; j++) Add(FootGrid - 1, j);
+        for (int i = FootGrid - 2; i >= 0; i--) Add(i, FootGrid - 1);
+        for (int j = FootGrid - 2; j > 0; j--) Add(0, j);
+        if (border.Count < 3) return;
+
+        // Fill: every grid cell whose 4 corners hit and lie close together (not spanning a depth jump).
+        var verts = new List<Vector3>();
+        var tris = new List<int>();
+        var idx = new int[FootGrid, FootGrid];
+        for (int j = 0; j < FootGrid; j++) for (int i = 0; i < FootGrid; i++)
         {
-            lineMat = new Material(Shader.Find("Universal Render Pipeline/Unlit")) { name = "WallPhotoOutline" };
-            if (lineMat.HasProperty("_Cull")) lineMat.SetFloat("_Cull", (float)CullMode.Off);
+            idx[i, j] = -1;
+            if (grid[i, j].HasValue) { idx[i, j] = verts.Count; verts.Add(grid[i, j].Value); }
         }
-        var go = new GameObject("PhotoFootprint_" + s.index);
-        go.transform.SetParent(transform, false);
-        var lr = go.AddComponent<LineRenderer>();
+        for (int j = 0; j < FootGrid - 1; j++) for (int i = 0; i < FootGrid - 1; i++)
+        {
+            int a = idx[i, j], b = idx[i + 1, j], c = idx[i + 1, j + 1], d = idx[i, j + 1];
+            if (a < 0 || b < 0 || c < 0 || d < 0) continue;
+            float span = Mathf.Max(Vector3.Distance(verts[a], verts[c]), Vector3.Distance(verts[b], verts[d]));
+            if (span > 1.2f) continue;
+            tris.AddRange(new[] { a, b, c, a, c, d });
+        }
+
+        if (!lineMat) lineMat = new Material(Shader.Find("Sprites/Default")) { name = "WallPhotoOutline" };
+        if (!fillMat) fillMat = new Material(Shader.Find("Sprites/Default")) { name = "WallPhotoFill" };
+
+        var fp = new Footprint { go = new GameObject("PhotoFootprint_" + s.index) };
+        fp.go.transform.SetParent(transform, false);
+        var lr = fp.line = fp.go.AddComponent<LineRenderer>();
         lr.sharedMaterial = lineMat;
         lr.useWorldSpace = true;
         lr.loop = true;
-        lr.positionCount = pts.Count;
-        lr.SetPositions(pts.ToArray());
-        lr.startWidth = lr.endWidth = 0.012f;
+        lr.positionCount = border.Count;
+        lr.SetPositions(border.ToArray());
+        lr.startWidth = lr.endWidth = 0.01f;
         lr.shadowCastingMode = ShadowCastingMode.Off;
         lr.receiveShadows = false;
-        SetColor(lr, last ? LastColor : CoverageColor);
-        outlines.Add(lr);
-    }
-#endif
-
-#if META_XR_SDK_INSTALLED
-    static void OutlineEdge(WallPhotoMeta s, Vector3 pos, Quaternion rot, Vector2 a, Vector2 b, List<Vector3> pts)
-    {
-        for (int i = 0; i < OutlineSteps; i++)
+        if (tris.Count > 0)
         {
-            Vector2 uv = Vector2.Lerp(a, b, i / (float)OutlineSteps);
-            Vector3 dir = rot * new Vector3((uv.x - s.cu) / s.fu, (uv.y - s.cv) / s.fv, 1f).normalized;
-            if (Hit(new Ray(pos, dir), out var p, out _)) pts.Add(p - dir * 0.02f);
+            var fillGo = new GameObject("Fill");
+            fillGo.transform.SetParent(fp.go.transform, false);
+            fp.mesh = new Mesh { name = "PhotoFootprintFill" };
+            fp.mesh.SetVertices(verts);
+            fp.mesh.SetTriangles(tris, 0);
+            fillGo.AddComponent<MeshFilter>().sharedMesh = fp.mesh;
+            var mr = fillGo.AddComponent<MeshRenderer>();
+            mr.sharedMaterial = fillMat;
+            mr.shadowCastingMode = ShadowCastingMode.Off;
+            mr.receiveShadows = false;
+        }
+        Recolor(fp, last ? LastColor : CoverageColor);
+        footprints.Add(fp);
+    }
+
+    /// <summary>Outline opaque, fill translucent - both via vertex colours (Sprites/Default), one shared material.</summary>
+    static void Recolor(Footprint fp, Color c)
+    {
+        if (fp.line) fp.line.startColor = fp.line.endColor = c;
+        if (fp.mesh)
+        {
+            var fill = new Color(c.r, c.g, c.b, 0.22f);
+            var cols = new Color[fp.mesh.vertexCount];
+            for (int i = 0; i < cols.Length; i++) cols[i] = fill;
+            fp.mesh.colors = cols;
         }
     }
 #endif
 
-    static void SetColor(LineRenderer lr, Color c) { if (lr) lr.startColor = lr.endColor = c; }
-
     void ClearOutlines()
     {
-        foreach (var lr in outlines) if (lr) Destroy(lr.gameObject);
-        outlines.Clear();
+        foreach (var fp in footprints)
+        {
+            if (fp.go) Destroy(fp.go);
+            if (fp.mesh) Destroy(fp.mesh);
+        }
+        footprints.Clear();
     }
 
     void UndoLast()
@@ -544,6 +716,7 @@ public class WallPhotoCapture : MonoBehaviour
         if (pendingWrites > 0) { uiLog?.AddLog("Photos: still saving, try again in a moment."); return; }
         var s = shots[shots.Count - 1];
         shots.RemoveAt(shots.Count - 1);
+        if (s.roomUuid != null && cableByRoom.TryGetValue(s.roomUuid, out int n)) cableByRoom[s.roomUuid] = Mathf.Max(0, n - 1);
         string jpg = Path.Combine(sessionDir, s.file);
         try { File.Delete(Path.ChangeExtension(jpg, ".json")); File.Delete(jpg); } catch (Exception e) { Debug.LogWarning(e); }
         nextIndex = shots.Count == 0 ? 1 : shots.Max(x => x.index) + 1;
@@ -562,55 +735,73 @@ public class WallPhotoCapture : MonoBehaviour
         if (!head) return;
         panel = XRUi.CreateWorldCanvas("WallPhotoPanel", new Vector2(PW, PH), PScale);
         var t = panel.transform;
-        if (!panelPlaced)
-        {
-            Vector3 fwd = Vector3.ProjectOnPlane(head.forward, Vector3.up).normalized;
-            panelPos = head.position + fwd * 0.6f - Vector3.up * 0.25f + Quaternion.Euler(0, -90, 0) * fwd * 0.3f;
-            panelRot = Quaternion.LookRotation(panelPos - head.position, Vector3.up);
-            panelPlaced = true;
-        }
-        t.SetPositionAndRotation(panelPos, panelRot);
-        PanelDrag.Attach(panel, PW, PH);
+        panelDrag = PanelDrag.Attach(panel, PW, PH);
+        FollowHand();
         XRUi.CreatePanel(t, "Background", XRUi.PanelColor, 0, 0, PW, PH);
 
-        float x0 = 20, fullW = PW - 40, y = 8;
-        countText = XRUi.CreateText(t, "Title", "", 22, TextAlignmentOptions.MidlineLeft, x0, y, fullW, 44, XRUi.TextColor, FontStyles.Bold);
-        y += 46;
-        statusText = XRUi.CreateText(t, "Hint", "", 18, TextAlignmentOptions.TopLeft, x0, y, fullW, 60, XRUi.MutedText);
-        y += 64 + Gap;
-        float w5 = (fullW - Gap * 4) / 5f;
-        autoButton = XRUi.CreateButton(t, "Auto", x0, y, w5, RowH, () => { auto = !auto; stillFor = 0; RefreshPanel(); }, 20);
-        denseButton = XRUi.CreateButton(t, "Dense", x0 + (w5 + Gap), y, w5, RowH, () =>
-        {
-            dense = !dense; haveDense = false;
-            uiLog?.AddLog(dense ? "Photos: DENSE on - walk slowly, look at every surface from several places." : "Photos: dense off.");
-            RefreshPanel();
-        }, 20);
-        coverageButton = XRUi.CreateButton(t, "Coverage", x0 + (w5 + Gap) * 2, y, w5, RowH, () =>
+        float x0 = 16, fullW = PW - 32, y = 8;
+        countText = XRUi.CreateText(t, "Title", "", 24, TextAlignmentOptions.MidlineLeft, x0, y, fullW, 38, XRUi.TextColor, FontStyles.Bold);
+        y += 38;
+        roomText = XRUi.CreateText(t, "Room", "", 19, TextAlignmentOptions.MidlineLeft, x0, y, fullW, 30, XRUi.AccentText);
+        y += 34;
+        // The two ways of shooting, as one either/or choice.
+        float w2 = (fullW - Gap) / 2f;
+        cableButton = XRUi.CreateButton(t, "Cable photos", x0, y, w2, RowH, () => SetDense(false), 22);
+        denseButton = XRUi.CreateButton(t, "3D scan", x0 + w2 + Gap, y, w2, RowH, () => SetDense(true), 22);
+        y += RowH + Gap;
+        float w3 = (fullW - Gap * 2) / 3f;
+        coverageButton = XRUi.CreateButton(t, "Outlines", x0, y, w3, RowH, () =>
         {
             showCoverage = !showCoverage;
 #if META_XR_SDK_INSTALLED
             RebuildOutlines();
 #endif
             RefreshPanel();
-        }, 18);
-        var undo = XRUi.CreateButton(t, "Delete last", x0 + (w5 + Gap) * 3, y, w5, RowH, UndoLast, 16);
+        }, 20);
+        var undo = XRUi.CreateButton(t, "Undo photo", x0 + w3 + Gap, y, w3, RowH, UndoLast, 19);
         XRUi.SetTint(undo, XRUi.ButtonDangerColor);
-        XRUi.CreateButton(t, "Close", x0 + (w5 + Gap) * 4, y, w5, RowH, ClosePanel, 20);
+        XRUi.CreateButton(t, "Finish", x0 + (w3 + Gap) * 2, y, w3, RowH, () => { if (editMode != null && editMode.IsOn) editMode.Toggle(); }, 22);
+        y += RowH + 4;
+        statusText = XRUi.CreateText(t, "Hint", "", 16, TextAlignmentOptions.TopLeft, x0, y, fullW, PH - y - 4, XRUi.MutedText);
         RefreshPanel();
+    }
+
+    void SetDense(bool on)
+    {
+        if (dense == on) return;
+        dense = on; haveDense = false; stillFor = 0;
+        uiLog?.AddLog(on ? "Photos: 3D scan - walk slowly, look at every wall, floor and ceiling from several spots."
+                         : "Photos: cable photos - look at a bare wall and hold still.");
+        tipUntil = 0;
+        RefreshPanel();
+    }
+
+    /// <summary>Above the edit toolbar on the left controller, facing you - until you grip-drag it somewhere.</summary>
+    void FollowHand()
+    {
+        if (!panel || !leftHand || !head || (panelDrag && panelDrag.Moved)) return;
+        Vector3 pos = leftHand.position + Vector3.up * 0.25f;
+        Vector3 look = pos - head.position;
+        if (look.sqrMagnitude < 1e-4f) return;
+        panel.transform.SetPositionAndRotation(pos, Quaternion.LookRotation(look, Vector3.up));
     }
 
     void RefreshPanel()
     {
         if (!panel) return;
-        countText.text = $"Wall photos: {shots.Count}   Dense: {denseCount}   ({Path.GetFileName(sessionDir)})";
-        if (statusText.text.StartsWith("<color=red>")) return;
-        statusText.text = dense
-            ? "DENSE (for a 3D splat): walk slowly round the room, look at every wall, floor and ceiling from several spots - it shoots by itself. Trigger = cable photo."
-            : auto
-            ? "Look at a wall and hold still - it shoots by itself. Trigger = shoot now. Green = already covered."
-            : "Trigger = take a photo. Green outlines = already covered.";
-        XRUi.SetTint(autoButton, auto && !dense ? XRUi.ButtonOnColor : XRUi.ButtonToggleColor);
+        countText.text = $"Wall photos: {shots.Count}    3D frames: {denseCount}";
+        if (currentRoomUuid != null)
+        {
+            int c = cableByRoom.TryGetValue(currentRoomUuid, out int a) ? a : 0, d = denseByRoom.TryGetValue(currentRoomUuid, out int b) ? b : 0;
+            string dHint = d == 0 ? "" : d < 120 ? " <color=#ffb347>(aim for 150+)</color>" : " <color=#7dff9a>ok</color>";
+            roomText.text = $"{currentRoomName}:  {c} photos,  {d} 3D frames{dHint}";
+        }
+        else roomText.text = "Outside the scanned rooms";
+        if (!statusText.text.StartsWith("<color=red>"))
+            statusText.text = dense
+                ? "Walk slowly round the room and look at every wall, floor and ceiling from several spots - it records by itself. Trigger = a cable photo."
+                : "Look at a bare wall, floor or ceiling and hold still - it clicks by itself. Trigger = photo now. Green outline = already covered.";
+        XRUi.SetTint(cableButton, !dense ? XRUi.ButtonOnColor : XRUi.ButtonToggleColor);
         XRUi.SetTint(denseButton, dense ? XRUi.ButtonOnColor : XRUi.ButtonToggleColor);
         XRUi.SetTint(coverageButton, showCoverage ? XRUi.ButtonOnColor : XRUi.ButtonToggleColor);
     }
@@ -621,6 +812,117 @@ public class WallPhotoCapture : MonoBehaviour
     {
         if (panel) Destroy(panel.gameObject);
         panel = null;
+    }
+
+    // ---------- HUD ----------
+
+    const float HudW = 900f, HudH = 120f, HudScale = 0.0011f;
+
+    void BuildHud()
+    {
+        if (hud) return;
+        hud = XRUi.CreateWorldCanvas("WallPhotoHud", new Vector2(HudW, HudH), HudScale);
+        var ray = hud.GetComponent<UnityEngine.XR.Interaction.Toolkit.UI.TrackedDeviceGraphicRaycaster>();
+        if (ray) Destroy(ray); // display only - never catches the pointer
+        var t = hud.transform;
+        hudFrame = XRUi.CreatePanel(t, "Frame", new Color(1, 1, 1, 0f), 0, 0, HudW, HudH);
+        XRUi.CreatePanel(t, "Back", new Color(0.03f, 0.04f, 0.06f, 0.72f), 6, 6, HudW - 12, HudH - 12);
+        hudText = XRUi.CreateText(t, "Text", "", 34, TextAlignmentOptions.Center, 16, 10, HudW - 32, HudH - 34, Color.white, FontStyles.Bold);
+        XRUi.CreatePanel(t, "BarBack", new Color(1, 1, 1, 0.12f), 40, HudH - 22, HudW - 80, 8);
+        hudBar = XRUi.CreatePanel(t, "Bar", new Color(0.45f, 0.85f, 1f, 1f), 40, HudH - 22, 0, 8);
+        foreach (var g in hud.GetComponentsInChildren<UnityEngine.UI.Graphic>()) g.raycastTarget = false;
+    }
+
+    void CloseHud()
+    {
+        if (hud) Destroy(hud.gameObject);
+        hud = null;
+    }
+
+    void SetHud(string text)
+    {
+        if (hudText) hudText.text = text;
+        SetBar(0);
+    }
+
+    void SetBar(float f)
+    {
+        if (!hudBar) return;
+        var rt = hudBar.rectTransform;
+        XRUi.Place(rt, 40, HudH - 22, (HudW - 80) * Mathf.Clamp01(f), 8);
+    }
+
+    /// <summary>One line telling why it is or isn't shooting right now.</summary>
+    void UpdateHud()
+    {
+        if (!hud || !started) return;
+        float now = Time.time;
+        hudFrame.color = new Color(1, 1, 1, now < flashUntil ? 0.85f : 0f);
+        if (now < tipUntil)
+        {
+            SetHud("<size=26>Look at a bare wall and hold still - it clicks by itself.\nGreen outline = done.  Panel above your left hand.</size>");
+            return;
+        }
+        if (now < flashUntil && flashText != null) { SetHud(flashText); return; }
+#if META_XR_SDK_INSTALLED
+        if (cam == null || !cam.IsPlaying) { SetHud("Camera starting..."); return; }
+        if (dense)
+        {
+            bool tooFast = headDegPerSec > DenseMaxDegPerSec || headMetersPerSec > DenseMaxMetersPerSec;
+            SetHud(tooFast ? "<color=#ffb347>Slower - the images get blurry</color>"
+                           : $"<color=#ff5050>\u25CF</color> 3D scan  -  {denseCount} frames");
+            return;
+        }
+        switch (view)
+        {
+            case View.Nothing: SetHud("<color=#aab4c4>Look at a wall, floor or ceiling</color>"); break;
+            case View.Covered: SetHud("<color=#7dff9a>Already photographed</color> <size=26>- look somewhere else</size>"); break;
+            case View.Moving: SetHud("Hold still to take a photo"); break;
+            case View.Settling:
+                hudText.text = "Hold still...";
+                SetBar(stillFor / StillTime);
+                break;
+            default: SetHud(capturing || shotRequested ? "Taking photo..." : ""); break;
+        }
+#endif
+    }
+
+    /// <summary>A little below the centre of view, ~1.2 m away, gently following the head.</summary>
+    void PlaceHud()
+    {
+        if (!hud || !head) return;
+        Vector3 target = head.position + head.forward * 1.2f - head.up * 0.32f;
+        var t = hud.transform;
+        t.position = Vector3.Lerp(t.position, target, 1f - Mathf.Exp(-10f * Time.deltaTime));
+        t.rotation = Quaternion.LookRotation(t.position - head.position, head.up);
+    }
+
+    static void Count(Dictionary<string, int> map, string key)
+    {
+        if (string.IsNullOrEmpty(key)) return;
+        map[key] = map.TryGetValue(key, out int n) ? n + 1 : 1;
+    }
+
+    /// <summary>A short shutter click (made in code - no audio asset needed).</summary>
+    void Click(float volume)
+    {
+        if (!audioSrc)
+        {
+            audioSrc = gameObject.AddComponent<AudioSource>();
+            audioSrc.playOnAwake = false;
+            audioSrc.spatialBlend = 0f;
+            const int rate = 44100, n = rate / 25;
+            var data = new float[n];
+            var rnd = new System.Random(7);
+            for (int i = 0; i < n; i++)
+            {
+                float env = Mathf.Exp(-i / (rate * 0.006f));
+                data[i] = env * (0.6f * (float)(rnd.NextDouble() * 2 - 1) + 0.4f * Mathf.Sin(i * 2f * Mathf.PI * 2200f / rate));
+            }
+            shutterClip = AudioClip.Create("Shutter", n, 1, rate, false);
+            shutterClip.SetData(data, 0);
+        }
+        audioSrc.PlayOneShot(shutterClip, volume);
     }
 
     void Haptic()

@@ -266,7 +266,7 @@ public class MiniMapPanel : MonoBehaviour
     public string TeleportFromMap(Ray ray)
     {
         if (!root) return "Minimap: off";
-        if (WalkThroughMode.Active == null) return "Minimap: start Walk first, then trigger on a room jumps there";
+        if (WalkThroughMode.Active == null) return "Minimap: it shows where you are. Jumping to a room (trigger on it) works in the walk-through - start Walk first.";
         float lvl = levels.Count > 0 ? levels[Mathf.Clamp(shownLevel, 0, levels.Count - 1)] : modelCenter.y;
         Vector3 local0 = new Vector3(0f, lvl - modelCenter.y, 0f);
         var plane = new Plane(root.transform.up, root.transform.TransformPoint(local0));

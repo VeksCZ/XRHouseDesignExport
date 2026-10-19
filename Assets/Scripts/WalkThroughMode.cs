@@ -112,6 +112,16 @@ public class WalkThroughMode : MonoBehaviour
     /// Jumps to the next story (cyclic, upwards): straight above/below where you stand if that story has floor
     /// there, else the middle of its largest room. Stories = floor anchor heights more than 1.5 m apart.
     /// </summary>
+    /// <summary>How many storeys these rooms have (floors more than 1.5 m apart) - the same grouping NextFloor uses.</summary>
+    public static int CountFloorLevels(IEnumerable<MRUKRoom> rooms)
+    {
+        var levels = new List<float>();
+        foreach (var y in rooms.SelectMany(r => r.FloorAnchors).Where(f => f != null && f.PlaneRect.HasValue)
+                     .Select(f => f.transform.position.y).OrderBy(y => y))
+            if (levels.Count == 0 || y - levels[levels.Count - 1] > 1.5f) levels.Add(y);
+        return levels.Count;
+    }
+
     public string NextFloor()
     {
         if (!isOn || walkRooms == null || !TryGetScanWorldPose(out var headScan, out _)) return null;

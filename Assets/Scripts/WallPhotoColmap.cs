@@ -37,6 +37,23 @@ public static class WallPhotoColmap
         catch (Exception e) { Debug.LogError($"<color=red>COLMAP export failed: {e.Message}</color>\n{e}"); }
     }
 
+    /// <summary>Batch mode: Unity.exe -batchmode -quit -projectPath . -executeMethod WallPhotoColmap.ExportBatch
+    /// -photos &lt;session folder&gt; (exit code 0 = written).</summary>
+    public static void ExportBatch()
+    {
+        var args = Environment.GetCommandLineArgs();
+        int i = Array.IndexOf(args, "-photos");
+        string dir = i >= 0 && i + 1 < args.Length ? args[i + 1] : null;
+        try
+        {
+            if (string.IsNullOrEmpty(dir) || !Directory.Exists(dir)) throw new Exception("pass -photos <Photos_yyyyMMdd folder>");
+            string outDir = Export(dir, out string report);
+            Debug.Log($"[WallPhotoColmap] {report} -> {outDir}");
+            EditorApplication.Exit(0);
+        }
+        catch (Exception e) { Debug.LogError($"[WallPhotoColmap] FAILED: {e.Message}"); EditorApplication.Exit(1); }
+    }
+
     /// <summary>Writes sessionDir/Colmap (replacing an earlier export) and returns its path.</summary>
     public static string Export(string sessionDir, out string report, bool includeCablePhotos = true)
     {

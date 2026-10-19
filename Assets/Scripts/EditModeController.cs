@@ -92,6 +92,13 @@ public class EditModeController : MonoBehaviour
         return ok;
     }
 
+    /// <summary>Edit mode on with this tool selected (from the main menu's shortcuts).</summary>
+    public void UseTool(Tool t)
+    {
+        if (!IsOn) Toggle();
+        if (CurrentTool != t) SelectTool(t);
+    }
+
     void SelectTool(Tool t)
     {
         CurrentTool = CurrentTool == t ? Tool.None : t;

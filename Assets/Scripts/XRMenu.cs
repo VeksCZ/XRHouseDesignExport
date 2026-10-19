@@ -31,7 +31,7 @@ public class XRMenu : MonoBehaviour
 
     // Canvas units; the canvas is scaled to CanvasScale metres per unit (600 units -> 36 cm at 0.75 m from the eyes).
     const float HeaderH = 40f;          // the draggable handle strip at the very top
-    const float CanvasWidth = 600f, CanvasHeight = 776f + 88f + HeaderH, CanvasScale = 0.0006f;
+    const float CanvasWidth = 600f, CanvasHeight = 776f + 88f + 88f + HeaderH, CanvasScale = 0.0006f;
     const float MenuDistance = 0.75f;   // metres in front of the eyes
     const float MenuDrop = 0.24f;       // metres below eye level, so it doesn't cover what you look at
     const float FollowStart = 30f;      // degrees you must turn away before the menu follows
@@ -51,7 +51,7 @@ public class XRMenu : MonoBehaviour
     // site - a toggle can also turn itself off from elsewhere (the floor plan panel's own Close button, or a
     // scan-source change invalidating the scan overlay/minimap), and a per-frame sync can never go stale the
     // way scattered manual updates did.
-    Button dollhouseButton, plansButton, scanOverlayButton, miniMapButton, walkButton, editButton;
+    Button dollhouseButton, plansButton, scanOverlayButton, miniMapButton, walkButton, editButton, photosButton;
     XRRayInteractor rightRay;
     float flickCooldown;
     float menuYaw;
@@ -166,8 +166,11 @@ public class XRMenu : MonoBehaviour
         editButton = XRUi.CreateButton(root, "Edit", left, top + 4 * (h + gap), w, h, () => editMode?.Toggle());
         XRUi.SetTint(editButton, XRUi.ButtonToggleColor);
         XRUi.CreateButton(root, "Next floor", right, top + 4 * (h + gap), w, h, OnNextFloor);
+        // One click into photographing the bare walls (edit mode + the Photos tool), the same again leaves it.
+        photosButton = XRUi.CreateButton(root, "Wall photos  -  cables / 3D scan", left, top + 5 * (h + gap), right + w - left, h, OnWallPhotos, 26);
+        XRUi.SetTint(photosButton, XRUi.ButtonToggleColor);
 
-        float rowY = top + 5 * (h + gap);
+        float rowY = top + 6 * (h + gap);
         // "Load scan" is gone - every action here (Export, Dollhouse, Floor plans, Scan overlay, Minimap)
         // already loads the selected source itself on demand, so a separate standalone "load" step had nothing
         // left to do that pressing the feature you actually wanted wouldn't already do. Clicking the scan name
@@ -376,6 +379,19 @@ public class XRMenu : MonoBehaviour
         if (miniMapButton != null) XRUi.SetTint(miniMapButton, miniMap != null && miniMap.IsOn ? XRUi.ButtonOnColor : XRUi.ButtonToggleColor);
         if (walkButton != null) XRUi.SetTint(walkButton, walk != null && walk.IsOn ? XRUi.ButtonOnColor : XRUi.ButtonToggleColor);
         if (editButton != null) XRUi.SetTint(editButton, editMode != null && editMode.IsOn ? XRUi.ButtonOnColor : XRUi.ButtonToggleColor);
+        if (photosButton != null) XRUi.SetTint(photosButton, PhotosOn ? XRUi.ButtonOnColor : XRUi.ButtonToggleColor);
+    }
+
+    bool PhotosOn => editMode != null && editMode.IsOn && editMode.CurrentTool == EditModeController.Tool.Photos;
+
+    /// <summary>Main-menu shortcut to the wall photos (edit mode + Photos tool); hides the menu so the view is clear
+    /// (B brings it back). Pressed again it leaves edit mode.</summary>
+    public void OnWallPhotos()
+    {
+        if (editMode == null) return;
+        if (PhotosOn) { editMode.Toggle(); return; }
+        editMode.UseTool(EditModeController.Tool.Photos);
+        if (menuCanvas != null && menuCanvas.gameObject.activeSelf) OnToggleMenu();
     }
 
     /// <summary>Opens/closes the whole wrist menu (bound to B - see the comment where it's read).</summary>
@@ -431,7 +447,19 @@ public class XRMenu : MonoBehaviour
 
     void OnNextFloor()
     {
-        if (walk == null || !walk.IsOn) { AddLog("Next floor: only while walking (Walk)."); return; }
+        if (walk == null || !walk.IsOn)
+        {
+            // Next floor moves you between storeys of the 1:1 model - say so, and whether there is another storey at all.
+            int n = 0;
+#if META_XR_SDK_INSTALLED
+            if (Meta.XR.MRUtilityKit.MRUK.Instance != null) n = WalkThroughMode.CountFloorLevels(MRUKDataProcessor.GetValidRooms(Meta.XR.MRUtilityKit.MRUK.Instance));
+#endif
+            string m = n == 1 ? "Next floor: this scan has only one floor."
+                     : n > 1 ? $"Next floor: this scan has {n} floors - it moves you between them in the walk-through, start Walk first."
+                     : "Next floor: moves you between floors in the walk-through - load a scan and start Walk first.";
+            AddLog(m); SetStatus(n == 1 ? "One floor only" : "Start Walk first");
+            return;
+        }
         string s = walk.NextFloor() ?? "Next floor: no position yet - try again";
         AddLog(s); SetStatus(s);
         Debug.Log($"[XRMenu] Next floor: {s}");
