@@ -85,6 +85,9 @@ public class XRMenu : MonoBehaviour
         stairTool.uiLog = this; stairTool.editMode = editMode; stairTool.walk = walk; stairTool.dollhouse = dollhouse;
         var holeTool = FindAnyObjectByType<HoleEditTool>() ?? gameObject.AddComponent<HoleEditTool>();
         holeTool.uiLog = this; holeTool.editMode = editMode; holeTool.walk = walk; holeTool.dollhouse = dollhouse;
+        // Wall photos over passthrough (cable chases before plastering), poses tied to the live scan's rooms.
+        var photoTool = FindAnyObjectByType<WallPhotoCapture>() ?? gameObject.AddComponent<WallPhotoCapture>();
+        photoTool.uiLog = this; photoTool.editMode = editMode; photoTool.exporter = exporter; photoTool.walk = walk;
         // Doorways walled up in edit mode are left out of every built model (walk, Dollhouse, minimap, export).
         XRModelFactory.RemovedOpening = DoorCatalog.IsWalledUp;
         var quality = FindAnyObjectByType<RenderQuality>() ?? gameObject.AddComponent<RenderQuality>();

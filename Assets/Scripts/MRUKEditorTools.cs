@@ -93,6 +93,7 @@ public static class MRUKEditorTools {
         // now keep them in the app's storage - remove what older builds left there before pulling.
         RunAdb($"shell rm -rf \"{RemoteExportDir}/Logs\" \"{RemoteExportDir}/session_debug_log.txt\"");
         PullSavedScans(local);
+        PullWallPhotos(local);
         if (RunAdb($"pull \"{RemoteExportDir}/.\" \"{local}\"")) {
             var dirs = Directory.GetDirectories(local, "Export_*");
             if (dirs.Length > 0) {
@@ -195,6 +196,20 @@ public static class MRUKEditorTools {
         } finally {
             try { Directory.Delete(tmp, true); } catch { }
         }
+    }
+
+    /// <summary>Wall photo sessions (WallPhotoCapture: persistentDataPath/WallPhotos/Photos_yyyyMMdd with JPGs, their
+    /// pose sidecars and a scan snapshot) arrive as Photos_yyyyMMdd folders - each one a scan source of its own.</summary>
+    static void PullWallPhotos(string exportRoot) {
+        if (!RunAdb($"shell ls -1 \"{RemoteAppFiles}/{WallPhotoCapture.RootFolder}\"", out string listing)) return;
+        int n = 0;
+        foreach (var name in listing.Split('\n').Select(l => l.Trim()).Where(l => l.StartsWith(WallPhotoCapture.SessionPrefix))) {
+            string dir = Path.Combine(exportRoot, name);
+            Directory.CreateDirectory(dir);
+            if (RunAdb($"pull \"{RemoteAppFiles}/{WallPhotoCapture.RootFolder}/{name}/.\" \"{dir}\"")) n++;
+            else Debug.LogError($"<color=red>Could not pull wall photos {name}.</color>");
+        }
+        if (n > 0) Debug.Log($"<color=green>Wall photos: {n} session folder(s) pulled ({WallPhotoCapture.SessionPrefix}*).</color>");
     }
 
     /// <summary>Session logs live in the app's own storage on the headset (not in the exports); fetches them into

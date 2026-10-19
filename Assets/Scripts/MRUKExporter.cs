@@ -26,6 +26,9 @@ public class MRUKExporter : MonoBehaviour
     public string SelectedSource { get; private set; } = LiveSource;
     /// <summary>The source whose data MRUK currently holds (null until something was loaded).</summary>
     public string ActiveSource { get; private set; }
+    /// <summary>MRUK holds the device's live scene (the live source, or a saved copy of it adopted without reloading),
+    /// i.e. its rooms line up with the real house. A saved scan loaded from JSON comes back in some other frame.</summary>
+    public bool WorldAligned { get; private set; }
 
     /// <summary>Live scan first, then cached scans, most recently saved first.</summary>
     public List<string> Sources => new[] { LiveSource }.Concat(MRUKSceneCache.ListCachedScans()).ToList();
@@ -37,6 +40,17 @@ public class MRUKExporter : MonoBehaviour
     /// holds exactly that data. Used when the first edit is made on the live scan: from then on the edits belong
     /// to this saved scan.
     /// </summary>
+    /// <summary>Makes sure MRUK holds the live, real-world-aligned scene (switching back to the live source if a saved
+    /// scan was loaded) - for anything that works over passthrough, like wall photos.</summary>
+    public async Task<bool> EnsureLiveLoaded(XRMenu ui = null)
+    {
+        if (WorldAligned && ActiveSource != null) return true;
+        SelectedSource = LiveSource;
+        bool ok = await EnsureSelectedSourceLoaded(ui, forceReload: true);
+        ui?.RefreshSourceLabel();
+        return ok;
+    }
+
     public void AdoptSavedLiveScan(string savedName)
     {
         if (string.IsNullOrEmpty(savedName)) return;
@@ -107,7 +121,9 @@ public class MRUKExporter : MonoBehaviour
 
         if (SelectedSource == LiveSource) {
             if (!await EnsureLiveSceneLoaded(ui)) return false;
+            WorldAligned = true;
         } else {
+            WorldAligned = false;
             ui?.AddLog($"Loading cached scan '{SelectedSource}'...");
             if (!await MRUKSceneCache.LoadCachedScene(MRUK.Instance, SelectedSource)) {
                 ui?.AddLog("<color=red>Failed to load cached scan.</color>");
@@ -140,6 +156,7 @@ public class MRUKExporter : MonoBehaviour
             ui?.AddLog("<color=cyan>Saving current scan to cache...</color>");
             if (!await EnsureLiveSceneLoaded(ui)) return null;
             ActiveSource = LiveSource;
+            WorldAligned = true;
 
             var rooms = MRUKDataProcessor.GetValidRooms(MRUK.Instance);
             if (rooms.Count == 0) {
@@ -295,6 +312,7 @@ public class MRUKExporter : MonoBehaviour
     public async Task<string> ExportLoadedScene(string sourceName, string root = null)
     {
         SelectedSource = ActiveSource = sourceName;
+        WorldAligned = false;
         var rooms = MRUKDataProcessor.GetValidRooms(MRUK.Instance);
         if (rooms.Count == 0) { Debug.LogError("[BatchExport] No valid rooms in the loaded scene."); return null; }
         return await RunExportPipeline(rooms, null, root) ? Path.GetDirectoryName(LastReportPath) : null;

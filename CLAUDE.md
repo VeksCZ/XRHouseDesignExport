@@ -44,6 +44,11 @@ and exports 3D models, floor plans and reports from the scan.
   `Exports/RoomData` is the one local folder, and every folder in it with a `92_Data_Scan.scene.json` is a scan
   source (exports are self-contained: `93_Data_Edits.json` + `94_Data_RoomNames.json`). Editor menu "Pull" brings
   exports plus the headset's saved scans (as `Scan_<name>` folders); `Tools/BatchExport.ps1` writes there too.
+- **Wall photos** (`WallPhotoCapture`, edit-mode tool "Photos"): passthrough-camera shots (MRUK `PassthroughCameraAccess`)
+  of bare walls/floors/ceilings before plastering, each with a `NNNN.json` sidecar (camera pose room-local to its room
+  UUID + viewport pinhole fu/fv/cu/cv). Needs the live, world-aligned scan (`MRUKExporter.WorldAligned` /
+  `EnsureLiveLoaded`). Headset: `persistentDataPath/WallPhotos/Photos_yyyyMMdd` incl. a scan snapshot; "Pull" brings
+  them into `Exports/RoomData/Photos_yyyyMMdd` (a scan source of its own). Pixel -> ray -> raycast on the scan gives 3D.
 - **Logs**: headset session logs are in `persistentDataPath/Logs` (menu "Pull logs from Quest" -> `Logs/Quest`),
   never in the export folder.
 - **Build + install to a USB Quest**: call `MRUKExporter.EditorFastBuildAndInstall()` (e.g. via the Unity MCP
