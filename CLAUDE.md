@@ -49,6 +49,10 @@ and exports 3D models, floor plans and reports from the scan.
   UUID + viewport pinhole fu/fv/cu/cv). Needs the live, world-aligned scan (`MRUKExporter.WorldAligned` /
   `EnsureLiveLoaded`). Headset: `persistentDataPath/WallPhotos/Photos_yyyyMMdd` incl. a scan snapshot; "Pull" brings
   them into `Exports/RoomData/Photos_yyyyMMdd` (a scan source of its own). Pixel -> ray -> raycast on the scan gives 3D.
+  "Dense" mode (for a Gaussian splat) shoots every ~12 cm / 8 deg while walking slowly into `Dense/`, with seed points
+  (scan hits coloured from the photo). Every photo also has a house-frame pose (local to the room with the smallest
+  UUID, fixed per session); menu MRUK > Wall photos > Export COLMAP (`WallPhotoColmap`) writes `Colmap/` (images +
+  sparse/0 text) in that frame with z negated - a trained splat negated back in z sits under that room's transform.
 - **Logs**: headset session logs are in `persistentDataPath/Logs` (menu "Pull logs from Quest" -> `Logs/Quest`),
   never in the export folder.
 - **Build + install to a USB Quest**: call `MRUKExporter.EditorFastBuildAndInstall()` (e.g. via the Unity MCP

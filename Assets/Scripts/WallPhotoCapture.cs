@@ -27,6 +27,14 @@ using Meta.XR.MRUtilityKit;
 /// Shooting: trigger = photo now. Auto (default on): a photo is taken by itself whenever the head is held still for
 /// a moment looking at something not photographed yet. Every photo's footprint is outlined on the real surfaces
 /// (coverage), so it's easy to see what is still missing.
+///
+/// Dense (for a Gaussian splat of the bare house): while on, a frame is taken every few centimetres / degrees of
+/// head motion as you walk slowly (motion-blur gated), into the session's Dense/ subfolder - hundreds per room. Each
+/// dense frame also carries a grid of seed points (rays hit against the scan, coloured from the photo) for the
+/// splat's initial point cloud. Every photo additionally stores its pose in one fixed "house frame" (the room with the
+/// smallest UUID), so photos from all rooms and days share one coordinate system: the menu "Wall photos > Export
+/// COLMAP" (WallPhotoColmap) turns a pulled session into a COLMAP dataset for any splat trainer, and the trained splat
+/// lands in that same frame - aligned with the scan.
 /// </summary>
 public class WallPhotoCapture : MonoBehaviour
 {
@@ -46,25 +54,32 @@ public class WallPhotoCapture : MonoBehaviour
     const float NewAngle = 22f, NewDistance = 0.9f;
     const int OutlineSteps = 6; // rays per image edge for the coverage outline
 
+    public const string DenseFolder = "Dense";
+    // Dense: a frame after DenseMove metres or DenseTurn degrees of camera motion, at most every DenseInterval, and
+    // only while the head moves slowly enough for a sharp image.
+    const float DenseMove = 0.12f, DenseTurn = 8f, DenseInterval = 0.3f, DenseMaxDegPerSec = 40f, DenseMaxMetersPerSec = 0.6f;
+    const int SeedCols = 8, SeedRows = 6, MaxPendingWrites = 3;
+
     static readonly Color CoverageColor = new Color(0.25f, 1f, 0.45f, 1f);
     static readonly Color LastColor = new Color(1f, 0.85f, 0.2f, 1f);
 
-    bool wasActive, auto = true, showCoverage = true;
-    string sessionDir;
-    int nextIndex;
+    bool wasActive, auto = true, showCoverage = true, dense;
+    string sessionDir, houseRoomUuid;
+    int nextIndex, denseCount, nextDenseIndex;
+    Vector3 lastDensePos; Quaternion lastDenseRot; bool haveDense; float lastDenseTime = -10f;
     readonly List<WallPhotoMeta> shots = new List<WallPhotoMeta>();
     readonly List<LineRenderer> outlines = new List<LineRenderer>();
     Material lineMat;
     Transform head;
 
     // stillness tracking
-    Vector3 lastHeadPos; Quaternion lastHeadRot; float stillFor, lastShotTime = -10f;
+    Vector3 lastHeadPos; Quaternion lastHeadRot; float stillFor, lastShotTime = -10f, headDegPerSec, headMetersPerSec;
     bool preparing, capturing;
     int pendingWrites;
 
     Canvas panel;
     TMP_Text countText, statusText;
-    UnityEngine.UI.Button autoButton, coverageButton;
+    UnityEngine.UI.Button autoButton, denseButton, coverageButton;
     Vector3 panelPos; Quaternion panelRot; bool panelPlaced;
     const float PW = 600f, PH = 250f, PScale = 0.0006f, RowH = 62f, Gap = 8f;
 
@@ -73,7 +88,7 @@ public class WallPhotoCapture : MonoBehaviour
     // A camera frame is armed when it arrives (pose + timestamp taken in that same frame); its pixels are read back
     // one frame later - GetTexture() is filled on the render thread, so reading it in the arrival frame would give
     // the previous image (see PassthroughCameraAccess.GetTexture docs).
-    bool shotRequested, armed, cameraReady;
+    bool shotRequested, requestDense, armed, cameraReady;
     Pose armedPose; DateTime armedTime;
 #endif
 
@@ -105,8 +120,12 @@ public class WallPhotoCapture : MonoBehaviour
         if (cam == null || !cam.IsPlaying) return;
         if (!cameraReady) { cameraReady = true; RefreshPanel(); }
         TrackStillness();
-        if (auto && !shotRequested && !capturing && stillFor >= StillTime && Time.time - lastShotTime >= MinInterval && IsNewView())
-            shotRequested = true;
+        if (!shotRequested && !capturing)
+        {
+            if (dense) { if (pendingWrites < MaxPendingWrites && DenseDue()) shotRequested = requestDense = true; }
+            else if (auto && stillFor >= StillTime && Time.time - lastShotTime >= MinInterval && IsNewView())
+            { shotRequested = true; requestDense = false; }
+        }
         PumpCapture();
 #endif
     }
@@ -157,7 +176,20 @@ public class WallPhotoCapture : MonoBehaviour
         }
         nextIndex = shots.Count == 0 ? 1 : shots.Max(s => s.index) + 1;
 
+        string denseDir = Path.Combine(sessionDir, DenseFolder);
+        Directory.CreateDirectory(denseDir);
+        var denseIdx = Directory.GetFiles(denseDir, "*.json")
+            .Select(f => int.TryParse(Path.GetFileNameWithoutExtension(f), out int i) ? i : 0).ToList();
+        denseCount = denseIdx.Count;
+        nextDenseIndex = denseIdx.Count == 0 ? 1 : denseIdx.Max() + 1;
+        haveDense = false;
+
 #if META_XR_SDK_INSTALLED
+        // The house frame: the room with the smallest UUID - or the one this session already used.
+        var rooms = MRUK.Instance != null ? MRUKDataProcessor.GetValidRooms(MRUK.Instance) : new List<MRUKRoom>();
+        houseRoomUuid = shots.Select(x => x.houseRoomUuid).FirstOrDefault(u => !string.IsNullOrEmpty(u) && rooms.Any(r => r.Anchor.Uuid.ToString() == u))
+                        ?? rooms.Select(r => r.Anchor.Uuid.ToString()).OrderBy(u => u, StringComparer.Ordinal).FirstOrDefault();
+
         // Snapshot of exactly the scan the poses refer to (room UUIDs stay the same across re-saves of one house,
         // but this makes the folder self-contained: on the PC it is a scan source of its own).
         try
@@ -221,6 +253,7 @@ public class WallPhotoCapture : MonoBehaviour
 #if META_XR_SDK_INSTALLED
         if (cam == null || !cam.IsPlaying) { uiLog?.AddLog("Photos: camera not ready yet."); return; }
         shotRequested = true;
+        requestDense = false; // the trigger always takes a cable photo
 #endif
     }
 
@@ -237,33 +270,60 @@ public class WallPhotoCapture : MonoBehaviour
         }
         if (!armed) return;
         shotRequested = armed = false;
-        Capture(armedPose, armedTime);
+        Capture(armedPose, armedTime, requestDense);
     }
 
-    void Capture(Pose pose, DateTime stamp)
+    void Capture(Pose pose, DateTime stamp, bool isDense)
     {
         var tex = cam.GetTexture();
         if (tex == null) return;
         capturing = true;
-        lastShotTime = Time.time;
-        var meta = BuildMeta(pose, stamp, tex.width, tex.height);
-        if (meta == null) { capturing = false; uiLog?.AddLog("<color=orange>Photos: you are outside every scanned room - not saved.</color>"); return; }
+        if (isDense) { lastDenseTime = Time.time; lastDensePos = pose.position; lastDenseRot = pose.rotation; haveDense = true; }
+        else lastShotTime = Time.time;
+        var meta = BuildMeta(pose, stamp, tex.width, tex.height, isDense);
+        if (meta == null)
+        {
+            capturing = false;
+            if (!isDense) uiLog?.AddLog("<color=orange>Photos: you are outside every scanned room - not saved.</color>");
+            return;
+        }
+        // Seed points for a splat: a grid of rays hit against the scan now; their colours come from the pixels below.
+        var seedUv = new List<Vector2>();
+        var seedHit = new List<Vector3>();
+        var houseRoom = HouseRoom();
+        if (isDense && houseRoom != null)
+        {
+            for (int y = 0; y < SeedRows; y++)
+                for (int x = 0; x < SeedCols; x++)
+                {
+                    var uv = new Vector2((x + 0.5f) / SeedCols, (y + 0.5f) / SeedRows);
+                    if (Hit(cam.ViewportPointToRay(uv, pose), out var p, out _))
+                    { seedUv.Add(uv); seedHit.Add(houseRoom.transform.InverseTransformPoint(p)); }
+                }
+        }
 
         AsyncGPUReadback.Request(tex, 0, TextureFormat.RGBA32, req =>
         {
             capturing = false;
-            if (req.hasError) { uiLog?.AddLog("<color=red>Photos: camera readback failed.</color>"); return; }
+            if (req.hasError) { if (!isDense) uiLog?.AddLog("<color=red>Photos: camera readback failed.</color>"); return; }
             byte[] pixels = req.GetData<byte>().ToArray();
             int w = req.width, h = req.height;
             meta.imageWidth = w; meta.imageHeight = h;
+            for (int i = 0; i < seedUv.Count; i++)
+            {
+                int px = Mathf.Clamp((int)(seedUv[i].x * w), 0, w - 1), py = Mathf.Clamp((int)(seedUv[i].y * h), 0, h - 1);
+                int o = (py * w + px) * 4; // rows bottom-up, like viewport v
+                meta.seedPoints.Add(seedHit[i]);
+                meta.seedColors.Add(new Color32(pixels[o], pixels[o + 1], pixels[o + 2], 255));
+            }
             string jpg = Path.Combine(sessionDir, meta.file), json = Path.ChangeExtension(jpg, ".json");
-            string metaJson = JsonUtility.ToJson(meta, true);
+            string metaJson = JsonUtility.ToJson(meta, !isDense);
             pendingWrites++;
             Task.Run(() =>
             {
                 // Rows come bottom-up (Unity texture order), which is what the encoder expects: the JPG is upright,
                 // with viewport (0,0) = its bottom-left pixel.
-                byte[] bytes = ImageConversion.EncodeArrayToJPG(pixels, GraphicsFormat.R8G8B8A8_UNorm, (uint)w, (uint)h, 0, 92);
+                byte[] bytes = ImageConversion.EncodeArrayToJPG(pixels, GraphicsFormat.R8G8B8A8_UNorm, (uint)w, (uint)h, 0, isDense ? 88 : 92);
                 File.WriteAllBytes(jpg, bytes);
                 File.WriteAllText(json, metaJson); // the JSON last: a photo counts once both exist
             }).ContinueWith(t =>
@@ -272,6 +332,13 @@ public class WallPhotoCapture : MonoBehaviour
                 if (t.Exception != null) Debug.LogError($"[WallPhotos] write failed: {t.Exception.GetBaseException()}");
             });
 
+            if (isDense)
+            {
+                denseCount++;
+                nextDenseIndex++;
+                if (denseCount % 10 == 0) RefreshPanel();
+                return;
+            }
             shots.Add(meta);
             nextIndex++;
             AddOutline(meta, true);
@@ -280,7 +347,20 @@ public class WallPhotoCapture : MonoBehaviour
         });
     }
 
-    WallPhotoMeta BuildMeta(Pose pose, DateTime stamp, int w, int h)
+    MRUKRoom HouseRoom() => MRUK.Instance == null || houseRoomUuid == null ? null
+        : MRUK.Instance.Rooms.FirstOrDefault(r => r.Anchor.Uuid.ToString() == houseRoomUuid);
+
+    /// <summary>Dense frame due: the camera moved/turned enough since the last one, slowly enough to be sharp.</summary>
+    bool DenseDue()
+    {
+        if (Time.time - lastDenseTime < DenseInterval) return false;
+        if (headDegPerSec > DenseMaxDegPerSec || headMetersPerSec > DenseMaxMetersPerSec) return false;
+        if (!haveDense) return true;
+        Pose p = cam.GetCameraPose();
+        return Vector3.Distance(p.position, lastDensePos) >= DenseMove || Quaternion.Angle(p.rotation, lastDenseRot) >= DenseTurn;
+    }
+
+    WallPhotoMeta BuildMeta(Pose pose, DateTime stamp, int w, int h, bool isDense)
     {
         var rooms = MRUK.Instance != null ? MRUKDataProcessor.GetValidRooms(MRUK.Instance) : new List<MRUKRoom>();
         var room = rooms.FirstOrDefault(r => r.IsPositionInRoom(pose.position))
@@ -297,10 +377,12 @@ public class WallPhotoCapture : MonoBehaviour
 
         var rt = room.transform;
         var intr = cam.Intrinsics;
+        int index = isDense ? nextDenseIndex : nextIndex;
         var m = new WallPhotoMeta
         {
-            index = nextIndex,
-            file = nextIndex.ToString("0000") + ".jpg",
+            index = index,
+            dense = isDense,
+            file = (isDense ? DenseFolder + "/" : "") + index.ToString("0000") + ".jpg",
             capturedAt = DateTime.Now.ToString("o"),
             cameraTimestamp = stamp.ToString("o"),
             camera = cam.CameraPosition.ToString(),
@@ -316,6 +398,13 @@ public class WallPhotoCapture : MonoBehaviour
             sensorResolution = new Vector2(intr.SensorResolution.x, intr.SensorResolution.y),
             imageWidth = w, imageHeight = h,
         };
+        var house = HouseRoom();
+        if (house != null)
+        {
+            m.houseRoomUuid = houseRoomUuid;
+            m.housePosition = house.transform.InverseTransformPoint(pose.position);
+            m.houseRotation = Quaternion.Inverse(house.transform.rotation) * pose.rotation;
+        }
         if (CenterHit(pose, out float cd, out string cl)) { m.centerHitDistance = cd; m.centerHitLabel = cl; }
         return m;
     }
@@ -352,8 +441,8 @@ public class WallPhotoCapture : MonoBehaviour
     {
         if (!head) return;
         float dt = Mathf.Max(Time.deltaTime, 1e-4f);
-        float deg = Quaternion.Angle(lastHeadRot, head.rotation) / dt;
-        float mps = Vector3.Distance(lastHeadPos, head.position) / dt;
+        float deg = headDegPerSec = Quaternion.Angle(lastHeadRot, head.rotation) / dt;
+        float mps = headMetersPerSec = Vector3.Distance(lastHeadPos, head.position) / dt;
         lastHeadPos = head.position; lastHeadRot = head.rotation;
         stillFor = deg < StillDegPerSec && mps < StillMetersPerSec ? stillFor + dt : 0f;
     }
@@ -489,9 +578,15 @@ public class WallPhotoCapture : MonoBehaviour
         y += 46;
         statusText = XRUi.CreateText(t, "Hint", "", 18, TextAlignmentOptions.TopLeft, x0, y, fullW, 60, XRUi.MutedText);
         y += 64 + Gap;
-        float w4 = (fullW - Gap * 3) / 4f;
-        autoButton = XRUi.CreateButton(t, "Auto", x0, y, w4, RowH, () => { auto = !auto; stillFor = 0; RefreshPanel(); }, 20);
-        coverageButton = XRUi.CreateButton(t, "Coverage", x0 + (w4 + Gap), y, w4, RowH, () =>
+        float w5 = (fullW - Gap * 4) / 5f;
+        autoButton = XRUi.CreateButton(t, "Auto", x0, y, w5, RowH, () => { auto = !auto; stillFor = 0; RefreshPanel(); }, 20);
+        denseButton = XRUi.CreateButton(t, "Dense", x0 + (w5 + Gap), y, w5, RowH, () =>
+        {
+            dense = !dense; haveDense = false;
+            uiLog?.AddLog(dense ? "Photos: DENSE on - walk slowly, look at every surface from several places." : "Photos: dense off.");
+            RefreshPanel();
+        }, 20);
+        coverageButton = XRUi.CreateButton(t, "Coverage", x0 + (w5 + Gap) * 2, y, w5, RowH, () =>
         {
             showCoverage = !showCoverage;
 #if META_XR_SDK_INSTALLED
@@ -499,21 +594,24 @@ public class WallPhotoCapture : MonoBehaviour
 #endif
             RefreshPanel();
         }, 18);
-        var undo = XRUi.CreateButton(t, "Delete last", x0 + (w4 + Gap) * 2, y, w4, RowH, UndoLast, 17);
+        var undo = XRUi.CreateButton(t, "Delete last", x0 + (w5 + Gap) * 3, y, w5, RowH, UndoLast, 16);
         XRUi.SetTint(undo, XRUi.ButtonDangerColor);
-        XRUi.CreateButton(t, "Close", x0 + (w4 + Gap) * 3, y, w4, RowH, ClosePanel, 20);
+        XRUi.CreateButton(t, "Close", x0 + (w5 + Gap) * 4, y, w5, RowH, ClosePanel, 20);
         RefreshPanel();
     }
 
     void RefreshPanel()
     {
         if (!panel) return;
-        countText.text = $"Wall photos: {shots.Count}   ({Path.GetFileName(sessionDir)})";
+        countText.text = $"Wall photos: {shots.Count}   Dense: {denseCount}   ({Path.GetFileName(sessionDir)})";
         if (statusText.text.StartsWith("<color=red>")) return;
-        statusText.text = auto
+        statusText.text = dense
+            ? "DENSE (for a 3D splat): walk slowly round the room, look at every wall, floor and ceiling from several spots - it shoots by itself. Trigger = cable photo."
+            : auto
             ? "Look at a wall and hold still - it shoots by itself. Trigger = shoot now. Green = already covered."
             : "Trigger = take a photo. Green outlines = already covered.";
-        XRUi.SetTint(autoButton, auto ? XRUi.ButtonOnColor : XRUi.ButtonToggleColor);
+        XRUi.SetTint(autoButton, auto && !dense ? XRUi.ButtonOnColor : XRUi.ButtonToggleColor);
+        XRUi.SetTint(denseButton, dense ? XRUi.ButtonOnColor : XRUi.ButtonToggleColor);
         XRUi.SetTint(coverageButton, showCoverage ? XRUi.ButtonOnColor : XRUi.ButtonToggleColor);
     }
 
@@ -559,4 +657,14 @@ public class WallPhotoMeta
     public int imageWidth, imageHeight;
     public float centerHitDistance;
     public string centerHitLabel;
+    /// <summary>Dense frame (Dense/ subfolder, for a splat) rather than a cable photo.</summary>
+    public bool dense;
+    /// <summary>The camera pose in the house frame: local to the room houseRoomUuid (the same room for every photo
+    /// of a session), so all rooms share one coordinate system - what the COLMAP export uses.</summary>
+    public string houseRoomUuid;
+    public Vector3 housePosition;
+    public Quaternion houseRotation;
+    /// <summary>Dense frames: scan surface points seen by the photo (house frame) and their colour in it.</summary>
+    public List<Vector3> seedPoints = new List<Vector3>();
+    public List<Color32> seedColors = new List<Color32>();
 }
