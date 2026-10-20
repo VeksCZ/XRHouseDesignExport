@@ -271,6 +271,7 @@ public class RouteEditTool : MonoBehaviour
             RouteStore.Apply(f => f.routes.Add(r));
             drawingId = r.id; labelIdx = 0;
             Haptic(0.5f);
+            Debug.Log($"[Routes] new {RouteStyle.Name(kind)} route {r.id.Substring(0, 6)} in {DoorCatalog.RoomId(room).Substring(0, 8)} at {c} ({(frameIsWalk ? "walk" : "passthrough")})");
         }
         else
         {
@@ -281,6 +282,7 @@ public class RouteEditTool : MonoBehaviour
             Vector3 local = room.transform.InverseTransformPoint(c);
             RouteStore.Apply(f => f.routes.First(x => x.id == id).localPoints.Add(new Vector3Data(local)));
             Haptic(0.35f);
+            Debug.Log($"[Routes] {RouteStyle.Name(route.kind)} {id.Substring(0, 6)}: point {route.localPoints.Count} at {c} ({(frameIsWalk ? "walk" : "passthrough")})");
         }
 #endif
         RefreshPanel();

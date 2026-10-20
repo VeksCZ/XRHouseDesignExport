@@ -141,6 +141,7 @@ public class WallOverlays : MonoBehaviour
         string stamp = $"{(root ? root.GetInstanceID() : 0)}|{yaw:F3}|{center}|{sceneSig}|{RouteStore.Version}|{photoVersion}|{routes}|{pics}|{fittings}|{toggleVersion}";
         if (ctx.go != null && stamp == ctx.stamp) return;
         Clear(ctx);
+        float t0 = Time.realtimeSinceStartup;
         ctx.stamp = stamp; ctx.root = root; ctx.yaw = yaw; ctx.center = center;
         ctx.go = new GameObject("Overlays_" + ctx.name);
         if (root != null)
@@ -158,6 +159,8 @@ public class WallOverlays : MonoBehaviour
         if (pics) BuildPhotos(ctx, rooms);
         if (fittings) BuildFittings(ctx, rooms);
 #endif
+        Debug.Log($"[Overlays] {ctx.name} rebuilt in {(Time.realtimeSinceStartup - t0) * 1000f:0} ms: routes {(routes ? RouteStore.Routes.Count : 0)}, " +
+                  $"boxes {(routes ? RouteStore.Current.markers.Count : 0)}, photos {(pics ? photos.Count : 0)}{(fittings ? ", fittings " + FittingsInfo : "")}");
     }
 
     void Clear(Ctx ctx)

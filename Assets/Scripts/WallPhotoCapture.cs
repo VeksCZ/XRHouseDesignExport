@@ -52,6 +52,10 @@ public class WallPhotoCapture : MonoBehaviour
     // from every earlier shot's centre hit.
     const float StillTime = 0.25f, StillDegPerSec = 8f, StillMetersPerSec = 0.06f, MinInterval = 0.6f;
     const float NewAngle = 22f, NewDistance = 0.9f;
+    // Cable photos the PC tools can use (RouteDetector rectifies up to 4.5 m / 72 deg - keep a margin).
+    const float MaxShotDist = 3.5f, MaxShotAngle = 62f;
+    // Dense frames sharper than this share of the recent median only (motion blur / focus): blurry ones are dropped.
+    const float MinRelSharpness = 0.6f;
 
     public const string DenseFolder = "Dense";
     // Dense: a frame after DenseMove metres or DenseTurn degrees of camera motion, at most every DenseInterval, and
@@ -103,6 +107,11 @@ public class WallPhotoCapture : MonoBehaviour
     // stillness tracking
     Vector3 lastHeadPos; Quaternion lastHeadRot; float stillFor, lastShotTime = -10f, headDegPerSec, headMetersPerSec;
     bool preparing, capturing;
+    // sharpness of recent frames (for the relative blur test) and what the session logged
+    readonly List<float> sharpDense = new List<float>(), sharpCable = new List<float>();
+    int blurryDropped;
+    Vector3 prevDensePos; Quaternion prevDenseRot; bool prevHaveDense; float prevDenseTime;
+    static readonly object logLock = new object();
     int pendingWrites;
 
     // Panel: rides above the edit toolbar on the left controller (grip-drag it away and it stays put).
@@ -122,7 +131,7 @@ public class WallPhotoCapture : MonoBehaviour
     const string TipPref = "WallPhotos.TipShown";
 
     // State the HUD explains.
-    enum View { Unknown, Nothing, Covered, Moving, Settling }
+    enum View { Unknown, Nothing, Covered, Moving, Settling, TooFar, TooOblique }
     View view;
     bool started;
     float retryAt;
@@ -352,7 +361,19 @@ public class WallPhotoCapture : MonoBehaviour
         go.transform.SetParent(transform, false);
         cam = go.AddComponent<PassthroughCameraAccess>();
         cam.CameraPosition = PassthroughCameraAccess.CameraPositionType.Left;
-        cam.RequestedResolution = new Vector2Int(1280, 960); // the largest the API offers
+        // the largest the headset offers (sharper chases for the PC tools); 1280x960 if the list isn't available
+        var res = new Vector2Int(1280, 960);
+        try
+        {
+            var sup = PassthroughCameraAccess.GetSupportedResolutions(PassthroughCameraAccess.CameraPositionType.Left);
+            if (sup != null && sup.Length > 0)
+            {
+                res = sup.OrderByDescending(r => r.x * r.y).First();
+                uiLog?.AddLog($"Photos: camera {res.x}x{res.y} (offered: {string.Join(", ", sup.Select(r => r.x + "x" + r.y))})");
+            }
+        }
+        catch (Exception e) { Debug.LogWarning($"[WallPhotos] supported resolutions: {e.Message}"); }
+        cam.RequestedResolution = res;
         go.SetActive(true);
         SetStatus("Camera starting...");
 #endif
@@ -397,8 +418,13 @@ public class WallPhotoCapture : MonoBehaviour
         var tex = cam.GetTexture();
         if (tex == null) return;
         capturing = true;
-        if (isDense) { lastDenseTime = Time.time; lastDensePos = pose.position; lastDenseRot = pose.rotation; haveDense = true; }
+        if (isDense)
+        {
+            prevDensePos = lastDensePos; prevDenseRot = lastDenseRot; prevHaveDense = haveDense; prevDenseTime = lastDenseTime;
+            lastDenseTime = Time.time; lastDensePos = pose.position; lastDenseRot = pose.rotation; haveDense = true;
+        }
         else lastShotTime = Time.time;
+        float reqAt = Time.realtimeSinceStartup, degAt = headDegPerSec, mpsAt = headMetersPerSec;
         var meta = BuildMeta(pose, stamp, tex.width, tex.height, isDense);
         if (meta == null)
         {
@@ -434,6 +460,22 @@ public class WallPhotoCapture : MonoBehaviour
             data.CopyTo(pixels);
             int w = req.width, h = req.height;
             meta.imageWidth = w; meta.imageHeight = h;
+            float readbackMs = (Time.realtimeSinceStartup - reqAt) * 1000f;
+            meta.sharpness = Sharpness(pixels, w, h);
+            var hist = isDense ? sharpDense : sharpCable;
+            float median = Median(hist);
+            meta.relativeSharpness = median > 0 ? meta.sharpness / median : 1f;
+            hist.Add(meta.sharpness); if (hist.Count > 40) hist.RemoveAt(0);
+            if (isDense && hist.Count > 8 && meta.relativeSharpness < MinRelSharpness)
+            {
+                // blurry: not saved; the next frame from about here is due right away
+                blurryDropped++;
+                lastDensePos = prevDensePos; lastDenseRot = prevDenseRot; haveDense = prevHaveDense; lastDenseTime = prevDenseTime;
+                lock (pixelPool) if (pixelPool.Count < MaxPendingWrites + 1) pixelPool.Push(pixels);
+                LogCapture(meta, false, "blurry", degAt, mpsAt, readbackMs, 0, 0);
+                return;
+            }
+            meta.headDegPerSec = degAt; meta.headMetersPerSec = mpsAt;
             for (int i = 0; i < seedUv.Count; i++)
             {
                 int px = Mathf.Clamp((int)(seedUv[i].x * w), 0, w - 1), py = Mathf.Clamp((int)(seedUv[i].y * h), 0, h - 1);
@@ -448,10 +490,13 @@ public class WallPhotoCapture : MonoBehaviour
             {
                 // Rows come bottom-up (Unity texture order), which is what the encoder expects: the JPG is upright,
                 // with viewport (0,0) = its bottom-left pixel.
+                var sw = System.Diagnostics.Stopwatch.StartNew();
                 byte[] bytes = ImageConversion.EncodeArrayToJPG(pixels, GraphicsFormat.R8G8B8A8_UNorm, (uint)w, (uint)h, 0, isDense ? 88 : 92);
+                float encodeMs = (float)sw.Elapsed.TotalMilliseconds;
                 lock (pixelPool) if (pixelPool.Count < MaxPendingWrites + 1) pixelPool.Push(pixels);
                 File.WriteAllBytes(jpg, bytes);
                 File.WriteAllText(json, metaJson); // the JSON last: a photo counts once both exist
+                LogCapture(meta, true, "", degAt, mpsAt, readbackMs, encodeMs, bytes.Length / 1024);
             }).ContinueWith(t =>
             {
                 pendingWrites--;
@@ -467,6 +512,7 @@ public class WallPhotoCapture : MonoBehaviour
                 Click(0.12f);
                 flashUntil = Time.time + 0.12f; flashText = null;
                 if (denseCount % 5 == 0) RefreshPanel();
+                if (denseCount % 25 == 0) Debug.Log($"[WallPhotos] 3D frames: {denseCount} saved, {blurryDropped} blurry dropped, coverage cells {coverage.Count}, pending writes {pendingWrites}");
                 return;
             }
             shots.Add(meta);
@@ -474,11 +520,59 @@ public class WallPhotoCapture : MonoBehaviour
             Count(cableByRoom, meta.roomUuid);
             AddOutline(meta, true);
             GuideMark(meta);
+            Debug.Log($"[WallPhotos] cable photo {meta.index} saved, sharp {meta.sharpness:0.0} (x{meta.relativeSharpness:0.00}), {meta.centerHitDistance:0.00} m {meta.centerHitLabel}{GuideSummary().Replace("\n", " - ")}");
             Haptic();
             Click(0.6f);
             flashUntil = Time.time + 0.9f; flashText = $"<color=#7dff9a>Photo {shots.Count} saved</color>";
             RefreshPanel();
         });
+    }
+
+    /// <summary>Mean luminance gradient over a sparse grid (every 4th pixel, 2 px steps) - drops with motion blur and
+    /// defocus. Absolute values depend on the surface (bare brick >> smooth plaster), so frames are compared with the
+    /// recent median, not with a fixed limit.</summary>
+    static float Sharpness(byte[] px, int w, int h)
+    {
+        double sum = 0; int n = 0;
+        for (int y = 8; y < h - 8; y += 4)
+            for (int x = 8; x < w - 8; x += 4)
+            {
+                int o = (y * w + x) * 4, ox = o + 8, oy = o + w * 8;
+                int l = px[o] * 2 + px[o + 1] * 5 + px[o + 2];
+                int lx = px[ox] * 2 + px[ox + 1] * 5 + px[ox + 2];
+                int ly = px[oy] * 2 + px[oy + 1] * 5 + px[oy + 2];
+                sum += Math.Abs(lx - l) + Math.Abs(ly - l);
+                n++;
+            }
+        return n > 0 ? (float)(sum / n / 8.0) : 0f;
+    }
+
+    static float Median(List<float> v)
+    {
+        if (v.Count == 0) return 0f;
+        var s = v.OrderBy(x => x).ToList();
+        return s[s.Count / 2];
+    }
+
+    /// <summary>One line per capture in the session's capture_log.csv - for measuring how the capture behaves.</summary>
+    void LogCapture(WallPhotoMeta m, bool saved, string reason, float deg, float mps, float readbackMs, float encodeMs, int kb)
+    {
+        string path = Path.Combine(sessionDir ?? "", "capture_log.csv");
+        var ci = System.Globalization.CultureInfo.InvariantCulture;
+        string line = string.Join(";", DateTime.Now.ToString("HH:mm:ss.fff"), m.dense ? "3d" : "cable", m.index.ToString(),
+            saved ? "saved" : "dropped", reason, m.roomName ?? (m.roomUuid ?? "").Substring(0, Math.Min(8, (m.roomUuid ?? "").Length)),
+            deg.ToString("0.0", ci), mps.ToString("0.00", ci), m.sharpness.ToString("0.0", ci), m.relativeSharpness.ToString("0.00", ci),
+            readbackMs.ToString("0", ci), encodeMs.ToString("0", ci), kb.ToString(), m.centerHitDistance.ToString("0.00", ci),
+            m.centerHitLabel ?? "", m.imageWidth + "x" + m.imageHeight);
+        try
+        {
+            lock (logLock)
+            {
+                if (!File.Exists(path)) File.AppendAllText(path, "time;kind;index;result;reason;room;head_deg_s;head_m_s;sharpness;rel_sharpness;readback_ms;encode_ms;kb;center_dist_m;center_label;size\n");
+                File.AppendAllText(path, line + "\n");
+            }
+        }
+        catch { }
     }
 
     MRUKRoom HouseRoom() => MRUK.Instance == null || houseRoomUuid == null ? null
@@ -580,6 +674,7 @@ public class WallPhotoCapture : MonoBehaviour
         currentRoomUuid = uuid;
         currentRoomName = room != null ? MRUKDataProcessor.GetRoomLabel(room) : null;
         RefreshPanel();
+        Debug.Log($"[WallPhotos] room: {currentRoomName ?? "outside"} ({uuid}){(dense ? "" : GuideSummary().Replace("\n", " - "))}");
     }
 
     // ---------- photo guide: what of the current room isn't photographed yet ----------
@@ -776,7 +871,10 @@ public class WallPhotoCapture : MonoBehaviour
     {
         Pose pose = cam.GetCameraPose();
         var ray = cam.ViewportPointToRay(new Vector2(0.5f, 0.5f), pose);
-        if (!Hit(ray, out _, out _)) return View.Nothing;
+        if (!Hit(ray, out var hp, out var hn, out _)) return View.Nothing;
+        // what the PC-side tools can use: the route detector skips surfaces seen from > 4.5 m or at > 72 deg
+        if (Vector3.Distance(ray.origin, hp) > MaxShotDist) return View.TooFar;
+        if (Vector3.Angle(-ray.direction, hn) > MaxShotAngle) return View.TooOblique;
         if (!IsNewView()) return View.Covered;
         return stillFor > 0 ? View.Settling : View.Moving;
     }
@@ -983,6 +1081,7 @@ public class WallPhotoCapture : MonoBehaviour
     void SetDense(bool on)
     {
         if (dense == on) return;
+        Debug.Log($"[WallPhotos] mode: {(on ? "3D scan" : "cable photos")} (3D frames so far {denseCount}, blurry dropped {blurryDropped})");
         dense = on; haveDense = false; stillFor = 0;
         uiLog?.AddLog(on ? "Photos: 3D scan - walk slowly, look at every wall, floor and ceiling from several spots."
                          : "Photos: cable photos - look at a bare wall and hold still.");
@@ -1089,7 +1188,7 @@ public class WallPhotoCapture : MonoBehaviour
             bool tooFast = headDegPerSec > DenseMaxDegPerSec || headMetersPerSec > DenseMaxMetersPerSec;
             SetHud(tooFast ? "<color=#ffb347>Slower - the images get blurry</color>"
                            : (currentRoomUuid != null && denseByRoom.TryGetValue(currentRoomUuid, out int inRoom)
-                               ? $"<color=#ff5050>\u25CF</color> 3D scan  -  {inRoom} frames in this room"
+                               ? $"<color=#ff5050>\u25CF</color> 3D scan  -  {inRoom} frames in this room" + (blurryDropped > 0 ? $"<size=24>  ({blurryDropped} blurry dropped)</size>" : "")
                                : $"<color=#ff5050>\u25CF</color> 3D scan  -  starting..."));
             return;
         }
@@ -1098,6 +1197,8 @@ public class WallPhotoCapture : MonoBehaviour
             case View.Nothing: SetHud("<color=#aab4c4>Look at a wall, floor or ceiling</color>"); break;
             case View.Covered: SetHud("<color=#7dff9a>Already photographed</color> <size=26>- look somewhere else</size>"); break;
             case View.Moving: SetHud("Hold still to take a photo"); break;
+            case View.TooFar: SetHud("<color=#ffb347>Too far</color> <size=26>- step closer (under 3.5 m)</size>"); break;
+            case View.TooOblique: SetHud("<color=#ffb347>Too slanted</color> <size=26>- face the surface more</size>"); break;
             case View.Settling:
                 hudText.text = "Hold still...";
                 SetBar(stillFor / StillTime);
@@ -1189,4 +1290,8 @@ public class WallPhotoMeta
     /// <summary>Dense frames: scan surface points seen by the photo (house frame) and their colour in it.</summary>
     public List<Vector3> seedPoints = new List<Vector3>();
     public List<Color32> seedColors = new List<Color32>();
+    /// <summary>Image sharpness (mean luminance gradient) and its ratio to the recent median of the same kind.</summary>
+    public float sharpness, relativeSharpness;
+    /// <summary>Head motion at the moment of the shot (deg/s, m/s).</summary>
+    public float headDegPerSec, headMetersPerSec;
 }
