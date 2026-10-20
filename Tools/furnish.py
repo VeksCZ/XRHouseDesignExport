@@ -38,7 +38,9 @@ Types: bathtub, shower ("glass": ["front", "left", "right"] or {"side": "right",
        washbasin (vanity + top; "basins": n, "vessel": true = bowls standing on the top, "mirror": true with
        "mirror_w"/"mirror_y"/"mirror_h", "cabinet_from" = underside height), wc (wall-hung bowl; "prewall": depth,
        0 = none), washer, radiator (towel rail, "y" = bottom), mirror, cabinet (wall cabinet, "y" default 1.4),
-       box (anything else; "color" = material name or "#rrggbb", "y" = lift).
+       box (anything else; "color" = material name or "#rrggbb", "y" = lift),
+       niche (a recess in the wall: "w" along it, "h" tall, "d" deep, "y" = bottom edge above the floor; the app cuts
+       it into the wall, this GLB only marks it on the wall face).
 """
 import argparse, json, math, os, struct, sys
 
@@ -174,6 +176,7 @@ DEFAULTS = {  # w, d, h
     'bathtub': (1.70, 0.75, 0.58), 'shower': (0.90, 0.90, 2.00), 'washbasin': (0.80, 0.48, 0.85),
     'wc': (0.40, 0.56, 1.15), 'washer': (0.60, 0.60, 0.85), 'radiator': (0.50, 0.10, 1.20),
     'mirror': (0.80, 0.02, 0.80), 'cabinet': (0.60, 0.20, 0.70), 'box': (0.60, 0.60, 0.85),
+    'niche': (0.30, 0.10, 0.30),
     # kitchen (keep in step with Furniture.cs): base run with worktop (sink/hob/dishwasher as [from, to] along it),
     # wall units ("glass": true = glazed), tall units (oven/microwave/fridge), free-standing island (use x/z)
     'kitchen_base': (1.20, 0.60, 0.90), 'kitchen_wall': (1.20, 0.35, 0.72),
@@ -304,6 +307,10 @@ def shape(item, w, d, h):
         return _kitchen(item, t, w, d, h)
     if t in ('tv', 'sofa_corner', 'dining_table', 'bed', 'desk'):
         return _living(item, t, w, d, h)
+    if t == 'niche':
+        # a recess in the wall ("d" = its depth, "y" = bottom edge): the app cuts it into the wall (XRModelFactory
+        # Niches); the exported GLB's walls are solid, so here it is only marked by a dark panel on the wall face
+        return [('gap', (0, w, 0, 0.004, 0, h))], item.get('y', 0.0)
     if t == 'fireplace':
         left = item.get('glass_side', 'left') == 'left'
         fb0, fb1, back, cheek, gl = 0.42, 1.02, 0.16, 0.10, 0.008
@@ -655,7 +662,8 @@ def furnish(js, binc, rooms, spec):
 # ---------------------------------------------------------------------------------------------------------- SVG check
 
 COLORS = {'bathtub': '#9ecae1', 'shower': '#c6dbef', 'washbasin': '#c49c6b', 'wc': '#e0e0e0', 'washer': '#bdbdbd',
-          'radiator': '#969696', 'mirror': '#deebf7', 'cabinet': '#c49c6b', 'box': '#d9d9d9'}
+          'radiator': '#969696', 'mirror': '#deebf7', 'cabinet': '#c49c6b', 'box': '#d9d9d9',
+          'niche': '#4d4d4d'}
 
 
 def svg_room(path, rname, room, items):

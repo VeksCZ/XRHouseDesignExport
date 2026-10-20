@@ -94,6 +94,7 @@ public static class MRUKEditorTools {
         RunAdb($"shell rm -rf \"{RemoteExportDir}/Logs\" \"{RemoteExportDir}/session_debug_log.txt\"");
         PullSavedScans(local);
         PullWallPhotos(local);
+        SyncRoutes(local);
         if (RunAdb($"pull \"{RemoteExportDir}/.\" \"{local}\"")) {
             var dirs = Directory.GetDirectories(local, "Export_*");
             if (dirs.Length > 0) {
@@ -210,6 +211,25 @@ public static class MRUKEditorTools {
             else Debug.LogError($"<color=red>Could not pull wall photos {name}.</color>");
         }
         if (n > 0) Debug.Log($"<color=green>Wall photos: {n} session folder(s) pulled ({WallPhotoCapture.SessionPrefix}*).</color>");
+    }
+
+    /// <summary>Traced routes (RouteStore, one file per house): the headset's and the PC's are merged by route id and the
+    /// result written to both, so routes drawn on either side end up everywhere.</summary>
+    static void SyncRoutes(string exportRoot) {
+        string remote = $"{RemoteAppFiles}/{RouteStore.Folder}/{RouteStore.FileName}";
+        string local = Path.Combine(exportRoot, RouteStore.Folder, RouteStore.FileName);
+        string tmp = Path.Combine(Path.GetTempPath(), "quest_routes.json");
+        if (File.Exists(tmp)) File.Delete(tmp);
+        bool onQuest = RunAdb($"shell ls \"{remote}\"", out string ls) && !ls.Contains("No such file") && RunAdb($"pull \"{remote}\" \"{tmp}\"");
+        var quest = onQuest ? RouteStore.Read(tmp) : null;
+        var pc = RouteStore.Read(local);
+        if (quest == null && pc == null) return;
+        var merged = RouteStore.Merge(pc, quest);
+        Directory.CreateDirectory(Path.GetDirectoryName(local));
+        File.WriteAllText(local, JsonUtility.ToJson(merged, true));
+        RunAdb($"shell mkdir -p \"{RemoteAppFiles}/{RouteStore.Folder}\"");
+        RunAdb($"push \"{local}\" \"{remote}\"");
+        Debug.Log($"<color=green>Routes: {merged.routes.Count} (Quest {quest?.routes.Count ?? 0}, PC {pc?.routes.Count ?? 0}) - merged into {local} and back to the Quest.</color>");
     }
 
     /// <summary>Session logs live in the app's own storage on the headset (not in the exports); fetches them into

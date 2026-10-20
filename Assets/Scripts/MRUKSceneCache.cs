@@ -67,15 +67,19 @@ public static class MRUKSceneCache
     {
         string root = GetCacheRoot();
         if (!Directory.Exists(root)) return new List<string>();
+        // Furnished scans (the finished house model: furniture, niches, real ceilings) come first, then by date.
         if (FolderMode)
             return Directory.GetDirectories(root)
                 .Where(d => File.Exists(Path.Combine(d, MRUKPathUtility.DATA_SCENE)))
-                .OrderByDescending(d => File.GetLastWriteTime(Path.Combine(d, MRUKPathUtility.DATA_SCENE)))
+                .OrderByDescending(d => File.Exists(Path.Combine(d, MRUKPathUtility.DATA_FURNITURE)))
+                .ThenByDescending(d => File.GetLastWriteTime(Path.Combine(d, MRUKPathUtility.DATA_SCENE)))
                 .Select(Path.GetFileName)
                 .ToList();
         return Directory.GetFiles(root, "*" + EXTENSION)
-            .OrderByDescending(File.GetLastWriteTime)
-            .Select(f => Path.GetFileName(f).Substring(0, Path.GetFileName(f).Length - EXTENSION.Length))
+            .Select(f => (file: f, name: Path.GetFileName(f).Substring(0, Path.GetFileName(f).Length - EXTENSION.Length)))
+            .OrderByDescending(x => File.Exists(FurniturePath(x.name)))
+            .ThenByDescending(x => File.GetLastWriteTime(x.file))
+            .Select(x => x.name)
             .ToList();
     }
 

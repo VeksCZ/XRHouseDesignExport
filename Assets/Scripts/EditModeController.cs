@@ -14,16 +14,16 @@ using UnityEngine.UI;
 /// </summary>
 public class EditModeController : MonoBehaviour
 {
-    public enum Tool { None, Doors, Stairs, Holes, Furniture, Measure, Sun, Photos }
+    public enum Tool { None, Doors, Stairs, Holes, Furniture, Measure, Sun, Photos, Routes }
 
     public XRMenu uiLog;
     public MRUKExporter exporter;
 
-    const float CanvasW = 770f, CanvasH = 190f, CanvasScale = 0.0004f; // ~31 x 8 cm, in front of you, a bit low
+    const float CanvasW = 840f, CanvasH = 190f, CanvasScale = 0.0004f; // ~31 x 8 cm, in front of you, a bit low
 
     Canvas toolbar;
     TMP_Text infoText;
-    Button doorsButton, stairsButton, holesButton, furnitureButton, measureButton, sunButton, photosButton, undoButton, redoButton;
+    Button doorsButton, stairsButton, holesButton, furnitureButton, measureButton, sunButton, photosButton, routesButton, undoButton, redoButton;
     Transform leftHand;
     bool saving;
 
@@ -107,6 +107,7 @@ public class EditModeController : MonoBehaviour
         if (CurrentTool == Tool.Holes) uiLog?.AddLog("Opening: two opposite corners on the ceiling (from below) or the floor (from above).");
         if (CurrentTool == Tool.Sun) uiLog?.AddLog("Sun (while walking): sunny patches from the windows - right stick left/right = half an hour, up/down = a month.");
         if (CurrentTool == Tool.Measure) uiLog?.AddLog("Measure: trigger on the start point, then on the end point (walls, floor, furniture) - trigger again starts a new one.");
+        if (CurrentTool == Tool.Routes) uiLog?.AddLog("Routes (over passthrough or while walking): pick the kind, then trigger along a pipe or cable - start, every bend, end.");
         if (CurrentTool == Tool.Photos) uiLog?.AddLog("Photos (over passthrough, live scan): look at a bare wall/floor/ceiling and hold still, or trigger - documents cable chases before plastering.");
         if (CurrentTool == Tool.Furniture) uiLog?.AddLog("Furniture (while walking): trigger on a piece picks it up, it follows the ray over the floor; trigger again puts it down. Right stick click turns it 90 degrees.");
         RefreshInfo();
@@ -133,7 +134,7 @@ public class EditModeController : MonoBehaviour
         infoText = XRUi.CreateText(t, "Info", "", 20, TextAlignmentOptions.MidlineRight, 100, 6, CanvasW - 114, 36, XRUi.MutedText);
 
         const float y = 52, h = 60, g = 8;
-        float w = (CanvasW - 14 * 2 - g * 9) / 10f;
+        float w = (CanvasW - 14 * 2 - g * 10) / 11f;
         float x = 14;
         doorsButton = XRUi.CreateButton(t, "Doors", x, y, w, h, () => SelectTool(Tool.Doors), 22); x += w + g;
         stairsButton = XRUi.CreateButton(t, "Stairs", x, y, w, h, () => SelectTool(Tool.Stairs), 22); x += w + g;
@@ -142,6 +143,7 @@ public class EditModeController : MonoBehaviour
         measureButton = XRUi.CreateButton(t, "Measure", x, y, w, h, () => SelectTool(Tool.Measure), 17); x += w + g;
         sunButton = XRUi.CreateButton(t, "Sun", x, y, w, h, () => SelectTool(Tool.Sun), 20); x += w + g;
         photosButton = XRUi.CreateButton(t, "Photos", x, y, w, h, () => SelectTool(Tool.Photos), 19); x += w + g;
+        routesButton = XRUi.CreateButton(t, "Routes", x, y, w, h, () => SelectTool(Tool.Routes), 19); x += w + g;
         undoButton = XRUi.CreateButton(t, "Undo", x, y, w, h, OnUndo, 22); x += w + g;
         redoButton = XRUi.CreateButton(t, "Redo", x, y, w, h, OnRedo, 22); x += w + g;
         XRUi.CreateButton(t, "Done", x, y, w, h, Toggle, 22);
@@ -181,6 +183,7 @@ public class EditModeController : MonoBehaviour
         XRUi.SetTint(measureButton, CurrentTool == Tool.Measure ? XRUi.ButtonOnColor : XRUi.ButtonToggleColor);
         XRUi.SetTint(sunButton, CurrentTool == Tool.Sun ? XRUi.ButtonOnColor : XRUi.ButtonToggleColor);
         XRUi.SetTint(photosButton, CurrentTool == Tool.Photos ? XRUi.ButtonOnColor : XRUi.ButtonToggleColor);
+        XRUi.SetTint(routesButton, CurrentTool == Tool.Routes ? XRUi.ButtonOnColor : XRUi.ButtonToggleColor);
         undoButton.interactable = HouseEditsStore.UndoCount > 0;
         redoButton.interactable = HouseEditsStore.RedoCount > 0;
         string scan = HouseEditsStore.CurrentScan ?? "live scan (saved on first edit)";

@@ -360,6 +360,11 @@ public class MRUKExporter : MonoBehaviour
             ui?.AddLog("<color=orange>Could not include edits/room names: " + ex.Message + "</color>");
         }
         File.WriteAllText(Path.Combine(session, MRUKPathUtility.DATA_REPORT), MRUKReportBuilder.GenerateFullReport(outlines, angle, SelectedSource));
+        // The scan's furniture spec: real (sloped) ceilings and the niches cut into the walls - as the walk-through shows them.
+        Furniture.InstallCeilings(rooms, HouseEditsStore.CurrentScan);
+        // Wall elevations + plans with the traced routes (switchable in the file).
+        try { WallDrawings.Write(session, rooms, SelectedSource); }
+        catch (Exception ex) { Debug.LogException(ex); ui?.AddLog("<color=orange>Wall drawings failed: " + ex.Message + "</color>"); }
         SetProgress(45, ui);
 
         ui?.AddLog("<color=cyan>[5/6] Exporting models...</color>");

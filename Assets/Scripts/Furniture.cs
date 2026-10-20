@@ -86,9 +86,10 @@ public static class Furniture
             foreach (var item in (rs["items"] as JArray ?? new JArray()).OfType<JObject>())
             {
                 k++;
+                string type = (string)item["type"] ?? "box";
+                if (type == NicheType) continue;   // cut into the walls instead (InstallCeilings -> XRModelFactory.Niches)
                 var rm = new XRRoomModel { roomName = ItemName(key, k - 1) };
                 model.rooms.Add(rm);
-                string type = (string)item["type"] ?? "box";
                 if (!Defaults.TryGetValue(type, out var def)) { Debug.LogWarning($"[Furniture] unknown type '{type}'"); continue; }
                 float w = F(item, "w", def.w), d = F(item, "d", def.d);
                 var toXZ = Place(box, item);
@@ -243,8 +244,10 @@ public static class Furniture
     public static void InstallCeilings(List<MRUKRoom> rooms, string scanName)
     {
         XRModelFactory.CeilingOverride = null;
+        XRModelFactory.Niches = new List<XRModelFactory.WallNiche>();
         var spec = string.IsNullOrEmpty(scanName) ? null : Load(scanName);
         XRModelFactory.ExteriorWallThickness = spec?["walls"] is JObject wj ? F(wj, "exterior", 0.25f) : 0.25f;
+        if (spec != null && rooms != null && rooms.Count > 0) InstallNiches(spec, rooms, scanName);
         if (spec?["ceilings"] is not JArray || rooms == null || rooms.Count == 0) return;
         Vector3 center = DollHouseVisualizer.CalculateCenter(rooms);
         Quaternion g = Quaternion.Euler(0, FloorPlanBuilder.CorrectionYaw(MRUKPlanExtractor.Extract(rooms)), 0);
@@ -281,6 +284,87 @@ public static class Furniture
             return null;
         };
         Debug.Log($"[Furniture] {scanName}: ceilings from the spec for {planes.Count} room(s)");
+    }
+
+    /// <summary>Item type of a recess in a wall: "w" along the wall, "h" tall, "d" deep, "y" = bottom edge above the
+    /// room's (rough) floor, placed like any item ("wall" + "along", or "x"/"z").</summary>
+    public const string NicheType = "niche";
+
+    /// <summary>The spec's niches as world-space wall recesses (XRModelFactory.Niches), in the export's frame like
+    /// the ceilings.</summary>
+    static void InstallNiches(JObject spec, List<MRUKRoom> rooms, string scanName)
+    {
+        XRModelFactory.Niches.AddRange(NichesOf(spec, rooms));
+        if (XRModelFactory.Niches.Count > 0) Debug.Log($"[Furniture] {scanName}: {XRModelFactory.Niches.Count} niche(s) cut into the walls");
+    }
+
+    /// <summary>The spec's niches in the world frame of these rooms (rooms matched by id, like the items).</summary>
+    public static List<XRModelFactory.WallNiche> NichesOf(JObject spec, List<MRUKRoom> rooms)
+    {
+        var list = new List<XRModelFactory.WallNiche>();
+        if (spec?["rooms"] is not JArray specRooms || rooms == null || rooms.Count == 0) return list;
+        Vector3 center = DollHouseVisualizer.CalculateCenter(rooms);
+        Quaternion g = Quaternion.Euler(0, FloorPlanBuilder.CorrectionYaw(MRUKPlanExtractor.Extract(rooms)), 0);
+        Quaternion gi = Quaternion.Inverse(g);
+        Vector3 World(float x, float y, float z) => gi * new Vector3(x, y, -z) + center;   // GLB axes -> world
+        foreach (var rs in specRooms.OfType<JObject>())
+        {
+            string key = ((string)rs["room"] ?? "").ToLowerInvariant();
+            if (key.StartsWith("room_")) key = key.Substring(5);
+            var room = rooms.FirstOrDefault(r => DoorCatalog.RoomId(r).ToLowerInvariant().StartsWith(key));
+            if (room == null || !TryRoomBox(room, g, center, out var box)) continue;
+            foreach (var item in (rs["items"] as JArray ?? new JArray()).OfType<JObject>())
+            {
+                if ((string)item["type"] != NicheType) continue;
+                float w = F(item, "w", 0.3f), h = F(item, "h", 0.3f), d = F(item, "d", 0.1f), y = box.y + F(item, "y", 0f);
+                var toXZ = Place(box, item);
+                var (xa, za) = toXZ(0f, 0f);
+                var (xb, zb) = toXZ(w, 0f);
+                var (xi, zi) = toXZ(0f, 1f);
+                Vector3 a = World(xa, y, za), b = World(xb, y, zb);
+                Vector3 inward = World(xi, y, zi) - a; inward.y = 0f;
+                list.Add(new XRModelFactory.WallNiche
+                {
+                    a = a, b = b, inward = inward.normalized, y0 = a.y, y1 = a.y + h, depth = d,
+                });
+            }
+        }
+        return list;
+    }
+
+    /// <summary>The spec's items that stand against a wall ("along", not an absolute "x"/"z" - those depend on the frame
+    /// of the whole saved scan) as one ghost mesh in the world frame of these rooms, vertex-coloured with 'alpha' - for
+    /// showing the planned fittings over passthrough on the live scan. Null if nothing matched.</summary>
+    public static Mesh GhostMesh(JObject spec, List<MRUKRoom> rooms, float alpha)
+    {
+        if (spec?["rooms"] is not JArray specRooms || rooms == null || rooms.Count == 0) return null;
+        var only = new JObject { ["rooms"] = new JArray() };
+        foreach (var rs in specRooms.OfType<JObject>())
+        {
+            var items = new JArray((rs["items"] as JArray ?? new JArray()).OfType<JObject>()
+                .Where(i => i["x"] == null && i["z"] == null && (string)i["type"] != NicheType).Select(i => i.DeepClone()));
+            if (items.Count > 0) ((JArray)only["rooms"]).Add(new JObject { ["room"] = rs["room"], ["items"] = items });
+        }
+        float yaw = FloorPlanBuilder.CorrectionYaw(MRUKPlanExtractor.Extract(rooms));
+        Vector3 center = DollHouseVisualizer.CalculateCenter(rooms);
+        var model = Build(only, rooms, yaw, center);
+        Quaternion gi = Quaternion.Inverse(Quaternion.Euler(0, yaw, 0));
+        var v = new List<Vector3>(); var col = new List<Color>(); var tri = new List<int>();
+        foreach (var part in model.rooms.Where(r => TryParseItem(r.roomName, out _, out _)).SelectMany(r => r.parts))
+        {
+            var c = part.color; c.a = part.name == GlassPart ? alpha * 0.4f : alpha;
+            for (int i = 0; i + 2 < part.triangles.Count; i += 3)
+            {
+                Vector3 a = gi * part.vertices[part.triangles[i]] + center, b = gi * part.vertices[part.triangles[i + 1]] + center, d = gi * part.vertices[part.triangles[i + 2]] + center;
+                Vector3 n = Vector3.Cross(b - a, d - a).normalized;
+                float sh = 0.7f + 0.3f * Mathf.Abs(Vector3.Dot(n, new Vector3(0.35f, 0.85f, 0.4f).normalized));
+                var sc = new Color(c.r * sh, c.g * sh, c.b * sh, c.a);
+                int k = v.Count;
+                v.Add(a); v.Add(b); v.Add(d); col.Add(sc); col.Add(sc); col.Add(sc);
+                tri.Add(k); tri.Add(k + 1); tri.Add(k + 2);
+            }
+        }
+        return v.Count == 0 ? null : RouteMesh.ToMesh("FittingsGhost", v, col, tri);
     }
 
     /// <summary>A box in GLB axes whose bottom and top follow (x, z) -> y (sloped ceilings, walls under them, roofs).</summary>

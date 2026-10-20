@@ -37,6 +37,18 @@ public partial class DesktopWalkApp : MonoBehaviour
         XRModelFactory.RemovedOpening = DoorCatalog.IsWalledUp;
         walk ??= FindAnyObjectByType<WalkThroughMode>() ?? gameObject.AddComponent<WalkThroughMode>();
         rig ??= FindAnyObjectByType<DesktopWalkRig>();
+        // Traced routes and cable photos on the walls (K / P), the same overlays as on the Quest.
+        var overlays = FindAnyObjectByType<WallOverlays>() ?? gameObject.AddComponent<WallOverlays>();
+        overlays.walk = walk;
+        // -routes <file>: a routes file of its own (tests - never the house's real one)
+        if (Arg("-routes") is string rf) RouteStore.OverridePath = System.IO.Path.GetFullPath(rf);
+        // -overlays routes,photos|none (tests): what to show, regardless of what was left on last time
+        if (Arg("-overlays") is string ov)
+        {
+            WallOverlays.ShowRoutes = ov.Contains("routes");
+            WallOverlays.ShowPhotos = ov.Contains("photos");
+            WallOverlays.ShowFittings = WallOverlays.FittingsInWalk = ov.Contains("fittings");
+        }
         Application.targetFrameRate = -1;
         QualitySettings.vSyncCount = Array.IndexOf(Environment.GetCommandLineArgs(), "-novsync") >= 0 ? 0 : 1;
         // Big flat-coloured surfaces: edges stair-step badly without MSAA. Not in the Editor (it'd be saved to the asset).
@@ -126,6 +138,8 @@ public partial class DesktopWalkApp : MonoBehaviour
             long tScan = sw.ElapsedMilliseconds;
             HouseEditsStore.Bind(scan);
             RoomNames.FilePath = MRUKSceneCache.RoomNamesPath(scan);
+            RouteStore.Reload();             // routes/photos may have been pulled since
+            WallOverlays.PhotosChanged();
             rig?.ResetView();
             if (!await walk.Enter(null, null)) { status = $"{scan}: no walkable rooms."; return; }
             Debug.Log($"TIMING load '{scan}': scan json {tScan} ms, walk model {sw.ElapsedMilliseconds - tScan} ms, total {sw.ElapsedMilliseconds} ms (t={Time.realtimeSinceStartup:0.00}s)");
@@ -195,7 +209,42 @@ public partial class DesktopWalkApp : MonoBehaviour
         if (kb.periodKey.wasPressedThisFrame) floorInfo = walk.SunStep(0, 1) ?? "";
         if (kb.mKey.wasPressedThisFrame) _ = CycleModel();
         if (kb.hKey.wasPressedThisFrame) showHelp = !showHelp;
+        if (kb.kKey.wasPressedThisFrame) { WallOverlays.ShowRoutes = !WallOverlays.ShowRoutes; floorInfo = WallOverlays.ShowRoutes ? $"Routes on ({RouteStore.Routes.Count})" : "Routes off"; }
+        if (kb.pKey.wasPressedThisFrame) { WallOverlays.ShowPhotos = !WallOverlays.ShowPhotos; floorInfo = WallOverlays.ShowPhotos ? "Photos on walls on" : "Photos on walls off"; }
+        if (kb.eKey.wasPressedThisFrame) floorInfo = ExportWallDrawings(true);
+        if (kb.dKey.wasPressedThisFrame) floorInfo = DetectRoutes();
         if (kb.f5Key.wasPressedThisFrame && loadedScan != null) _ = Load(loadedScan);
+    }
+
+    /// <summary>E: the walls/routes drawings (WallDrawings) of the loaded scan, into its folder; opens them.</summary>
+    string ExportWallDrawings(bool open, string dir = null)
+    {
+#if META_XR_SDK_INSTALLED
+        if (loadedScan == null || MRUK.Instance == null) return "Load a scan first";
+        try
+        {
+            var rooms = MRUKDataProcessor.GetValidRooms(MRUK.Instance);
+            string path = WallDrawings.Write(dir ?? System.IO.Path.Combine(System.IO.Path.GetFullPath(MRUKSceneCache.GetCacheRoot()), loadedScan), rooms, loadedScan);
+            Debug.Log($"[DesktopWalkApp] wall drawings: {path}");
+            if (open) Application.OpenURL("file:///" + path.Replace('\\', '/'));
+            return "Wall drawings: " + System.IO.Path.GetFileName(path);
+        }
+        catch (Exception ex) { Debug.LogException(ex); return "Wall drawings failed: " + ex.Message; }
+#else
+        return "";
+#endif
+    }
+
+    /// <summary>D: proposes routes from the cable photos (RouteDetector) - saved to the house's routes, shown faint.</summary>
+    string DetectRoutes()
+    {
+#if META_XR_SDK_INSTALLED
+        if (MRUK.Instance == null || !walk.IsOn) return "Load a scan first";
+        try { return "Photos: " + RouteDetector.DetectAll(MRUKDataProcessor.GetValidRooms(MRUK.Instance)).Summary; }
+        catch (Exception ex) { Debug.LogException(ex); return "Detection failed: " + ex.Message; }
+#else
+        return "";
+#endif
     }
 
     Ray CenterRay() => rig && rig.Head ? new Ray(rig.Head.position, rig.Head.forward) : default;
@@ -280,7 +329,7 @@ public partial class DesktopWalkApp : MonoBehaviour
     {
         string text = $"{loadedScan}  ·  {walk.ModelLabel.Replace("Walk: ", "")}" + (floorInfo != "" ? "  ·  " + floorInfo : "");
         if (showHelp)
-            text += "\nWASD move · mouse look · Shift run · Ctrl slow · click door open/close · G move furniture· R turn it· T measure (Del clear)· U sun [ ] time , . month· F next floor · M model · F5 reload · Esc menu · H hide";
+            text += "\nWASD move · mouse look · Shift run · Ctrl slow · click door open/close · G move furniture· R turn it· T measure (Del clear)· U sun [ ] time , . month· F next floor · K routes · P photos on walls · D routes from photos · E wall drawings · M model · F5 reload · Esc menu · H hide";
         float bh = showHelp ? 74 : 44;
         GUI.Box(new Rect(12, h - bh - 12, 1100, bh), GUIContent.none, box);
         GUI.Label(new Rect(26, h - bh - 4, 1080, bh), text, small);

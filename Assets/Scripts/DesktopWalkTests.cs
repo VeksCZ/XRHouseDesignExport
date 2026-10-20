@@ -35,6 +35,7 @@ public partial class DesktopWalkApp
             {
                 SetMenu(false);
                 rig.InputEnabled = false;
+                await AddTestRoutes();
                 ok = test switch
                 {
                     "views" => await TestViews(outDir),
@@ -53,6 +54,8 @@ public partial class DesktopWalkApp
                     "setstair" => SetStair(),
                     "sun" => await TestSun(outDir),
                     "ceilfit" => CeilFit(),
+                    "walls" => !ExportWallDrawings(false, outDir).Contains("failed"),
+                    "detect" => !DetectRoutes().Contains("failed") && ExportWallDrawings(false, outDir) != null,
                     _ => false,
                 };
             }
@@ -86,6 +89,50 @@ public partial class DesktopWalkApp
         walk.PlaceAtScanPoint(floor);
         rig.SetView(yawDeg, pitchDeg);
         await Frames(5);
+    }
+
+    async Task AddTestRoutes()
+    {
+        // -addmarkers "kind:type:x,y,z:nx,ny,nz|..." - boxes/outlets in the GLB frame (absolute y), normal out of the surface
+        if (Arg("-addmarkers") != null && walk.TryGetModelFrame(out _, out float my, out var mc))
+        {
+            Quaternion gi = Quaternion.Inverse(Quaternion.Euler(0, my, 0));
+            var rooms = Rooms();
+            foreach (var spec in Arg("-addmarkers").Split('|'))
+            {
+                var kv = spec.Split(':');
+                float[] V(string t) => t.Split(',').Select(x => float.Parse(x.Trim(), CultureInfo.InvariantCulture)).ToArray();
+                var pf = V(kv[2]); var nf = V(kv[3]);
+                Vector3 p = gi * new Vector3(pf[0], pf[1], -pf[2]) + mc, n = gi * new Vector3(nf[0], nf[1], -nf[2]);
+                var room = DoorCatalog.FindRoomAt(rooms, p + Vector3.up * 0.05f) ?? DoorCatalog.FindRoomAt(rooms, new Vector3(p.x, p.y - 1f, p.z));
+                if (room == null) { Debug.Log("TRACE addmarkers: no room for " + spec); continue; }
+                var m = new RouteMarker
+                {
+                    id = Guid.NewGuid().ToString("N"), kind = (RouteKind)int.Parse(kv[0]), type = kv[1], roomUuid = DoorCatalog.RoomId(room),
+                    localPos = new Vector3Data(room.transform.InverseTransformPoint(p)), localNormal = new Vector3Data(room.transform.InverseTransformDirection(n)),
+                };
+                RouteStore.Apply(fl => fl.markers.Add(m));
+            }
+        }
+        // -addroutes "kind:x,y,z;x,y,z;...|kind:..." - routes in the furniture spec's frame (GLB axes, absolute y),
+        // kind = RouteKind number; added to the routes file (use with -routes <test file>)
+        if (Arg("-addroutes") != null && walk.TryGetModelFrame(out _, out float ry, out var rc))
+        {
+            Quaternion gi = Quaternion.Inverse(Quaternion.Euler(0, ry, 0));
+            var rooms = Rooms();
+            foreach (var spec in Arg("-addroutes").Split('|'))
+            {
+                var kv = spec.Split(':');
+                var pts = kv[1].Split(';').Select(t => t.Split(',').Select(x => float.Parse(x.Trim(), CultureInfo.InvariantCulture)).ToArray())
+                    .Select(f => gi * new Vector3(f[0], f[1], -f[2]) + rc).ToList();
+                var room = DoorCatalog.FindRoomAt(rooms, pts[0] + Vector3.up * 0.05f) ?? DoorCatalog.FindRoomAt(rooms, pts[pts.Count - 1] + Vector3.up * 0.05f);
+                if (room == null) { Debug.Log("TRACE addroutes: no room for " + spec); continue; }
+                var r = new PipeRoute { id = Guid.NewGuid().ToString("N"), kind = (RouteKind)int.Parse(kv[0]), roomUuid = DoorCatalog.RoomId(room), endLabel = kv.Length > 2 ? kv[2] : "" };
+                foreach (var p in pts) r.localPoints.Add(new Vector3Data(room.transform.InverseTransformPoint(p)));
+                RouteStore.Apply(fl => fl.routes.Add(r));
+            }
+            await Frames(10);
+        }
     }
 
     async Task<bool> TestViews(string outDir)

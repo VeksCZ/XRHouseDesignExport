@@ -78,8 +78,10 @@ public static class XRModelFactory
                     return Mathf.Abs(lp.z) < 0.25f && Mathf.Abs(lp.x) < (wW / 2f + 0.1f) && Mathf.Abs(lp.y) < (wH / 2f + 0.1f);
                 }).ToList();
                 var cuts = CutRects(wallPos, wallRot, wW, wH);   // where a stair passes through this wall
+                // local +Z points into the room here: the box spans shift - t .. shift
+                var niches = NichesOn(wallPos, wallRot, wW, wH, wallShift - wallThickness, wallShift);
 
-                if (wallHoles.Count > 0 || cuts.Count > 0) {
+                if (wallHoles.Count > 0 || cuts.Count > 0 || niches.Count > 0) {
                     var xC = new List<float> { -wW/2f, wW/2f };
                     var yC = new List<float> { -wH/2f, wH/2f };
                     foreach(var h in wallHoles) {
@@ -92,6 +94,7 @@ public static class XRModelFactory
                         xC.Add(Mathf.Clamp(k.cx - k.hw, -wW/2f, wW/2f)); xC.Add(Mathf.Clamp(k.cx + k.hw, -wW/2f, wW/2f));
                         yC.Add(Mathf.Clamp(k.cy - k.hh, -wH/2f, wH/2f)); yC.Add(Mathf.Clamp(k.cy + k.hh, -wH/2f, wH/2f));
                     }
+                    foreach (var n in niches) { xC.Add(n.x0); xC.Add(n.x1); yC.Add(n.y0); yC.Add(n.y1); }
                     var sX = xC.Distinct().OrderBy(x => x).ToList();
                     var sY = yC.Distinct().OrderBy(y => y).ToList();
                     for (int i=0; i<sX.Count-1; i++) {
@@ -104,7 +107,7 @@ public static class XRModelFactory
                                 float hw = OW(h)/2f, hh = h.PlaneRect.Value.height/2f;
                                 return midX > lp.x-hw+0.01f && midX < lp.x+hw-0.01f && midY > lp.y-hh+0.01f && midY < lp.y+hh-0.01f;
                             }) || cuts.Any(k => midX > k.cx - k.hw && midX < k.cx + k.hw && midY > k.cy - k.hh && midY < k.cy + k.hh);
-                            if (!isHole) rm.parts.Add(CreateBoxPart("WallSeg", wallPos + wallRot * new Vector3(midX, midY, 0), wallRot, new Vector3(x2-x1, y2-y1, wallThickness), "WALL", center, rotation, wallOff));
+                            if (!isHole) AddWallCell(rm, wallPos, wallRot, midX, midY, x2-x1, y2-y1, wallShift - wallThickness, wallShift, niches, center, rotation);
                         }
                     }
                 } else rm.parts.Add(CreateBoxPart("WALL", wallPos, wallRot, new Vector3(wW, wH, wallThickness), "WALL", center, rotation, wallOff));
@@ -313,7 +316,9 @@ public static class XRModelFactory
                         return Mathf.Abs(lp.z) < 0.3f && Mathf.Abs(lp.x) < (segLen/2f + 0.1f);
                     }).ToList();
 
-                    if (holes.Count > 0) {
+                    // local +Z points out of the room here: the box spans -shift .. t - shift
+                    var niches = NichesOn(segMid, segRot, segLen, hMin, -wallShift, wallThickness - wallShift);
+                    if (holes.Count > 0 || niches.Count > 0) {
                         foreach (var ho in holes) roomOpenings.Add(ho);
                         var xC = new List<float> { -segLen/2f, segLen/2f };
                         var yC = new List<float> { -hMin/2f, hMin/2f };
@@ -323,6 +328,7 @@ public static class XRModelFactory
                             xC.Add(Mathf.Clamp(lp.x - hw, -segLen/2f, segLen/2f)); xC.Add(Mathf.Clamp(lp.x + hw, -segLen/2f, segLen/2f));
                             yC.Add(Mathf.Clamp(lp.y - hh, -hMin/2f, hMin/2f)); yC.Add(Mathf.Clamp(lp.y + hh, -hMin/2f, hMin/2f));
                         }
+                        foreach (var n in niches) { xC.Add(n.x0); xC.Add(n.x1); yC.Add(n.y0); yC.Add(n.y1); }
                         var sX = xC.Distinct().OrderBy(x => x).ToList();
                         var sY = yC.Distinct().OrderBy(y => y).ToList();
                         for (int ix=0; ix<sX.Count-1; ix++) {
@@ -335,7 +341,7 @@ public static class XRModelFactory
                                     float hw = OW(ho)/2f, hh = ho.PlaneRect.Value.height/2f;
                                     return midX > lp.x-hw+0.005f && midX < lp.x+hw-0.005f && midY > lp.y-hh+0.005f && midY < lp.y+hh-0.005f;
                                 });
-                                if (!isHole) rm.parts.Add(CreateBoxPart("WallSeg", segMid + segRot * new Vector3(midX, midY, 0), segRot, new Vector3(x2-x1, y2-y1, wallThickness), "WALL", center, rotation, wallOff));
+                                if (!isHole) AddWallCell(rm, segMid, segRot, midX, midY, x2-x1, y2-y1, -wallShift, wallThickness - wallShift, niches, center, rotation);
                             }
                         }
                     } else if (hMin > 0.02f) {
@@ -542,6 +548,73 @@ return model;
     /// <summary>Ceilings from the furniture spec ("ceilings"): (a room's CeilingAnchors, world probe) -> world Y, or
     /// null to keep the scanned one. Installed per scan by Furniture.InstallCeilings.</summary>
     public static System.Func<IEnumerable<MRUKAnchor>, Vector3, float?> CeilingOverride;
+
+    /// <summary>A blind recess in a wall (a niche from the furniture spec): the wall face edge a-b (world, horizontal),
+    /// world heights y0..y1, depth into the wall and the face's normal pointing into the room it opens to.</summary>
+    public struct WallNiche { public Vector3 a, b, inward; public float y0, y1, depth; }
+
+    /// <summary>Niches cut into the walls of every model built afterwards. Installed per scan by
+    /// Furniture.InstallCeilings (empty = none).</summary>
+    public static List<WallNiche> Niches = new List<WallNiche>();
+
+    /// <summary>A niche on one wall panel, in the panel's local frame: x/y rectangle and the slab (local z) it hollows.</summary>
+    struct NicheRect { public float x0, x1, y0, y1, z0, z1; public bool own; }
+
+    /// <summary>The niches that hollow out a wall panel (centre pos, rotation rot, w x h) whose box spans local z
+    /// boxZ0..boxZ1. The panel of the niche's own room and the opposite face of the same wall (a neighbour room's
+    /// panel, whose box reaches through to this room) both get it.</summary>
+    static List<NicheRect> NichesOn(Vector3 pos, Quaternion rot, float w, float h, float boxZ0, float boxZ1)
+    {
+        var list = new List<NicheRect>();
+        if (Niches == null || Niches.Count == 0) return list;
+        Quaternion inv = Quaternion.Inverse(rot);
+        Vector3 fwd = rot * Vector3.forward;
+        foreach (var n in Niches) {
+            float facing = Vector3.Dot(n.inward, fwd);
+            if (Mathf.Abs(facing) < 0.9f) continue;
+            Vector3 la = inv * (n.a - pos), lb = inv * (n.b - pos);
+            float x0 = Mathf.Max(-w / 2f, Mathf.Min(la.x, lb.x)), x1 = Mathf.Min(w / 2f, Mathf.Max(la.x, lb.x));
+            float y0 = Mathf.Max(-h / 2f, n.y0 - pos.y), y1 = Mathf.Min(h / 2f, n.y1 - pos.y);
+            if (x1 - x0 < 0.01f || y1 - y0 < 0.01f) continue;
+            float zf = (la.z + lb.z) / 2f;                 // the niche's opening, in this panel's z
+            float dz = -facing * n.depth;                  // and how far its back lies from there
+            float z0 = Mathf.Min(zf, zf + dz), z1 = Mathf.Max(zf, zf + dz);
+            // open towards the room: through whatever is left in front of the opening
+            if (dz < 0f) z1 = Mathf.Max(z1, boxZ1 + 0.01f); else z0 = Mathf.Min(z0, boxZ0 - 0.01f);
+            // the opposite face of the wall: a few cm of slack behind the back, so this panel never pokes into it
+            bool own = Mathf.Abs(zf) <= 0.06f;
+            if (!own) { if (dz < 0f) z0 -= 0.03f; else z1 += 0.03f; }
+            if (z1 <= boxZ0 || z0 >= boxZ1 || Mathf.Abs(zf) > Mathf.Abs(boxZ1 - boxZ0) + 0.35f) continue;
+            list.Add(new NicheRect { x0 = x0, x1 = x1, y0 = y0, y1 = y1, z0 = z0, z1 = z1, own = own });
+        }
+        return list;
+    }
+
+    /// <summary>Material of a niche's back (shaded viewers keep the part colour of a material they don't know).</summary>
+    public const string NicheMaterial = "NICHE";
+    static XRMeshPart Tint(XRMeshPart p)
+    {
+        if (p.materialName == NicheMaterial) p.color = new Color(0.80f, 0.78f, 0.74f);
+        return p;
+    }
+
+    /// <summary>One wall cell (local rect centred midX/midY, box boxZ0..boxZ1 along local z): solid, or what is left
+    /// of it in front of / behind a niche.</summary>
+    static void AddWallCell(XRRoomModel rm, Vector3 pos, Quaternion rot, float midX, float midY, float sx, float sy,
+        float boxZ0, float boxZ1, List<NicheRect> niches, Vector3 center, float rotation)
+    {
+        Vector3 at = pos + rot * new Vector3(midX, midY, 0);
+        foreach (var n in niches) {
+            if (midX <= n.x0 || midX >= n.x1 || midY <= n.y0 || midY >= n.y1) continue;
+            float a1 = Mathf.Min(boxZ1, n.z0), b0 = Mathf.Max(boxZ0, n.z1);
+            // in the niche's own room what is left is its back: a shade darker, so the recess reads from the front
+            string mat = n.own ? NicheMaterial : "WALL";
+            if (a1 - boxZ0 > 0.005f) rm.parts.Add(Tint(CreateBoxPart("WallSeg", at, rot, new Vector3(sx, sy, a1 - boxZ0), mat, center, rotation, new Vector3(0, 0, (boxZ0 + a1) / 2f))));
+            if (boxZ1 - b0 > 0.005f) rm.parts.Add(Tint(CreateBoxPart("WallSeg", at, rot, new Vector3(sx, sy, boxZ1 - b0), mat, center, rotation, new Vector3(0, 0, (b0 + boxZ1) / 2f))));
+            return;
+        }
+        rm.parts.Add(CreateBoxPart("WallSeg", at, rot, new Vector3(sx, sy, boxZ1 - boxZ0), "WALL", center, rotation, new Vector3(0, 0, (boxZ0 + boxZ1) / 2f)));
+    }
 
     /// <summary>Thickness of a wall with no scanned room behind it (the outer walls) - the spec's
     /// "walls": {"exterior": m} (Furniture.InstallCeilings), else a typical 25 cm.</summary>
@@ -950,4 +1023,4 @@ return model;
         if (m.Contains("WINDOW")) return new Color(0.25f, 0.60f, 0.92f);
         return Color.white;
         }
-        }
+        }

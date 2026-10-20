@@ -111,7 +111,7 @@ public class WallPhotoCapture : MonoBehaviour
     TMP_Text countText, roomText, statusText;
     UnityEngine.UI.Button cableButton, denseButton, coverageButton;
     Transform leftHand;
-    const float PW = 560f, PH = 300f, PScale = 0.00045f, RowH = 62f, Gap = 8f;
+    const float PW = 560f, PH = 324f, PScale = 0.00045f, RowH = 62f, Gap = 8f;
 
     // HUD: one line of live guidance just below the centre of view (why it is or isn't shooting right now).
     Canvas hud;
@@ -157,6 +157,8 @@ public class WallPhotoCapture : MonoBehaviour
         if (fillMat) Destroy(fillMat);
         if (covGo) Destroy(covGo);
         if (covMesh) Destroy(covMesh);
+        if (guideGo) Destroy(guideGo);
+        if (guideMesh) Destroy(guideMesh);
         if (shutterClip) Destroy(shutterClip);
     }
 
@@ -166,7 +168,7 @@ public class WallPhotoCapture : MonoBehaviour
     {
         if (!Active)
         {
-            if (wasActive) { wasActive = false; started = false; StopCamera(); ClosePanel(); CloseHud(); ClearOutlines(); if (covGo) covGo.SetActive(false); }
+            if (wasActive) { wasActive = false; started = false; StopCamera(); ClosePanel(); CloseHud(); ClearOutlines(); if (covGo) covGo.SetActive(false); if (guideGo) guideGo.SetActive(false); guideRoom = "-"; }
             return;
         }
         wasActive = true;
@@ -189,6 +191,7 @@ public class WallPhotoCapture : MonoBehaviour
         }
         PumpCapture();
         UpdateCoverage();
+        UpdateGuide();
 #endif
         UpdateHud();
     }
@@ -453,6 +456,7 @@ public class WallPhotoCapture : MonoBehaviour
             {
                 pendingWrites--;
                 if (t.Exception != null) Debug.LogError($"[WallPhotos] write failed: {t.Exception.GetBaseException()}");
+                else if (!isDense) WallOverlays.PhotosChanged(); // "Photos on walls" picks it up
             });
 
             if (isDense)
@@ -469,6 +473,7 @@ public class WallPhotoCapture : MonoBehaviour
             nextIndex++;
             Count(cableByRoom, meta.roomUuid);
             AddOutline(meta, true);
+            GuideMark(meta);
             Haptic();
             Click(0.6f);
             flashUntil = Time.time + 0.9f; flashText = $"<color=#7dff9a>Photo {shots.Count} saved</color>";
@@ -575,6 +580,134 @@ public class WallPhotoCapture : MonoBehaviour
         currentRoomUuid = uuid;
         currentRoomName = room != null ? MRUKDataProcessor.GetRoomLabel(room) : null;
         RefreshPanel();
+    }
+
+    // ---------- photo guide: what of the current room isn't photographed yet ----------
+
+    // The room's walls, floor and ceiling as a 25 cm grid; a cell counts as photographed once a cable photo saw it
+    // (in the image, closer than 4.5 m, not too oblique). Cells still missing are red patches on the real surfaces
+    // (with Outlines on, in cable mode) and the panel names the surfaces still missing.
+    class GuideCell { public Vector3 p, n; public int surface; public bool seen; }
+    readonly List<GuideCell> guide = new List<GuideCell>();
+    readonly List<string> guideNames = new List<string>();
+    string guideRoom;
+    GameObject guideGo; Mesh guideMesh; bool guideDirty;
+    const float GuideStep = 0.25f, GuidePatch = 0.17f, GuideMaxDist = 4.5f, GuideMaxAngle = 72f;
+
+    void BuildGuide()
+    {
+        guide.Clear(); guideNames.Clear(); guideDirty = true;
+        guideRoom = currentRoomUuid;
+        var room = currentRoomUuid == null ? null : Rooms.FirstOrDefault(r => r.Anchor.Uuid.ToString() == currentRoomUuid);
+        if (room == null) return;
+        var openings = Rooms.SelectMany(r => r.Anchors).Where(a => a != null && a.PlaneRect.HasValue &&
+            (a.Label.ToString().Contains("DOOR") || a.Label.ToString().Contains("WINDOW"))).ToList();
+        var walls = room.Anchors.Where(a => a != null && a.PlaneRect.HasValue && MRUKDataProcessor.IsStructuralWall(a))
+            .OrderBy(a => Mathf.Atan2(a.transform.forward.x, a.transform.forward.z)).ToList();
+        void Add(MRUKAnchor a, string name, bool flat)
+        {
+            int idx = guideNames.Count; guideNames.Add(name);
+            var r = a.PlaneRect.Value;
+            for (float y = r.yMin + GuideStep / 2; y < r.yMax; y += GuideStep)
+                for (float x = r.xMin + GuideStep / 2; x < r.xMax; x += GuideStep)
+                {
+                    if (flat && !InPlane(a, x, y)) continue;
+                    Vector3 p = a.transform.TransformPoint(new Vector3(x, y, 0));
+                    if (!flat && openings.Any(o => InOpening(o, p))) continue;
+                    guide.Add(new GuideCell { p = p, n = a.transform.forward, surface = idx });
+                }
+        }
+        for (int i = 0; i < walls.Count; i++) Add(walls[i], $"wall {i + 1}", false);
+        foreach (var f in room.FloorAnchors) if (f != null && f.PlaneRect.HasValue) Add(f, "floor", true);
+        foreach (var c in room.CeilingAnchors) if (c != null && c.PlaneRect.HasValue) Add(c, "ceiling", true);
+        foreach (var sh in shots) GuideMark(sh, false);
+    }
+
+    static bool InOpening(MRUKAnchor o, Vector3 p)
+    {
+        Vector3 l = o.transform.InverseTransformPoint(p);
+        var r = o.PlaneRect.Value;
+        return Mathf.Abs(l.z) < 0.3f && l.x > r.xMin && l.x < r.xMax && l.y > r.yMin && l.y < r.yMax;
+    }
+
+    static bool InPlane(MRUKAnchor a, float x, float y)
+    {
+        var b = a.PlaneBoundary2D;
+        if (b == null || b.Count < 3) return true;
+        bool inside = false;
+        for (int i = 0, j = b.Count - 1; i < b.Count; j = i++)
+            if ((b[i].y > y) != (b[j].y > y) && x < (b[j].x - b[i].x) * (y - b[i].y) / (b[j].y - b[i].y) + b[i].x) inside = !inside;
+        return inside;
+    }
+
+    void GuideMark(WallPhotoMeta s, bool dirty = true)
+    {
+        if (guide.Count == 0 || !ShotWorld(s, out var pos, out var rot)) return;
+        var inv = Quaternion.Inverse(rot);
+        foreach (var c in guide)
+        {
+            if (c.seen) continue;
+            Vector3 d = c.p - pos;
+            float dist = d.magnitude;
+            if (dist > GuideMaxDist || Vector3.Angle(-d, c.n) > GuideMaxAngle) continue;
+            Vector3 l = inv * d;
+            if (l.z < 0.15f) continue;
+            float vx = s.cu + s.fu * l.x / l.z, vy = s.cv + s.fv * l.y / l.z;
+            if (vx > 0.03f && vx < 0.97f && vy > 0.03f && vy < 0.97f) c.seen = true;
+        }
+        if (dirty) { guideDirty = true; RefreshPanel(); }
+    }
+
+    /// <summary>" - 72 % photographed, missing: ceiling, wall 3" for the panel.</summary>
+    string GuideSummary()
+    {
+        if (guideRoom != currentRoomUuid) BuildGuide();
+        if (guide.Count == 0) return "";
+        int pct = Mathf.RoundToInt(100f * guide.Count(c => c.seen) / guide.Count);
+        var missing = new List<string>();
+        for (int i = 0; i < guideNames.Count; i++)
+        {
+            var cells = guide.Where(c => c.surface == i).ToList();
+            if (cells.Count > 0 && cells.Count(c => c.seen) < cells.Count * 0.8f && !missing.Contains(guideNames[i])) missing.Add(guideNames[i]);
+        }
+        return pct >= 97 ? $"\n<color=#7dff9a>Room photographed ({pct} %)</color>"
+                         : $"\n{pct} % photographed - <color=#ffb347>missing: {string.Join(", ", missing)}</color>";
+    }
+
+    void UpdateGuide()
+    {
+        bool show = !dense && showCoverage && guide.Count > 0;
+        if (guideRoom != currentRoomUuid) { BuildGuide(); RefreshPanel(); }
+        if (guideGo) guideGo.SetActive(show);
+        if (!show || !guideDirty) return;
+        guideDirty = false;
+        if (!guideGo)
+        {
+            guideGo = new GameObject("PhotoGuide"); // world space, no parent (see AddOutline)
+            guideMesh = new Mesh { name = "PhotoGuide", indexFormat = UnityEngine.Rendering.IndexFormat.UInt32 };
+            guideGo.AddComponent<MeshFilter>().sharedMesh = guideMesh;
+            var mr = guideGo.AddComponent<MeshRenderer>();
+            if (!fillMat) fillMat = new Material(Shader.Find("Sprites/Default")) { name = "WallPhotoFill" };
+            mr.sharedMaterial = fillMat;
+            mr.shadowCastingMode = ShadowCastingMode.Off;
+            mr.receiveShadows = false;
+        }
+        var verts = new List<Vector3>(); var cols = new List<Color>(); var tris = new List<int>();
+        var red = new Color(1f, 0.25f, 0.2f, 0.32f);
+        foreach (var c in guide)
+        {
+            if (c.seen) continue;
+            Vector3 t = Vector3.Cross(c.n, Mathf.Abs(c.n.y) > 0.9f ? Vector3.right : Vector3.up).normalized * (GuidePatch * 0.5f);
+            Vector3 b = Vector3.Cross(c.n, t);
+            Vector3 o = c.p + c.n * 0.012f;
+            int k = verts.Count;
+            verts.Add(o - t - b); verts.Add(o + t - b); verts.Add(o + t + b); verts.Add(o - t + b);
+            cols.Add(red); cols.Add(red); cols.Add(red); cols.Add(red);
+            tris.Add(k); tris.Add(k + 1); tris.Add(k + 2); tris.Add(k); tris.Add(k + 2); tris.Add(k + 3);
+        }
+        guideMesh.Clear();
+        guideMesh.SetVertices(verts); guideMesh.SetColors(cols); guideMesh.SetTriangles(tris, 0);
+        guideMesh.RecalculateBounds();
     }
 
     // ---------- 3D-scan coverage ----------
@@ -795,6 +928,10 @@ public class WallPhotoCapture : MonoBehaviour
         if (s.roomUuid != null && cableByRoom.TryGetValue(s.roomUuid, out int n)) cableByRoom[s.roomUuid] = Mathf.Max(0, n - 1);
         string jpg = Path.Combine(sessionDir, s.file);
         try { File.Delete(Path.ChangeExtension(jpg, ".json")); File.Delete(jpg); } catch (Exception e) { Debug.LogWarning(e); }
+        WallOverlays.PhotosChanged();
+#if META_XR_SDK_INSTALLED
+        guideRoom = "-"; // rebuilt without the deleted photo
+#endif
         nextIndex = shots.Count == 0 ? 1 : shots.Max(x => x.index) + 1;
 #if META_XR_SDK_INSTALLED
         RebuildOutlines();
@@ -819,8 +956,8 @@ public class WallPhotoCapture : MonoBehaviour
         float x0 = 16, fullW = PW - 32, y = 8;
         countText = XRUi.CreateText(t, "Title", "", 24, TextAlignmentOptions.MidlineLeft, x0, y, fullW, 38, XRUi.TextColor, FontStyles.Bold);
         y += 38;
-        roomText = XRUi.CreateText(t, "Room", "", 19, TextAlignmentOptions.MidlineLeft, x0, y, fullW, 30, XRUi.AccentText);
-        y += 34;
+        roomText = XRUi.CreateText(t, "Room", "", 19, TextAlignmentOptions.TopLeft, x0, y, fullW, 54, XRUi.AccentText);
+        y += 58;
         // The two ways of shooting, as one either/or choice.
         float w2 = (fullW - Gap) / 2f;
         cableButton = XRUi.CreateButton(t, "Cable photos", x0, y, w2, RowH, () => SetDense(false), 22);
@@ -873,12 +1010,15 @@ public class WallPhotoCapture : MonoBehaviour
             int c = cableByRoom.TryGetValue(currentRoomUuid, out int a) ? a : 0, d = denseByRoom.TryGetValue(currentRoomUuid, out int b) ? b : 0;
             string dHint = d == 0 ? "" : d < 120 ? " <color=#ffb347>(aim for 150+)</color>" : " <color=#7dff9a>ok</color>";
             roomText.text = $"{currentRoomName}:  {c} photos,  {d} 3D frames{dHint}";
+#if META_XR_SDK_INSTALLED
+            if (!dense) roomText.text += GuideSummary();
+#endif
         }
         else roomText.text = "Outside the scanned rooms";
         if (!statusText.text.StartsWith("<color=red>"))
             statusText.text = dense
                 ? "Walk slowly round the room and look at every wall, floor and ceiling from several spots - it records by itself. Patches on the walls: orange = seen once, yellow = twice, green = enough. Trigger = a cable photo."
-                : "Look at a bare wall, floor or ceiling and hold still - it clicks by itself. Trigger = photo now. Green outline = already covered.";
+                : "Look at a bare wall, floor or ceiling and hold still - it clicks by itself. Trigger = photo now. Green outline = already covered, red patches = not photographed yet.";
         XRUi.SetTint(cableButton, !dense ? XRUi.ButtonOnColor : XRUi.ButtonToggleColor);
         XRUi.SetTint(denseButton, dense ? XRUi.ButtonOnColor : XRUi.ButtonToggleColor);
         XRUi.SetTint(coverageButton, showCoverage ? XRUi.ButtonOnColor : XRUi.ButtonToggleColor);

@@ -53,6 +53,17 @@ and exports 3D models, floor plans and reports from the scan.
   (scan hits coloured from the photo). Every photo also has a house-frame pose (local to the room with the smallest
   UUID, fixed per session); menu MRUK > Wall photos > Export COLMAP (`WallPhotoColmap`) writes `Colmap/` (images +
   sparse/0 text) in that frame with z negated - a trained splat negated back in z sits under that room's transform.
+- **Routes** (`RouteEditTool`, edit-mode tool "Routes" / main menu "Trace routes"): cables, cold/hot water, waste and
+  heating traced as polylines by clicking points on the scan (over passthrough on the live scan, or in the walk-through).
+  Stored house-wide, not per scan (`RouteStore`: headset `persistentDataPath/Routes/routes.json`, PC
+  `Exports/RoomData/Routes/routes.json`; "Pull" merges both by route id and pushes the result back), points room-local to
+  their room UUID - so they show in every scan that has that room. `WallOverlays` draws routes and the cable photos
+  projected onto the walls ("Photos on walls") into passthrough / walk / Dollhouse, each switchable (menu, desktop K / P).
+  `WallDrawings` writes `97_Walls_Routes.html` (plans + wall elevations with openings, niches and routes, cm from the left
+  corner and the rough floor, check boxes to hide routes/dimensions): on Export, and desktop key E (scan folder).
+  Desktop tests: `-routes <file>` (never the real file) `-addroutes "kind:x,y,z;...|..."` (GLB frame), `-test walls`.
+- **Niches** (furniture spec item `"type": "niche"`): cut into the walls by `XRModelFactory` (`Niches`, installed with the
+  spec's ceilings by `Furniture.InstallCeilings`); `furnish.py` only marks them on the wall face.
 - **Logs**: headset session logs are in `persistentDataPath/Logs` (menu "Pull logs from Quest" -> `Logs/Quest`),
   never in the export folder.
 - **Build + install to a USB Quest**: call `MRUKExporter.EditorFastBuildAndInstall()` (e.g. via the Unity MCP

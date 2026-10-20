@@ -31,7 +31,7 @@ public class XRMenu : MonoBehaviour
 
     // Canvas units; the canvas is scaled to CanvasScale metres per unit (600 units -> 36 cm at 0.75 m from the eyes).
     const float HeaderH = 40f;          // the draggable handle strip at the very top
-    const float CanvasWidth = 600f, CanvasHeight = 776f + 88f + 88f + HeaderH, CanvasScale = 0.0006f;
+    const float CanvasWidth = 600f, CanvasHeight = 776f + 88f + 88f + 88f + 88f + HeaderH, CanvasScale = 0.0006f;
     const float MenuDistance = 0.75f;   // metres in front of the eyes
     const float MenuDrop = 0.24f;       // metres below eye level, so it doesn't cover what you look at
     const int VisibleLogLines = 5;
@@ -49,7 +49,7 @@ public class XRMenu : MonoBehaviour
     // site - a toggle can also turn itself off from elsewhere (the floor plan panel's own Close button, or a
     // scan-source change invalidating the scan overlay/minimap), and a per-frame sync can never go stale the
     // way scattered manual updates did.
-    Button dollhouseButton, plansButton, scanOverlayButton, miniMapButton, walkButton, editButton, photosButton;
+    Button dollhouseButton, plansButton, scanOverlayButton, miniMapButton, walkButton, editButton, photosButton, routesButton, showRoutesButton, showPhotosButton, fittingsButton;
     XRRayInteractor rightRay;
     float flickCooldown;
     bool menuPlaced;
@@ -85,6 +85,12 @@ public class XRMenu : MonoBehaviour
         // Wall photos over passthrough (cable chases before plastering), poses tied to the live scan's rooms.
         var photoTool = FindAnyObjectByType<WallPhotoCapture>() ?? gameObject.AddComponent<WallPhotoCapture>();
         photoTool.uiLog = this; photoTool.editMode = editMode; photoTool.exporter = exporter; photoTool.walk = walk;
+        // Installation routes (cables, water, waste, heating) traced on the real walls, house-wide (RouteStore).
+        var routeTool = FindAnyObjectByType<RouteEditTool>() ?? gameObject.AddComponent<RouteEditTool>();
+        routeTool.uiLog = this; routeTool.editMode = editMode; routeTool.walk = walk; routeTool.exporter = exporter;
+        // Routes and the cable photos drawn into passthrough / walk-through / Dollhouse (each switchable).
+        var overlays = FindAnyObjectByType<WallOverlays>() ?? gameObject.AddComponent<WallOverlays>();
+        overlays.walk = walk; overlays.dollhouse = dollhouse; overlays.exporter = exporter;
         // Doorways walled up in edit mode are left out of every built model (walk, Dollhouse, minimap, export).
         XRModelFactory.RemovedOpening = DoorCatalog.IsWalledUp;
         var quality = FindAnyObjectByType<RenderQuality>() ?? gameObject.AddComponent<RenderQuality>();
@@ -164,10 +170,19 @@ public class XRMenu : MonoBehaviour
         XRUi.SetTint(editButton, XRUi.ButtonToggleColor);
         XRUi.CreateButton(root, "Next floor", right, top + 4 * (h + gap), w, h, OnNextFloor);
         // One click into photographing the bare walls (edit mode + the Photos tool), the same again leaves it.
-        photosButton = XRUi.CreateButton(root, "Wall photos  -  cables / 3D scan", left, top + 5 * (h + gap), right + w - left, h, OnWallPhotos, 26);
+        photosButton = XRUi.CreateButton(root, "Wall photos", left, top + 5 * (h + gap), w, h, OnWallPhotos);
         XRUi.SetTint(photosButton, XRUi.ButtonToggleColor);
+        // Tracing pipes/cables (edit mode + the Routes tool), the same again leaves it.
+        routesButton = XRUi.CreateButton(root, "Trace routes", right, top + 5 * (h + gap), w, h, OnTraceRoutes);
+        XRUi.SetTint(routesButton, XRUi.ButtonToggleColor);
+        // What the views show: the traced routes and the cable photos on the walls - each on/off.
+        showRoutesButton = XRUi.CreateButton(root, "Show routes", left, top + 6 * (h + gap), w, h, () => WallOverlays.ShowRoutes = !WallOverlays.ShowRoutes);
+        showPhotosButton = XRUi.CreateButton(root, "Photos on walls", right, top + 6 * (h + gap), w, h, () => WallOverlays.ShowPhotos = !WallOverlays.ShowPhotos);
 
-        float rowY = top + 6 * (h + gap);
+        // The planned bathroom (bath, shower, basins as ghosts) and the niches sunk into the real walls - over passthrough.
+        fittingsButton = XRUi.CreateButton(root, "Fittings + niches on the real walls", left, top + 7 * (h + gap), right + w - left, h, OnToggleFittings, 24);
+
+        float rowY = top + 8 * (h + gap);
         // "Load scan" is gone - every action here (Export, Dollhouse, Floor plans, Scan overlay, Minimap)
         // already loads the selected source itself on demand, so a separate standalone "load" step had nothing
         // left to do that pressing the feature you actually wanted wouldn't already do. Clicking the scan name
@@ -367,6 +382,32 @@ public class XRMenu : MonoBehaviour
         if (walkButton != null) XRUi.SetTint(walkButton, walk != null && walk.IsOn ? XRUi.ButtonOnColor : XRUi.ButtonToggleColor);
         if (editButton != null) XRUi.SetTint(editButton, editMode != null && editMode.IsOn ? XRUi.ButtonOnColor : XRUi.ButtonToggleColor);
         if (photosButton != null) XRUi.SetTint(photosButton, PhotosOn ? XRUi.ButtonOnColor : XRUi.ButtonToggleColor);
+        if (routesButton != null) XRUi.SetTint(routesButton, RoutesOn ? XRUi.ButtonOnColor : XRUi.ButtonToggleColor);
+        if (showRoutesButton != null) XRUi.SetTint(showRoutesButton, WallOverlays.ShowRoutes ? XRUi.ButtonOnColor : XRUi.ButtonToggleColor);
+        if (showPhotosButton != null) XRUi.SetTint(showPhotosButton, WallOverlays.ShowPhotos ? XRUi.ButtonOnColor : XRUi.ButtonToggleColor);
+        if (fittingsButton != null) XRUi.SetTint(fittingsButton, WallOverlays.ShowFittings ? XRUi.ButtonOnColor : XRUi.ButtonToggleColor);
+    }
+
+    /// <summary>Fittings + niches over passthrough: needs the live scan (loads it if a saved one is active).</summary>
+    async void OnToggleFittings()
+    {
+        WallOverlays.ShowFittings = !WallOverlays.ShowFittings;
+        if (!WallOverlays.ShowFittings) { AddLog("Fittings off."); return; }
+        if (walk != null && walk.IsOn) OnToggleWalk(); // they are drawn on the real walls
+        if (exporter != null && !exporter.WorldAligned) await exporter.EnsureLiveLoaded(this);
+        await Task.Delay(500);
+        AddLog("Fittings + niches: " + WallOverlays.FittingsInfo);
+    }
+
+    bool RoutesOn => editMode != null && editMode.IsOn && editMode.CurrentTool == EditModeController.Tool.Routes;
+
+    /// <summary>Main-menu shortcut to tracing routes (edit mode + Routes tool); hides the menu. Again = leave.</summary>
+    public void OnTraceRoutes()
+    {
+        if (editMode == null) return;
+        if (RoutesOn) { editMode.Toggle(); return; }
+        editMode.UseTool(EditModeController.Tool.Routes);
+        if (menuCanvas != null && menuCanvas.gameObject.activeSelf) OnToggleMenu();
     }
 
     bool PhotosOn => editMode != null && editMode.IsOn && editMode.CurrentTool == EditModeController.Tool.Photos;
