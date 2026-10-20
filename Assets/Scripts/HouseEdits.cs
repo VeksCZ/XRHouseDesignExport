@@ -184,6 +184,7 @@ public static class HouseEditsStore
         Current.modified = DateTime.Now.ToString("s");
         try { File.WriteAllText(currentPath ?? PathFor(CurrentScan), JsonUtility.ToJson(Current, true)); }
         catch (Exception ex) { Debug.LogException(ex); }
+        PendingChanges.Mark("edits");
         Changed?.Invoke();
     }
 

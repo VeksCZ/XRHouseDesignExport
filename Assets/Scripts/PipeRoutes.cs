@@ -201,6 +201,7 @@ public static class RouteStore
         if (undo.Count > MaxUndo) undo.RemoveAt(0);
         change(Current);
         Save();
+        PendingChanges.Mark("routes");
     }
 
     public static bool Undo()
@@ -209,6 +210,7 @@ public static class RouteStore
         current = JsonUtility.FromJson<PipeRouteFile>(undo[undo.Count - 1]) ?? new PipeRouteFile();
         undo.RemoveAt(undo.Count - 1);
         Save();
+        PendingChanges.Mark("routes");
         return true;
     }
 

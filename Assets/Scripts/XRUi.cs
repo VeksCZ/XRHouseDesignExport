@@ -19,6 +19,7 @@ public static class XRUi
     // A toggle button's resting tint while it's ON, and a fixed warning tint for a destructive action - distinct
     // from ButtonHover/ButtonPressed (which are only ever transient, on-press states) so they read at a glance.
     public static readonly Color ButtonOnColor = new Color(0.16f, 0.60f, 0.32f, 1f);
+    public static readonly Color ButtonWarnColor = new Color(0.80f, 0.45f, 0.10f, 1f);
     public static readonly Color ButtonDangerColor = new Color(0.75f, 0.18f, 0.30f, 1f);
     // A toggle button's resting tint while it's OFF - distinct from a plain action button's own ButtonColor, so
     // "this button is a toggle" is visible even before it's ever been turned on (ButtonOnColor still takes over
@@ -65,7 +66,10 @@ public static class XRUi
 
     /// <summary>True when a placed panel has been left behind (you walked away) and should come back in front.</summary>
     public static bool LeftBehind(Transform t, Transform head, float maxDist = 2.5f) =>
-        t != null && head != null && Vector3.Distance(t.position, head.position) > maxDist;
+        t != null && head != null && (Vector3.Distance(t.position, head.position) > maxDist
+            // or far above/below the eyes: placed before tracking had settled (startup, recenter) - it ended up ~1 m
+            // under the floor-level origin while the head was still at 0
+            || Mathf.Abs(t.position.y - head.position.y) > 0.9f);
 
     /// <summary>Top-left anchored placement: x/y measured from the parent's top-left corner, y growing downwards.</summary>
     public static void Place(RectTransform rt, float x, float y, float width, float height)

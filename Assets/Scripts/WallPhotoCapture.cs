@@ -87,7 +87,8 @@ public class WallPhotoCapture : MonoBehaviour
         get
         {
             var m = MRUK.Instance;
-            int n = m != null ? m.Rooms.Count : 0;
+            // keyed by the room count AND the scene version: another scan with as many rooms must not reuse the old list
+            int n = (m != null ? m.Rooms.Count : 0) + 1000 * MRUKExporter.SceneVersion;
             if (n != roomCacheCount) { roomCache = m != null ? MRUKDataProcessor.GetValidRooms(m) : new List<MRUKRoom>(); roomCacheCount = n; }
             return roomCache;
         }
@@ -233,11 +234,10 @@ public class WallPhotoCapture : MonoBehaviour
         preparing = true;
         try
         {
-            SetHud("Loading the live scan...");
+            SetHud("Lining the scan up with the house...");
             if (exporter == null || !await exporter.EnsureLiveLoaded(uiLog))
             {
-                uiLog?.AddLog("<color=red>Photos: the live scan could not be loaded - photos need it to line up with the real house.</color>");
-                SetHud("<color=#ff6060>Live scan not available - retrying...</color>");
+                SetHud("<color=#ff6060>This scan isn't lined up with the house here - photos need that. Pick Live scan with < > if this isn't the house.</color>");
                 retryAt = Time.time + 5f;
                 return;
             }
@@ -398,12 +398,23 @@ public class WallPhotoCapture : MonoBehaviour
     }
 
 #if META_XR_SDK_INSTALLED
+    /// <summary>The camera pose in Unity's world. The API gives it in the device's own frame; when a saved scan is lined
+    /// up with the house (MRUKExporter.AlignToLive shifts the tracking space), the rig's tracking space maps it into the
+    /// world the rooms live in - with no shift that is (nearly) identity, as before.</summary>
+    Pose CameraPose()
+    {
+        var p = cam.GetCameraPose();
+        if (!rigSpace) { var rig = FindFirstObjectByType<OVRCameraRig>(); rigSpace = rig ? rig.trackingSpace : null; }
+        return rigSpace ? new Pose(rigSpace.TransformPoint(p.position), rigSpace.rotation * p.rotation) : p;
+    }
+    Transform rigSpace;
+
     void PumpCapture()
     {
         if (!shotRequested || capturing) return;
         if (cam.IsUpdatedThisFrame)
         {
-            armedPose = cam.GetCameraPose();
+            armedPose = CameraPose();
             armedTime = cam.Timestamp;
             armed = true;
             return;
@@ -486,6 +497,7 @@ public class WallPhotoCapture : MonoBehaviour
             string jpg = Path.Combine(sessionDir, meta.file), json = Path.ChangeExtension(jpg, ".json");
             string metaJson = JsonUtility.ToJson(meta, !isDense);
             pendingWrites++;
+            PendingChanges.Mark("photos");
             Task.Run(() =>
             {
                 // Rows come bottom-up (Unity texture order), which is what the encoder expects: the JPG is upright,
@@ -520,6 +532,7 @@ public class WallPhotoCapture : MonoBehaviour
             Count(cableByRoom, meta.roomUuid);
             AddOutline(meta, true);
             GuideMark(meta);
+            Debug.Log($"[WallPhotos] camera-head offset {(head ? Vector3.Distance(meta.worldPosition, head.position) : -1f):0.000} m (should be a few cm)");
             Debug.Log($"[WallPhotos] cable photo {meta.index} saved, sharp {meta.sharpness:0.0} (x{meta.relativeSharpness:0.00}), {meta.centerHitDistance:0.00} m {meta.centerHitLabel}{GuideSummary().Replace("\n", " - ")}");
             Haptic();
             Click(0.6f);
@@ -584,7 +597,7 @@ public class WallPhotoCapture : MonoBehaviour
         if (Time.time - lastDenseTime < DenseInterval) return false;
         if (headDegPerSec > DenseMaxDegPerSec || headMetersPerSec > DenseMaxMetersPerSec) return false;
         if (!haveDense) return true;
-        Pose p = cam.GetCameraPose();
+        Pose p = CameraPose();
         return Vector3.Distance(p.position, lastDensePos) >= DenseMove || Quaternion.Angle(p.rotation, lastDenseRot) >= DenseTurn;
     }
 
@@ -869,7 +882,7 @@ public class WallPhotoCapture : MonoBehaviour
     /// still moves, or a new spot it is settling on (shoots once stillFor reaches StillTime).</summary>
     View ClassifyView()
     {
-        Pose pose = cam.GetCameraPose();
+        Pose pose = CameraPose();
         var ray = cam.ViewportPointToRay(new Vector2(0.5f, 0.5f), pose);
         if (!Hit(ray, out var hp, out var hn, out _)) return View.Nothing;
         // what the PC-side tools can use: the route detector skips surfaces seen from > 4.5 m or at > 72 deg
@@ -881,7 +894,7 @@ public class WallPhotoCapture : MonoBehaviour
 
     bool IsNewView()
     {
-        Pose pose = cam.GetCameraPose();
+        Pose pose = CameraPose();
         var ray = cam.ViewportPointToRay(new Vector2(0.5f, 0.5f), pose);
         if (!Hit(ray, out var p, out _)) return false; // looking at nothing scanned (out of a window...)
         foreach (var s in shots)

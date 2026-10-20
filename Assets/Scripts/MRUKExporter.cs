@@ -40,19 +40,25 @@ public class MRUKExporter : MonoBehaviour
     /// holds exactly that data. Used when the first edit is made on the live scan: from then on the edits belong
     /// to this saved scan.
     /// </summary>
-    /// <summary>Makes sure MRUK holds the live, real-world-aligned scene (switching back to the live source if a saved
-    /// scan was loaded) - for anything that works over passthrough, like wall photos.</summary>
+    /// <summary>Makes sure MRUK holds the selected scan lined up with the real house (the live scan, or a saved one
+    /// aligned onto it) - for anything that works over passthrough, like wall photos and routes. Never switches the
+    /// selected scan.</summary>
+    int notAlignedLogged = -1;
     public async Task<bool> EnsureLiveLoaded(XRMenu ui = null)
     {
-        if (WorldAligned && ActiveSource != null) return true;
-        SelectedSource = LiveSource;
-        bool ok = await EnsureSelectedSourceLoaded(ui, forceReload: true);
-        ui?.RefreshSourceLabel();
-        return ok;
+        if (WorldAligned && ActiveSource == SelectedSource) return true;
+        // Never switches the source by itself: a saved scan stays selected and is lined up with the house; if it
+        // can't be (no room in common - e.g. not in the house), it is the model only. Live scan = pick it with < >.
+        // (loading a saved scan on the headset already tries to line it up - no reload loop when it can't)
+        bool ok = await EnsureSelectedSourceLoaded(ui);
+        if (ok && !WorldAligned && notAlignedLogged != SceneVersion && (notAlignedLogged = SceneVersion) >= 0)
+            ui?.AddLog($"<color=orange>'{SelectedSource}' isn't lined up with the house here - walk through the model to work on it, or pick Live scan with < >.</color>");
+        return ok && WorldAligned;
     }
 
     public void AdoptSavedLiveScan(string savedName)
     {
+        SceneVersion++;
         if (string.IsNullOrEmpty(savedName)) return;
         SelectedSource = savedName;
         ActiveSource = savedName;
@@ -65,6 +71,101 @@ public class MRUKExporter : MonoBehaviour
     {
         HouseEditsStore.Bind(scanName);
         RoomNames.FilePath = MRUKSceneCache.RoomNamesPath(scanName);
+    }
+
+    /// <summary>Bumped whenever MRUK's rooms are replaced (another scan loaded) - room caches compare against it.</summary>
+    public static int SceneVersion { get; private set; }
+
+    /// <summary>How the loaded saved scan sits on the real house, e.g. "aligned to the house via 7 rooms (2 cm)".</summary>
+    public string AlignInfo { get; private set; } = "";
+
+    struct LiveRoom { public Vector3 pos; public Quaternion rot; public bool intact; }
+
+    static Dictionary<string, LiveRoom> SnapshotRooms()
+    {
+        var d = new Dictionary<string, LiveRoom>();
+        foreach (var r in MRUK.Instance.Rooms)
+        {
+            if (r == null) continue;
+            d[r.Anchor.Uuid.ToString()] = new LiveRoom
+            {
+                pos = r.transform.position, rot = r.transform.rotation,
+                intact = r.FloorAnchors.Count > 0 && r.WallAnchors.Count >= 3,
+            };
+        }
+        return d;
+    }
+
+    /// <summary>
+    /// Lines the just-loaded saved scan up with the real house: every room it shares with the live scene (same UUID -
+    /// the saved scan is a copy of that scene) says where it really is now; the yaw + offset most of them agree on
+    /// (within 2 deg / 15 cm) is applied to the tracking space, so the saved rooms land on the real walls. Rooms the
+    /// device has since lost or re-scanned don't spoil it - they just disagree and are outvoted.
+    /// </summary>
+    void AlignToLive(Dictionary<string, LiveRoom> live, XRMenu ui)
+    {
+        var pairs = new List<(string id, LiveRoom l, Vector3 sp, Quaternion sr)>();
+        foreach (var r in MRUK.Instance.Rooms)
+        {
+            if (r == null || !live.TryGetValue(r.Anchor.Uuid.ToString(), out var l)) continue;
+            pairs.Add((r.Anchor.Uuid.ToString(), l, r.transform.position, r.transform.rotation));
+        }
+        if (pairs.Count == 0)
+        {
+            AlignInfo = "not aligned - no room in common with the live scan (another place)";
+            ui?.AddLog($"<color=orange>Saved scan: {AlignInfo}. It is a model only here.</color>");
+            Debug.Log("[Align] " + AlignInfo);
+            return;
+        }
+        float Yaw(Quaternion q) { var f = q * Vector3.forward; return Mathf.Atan2(f.x, f.z) * Mathf.Rad2Deg; }
+        (Quaternion R, Vector3 t) Fit(int i)
+        {
+            var p = pairs[i];
+            var R = Quaternion.Euler(0, Yaw(p.sr * Quaternion.Inverse(p.l.rot)), 0);
+            return (R, p.sp - R * p.l.pos);
+        }
+        int best = -1, bestSupport = 0; float bestErr = float.MaxValue;
+        for (int i = 0; i < pairs.Count; i++)
+        {
+            if (!pairs[i].l.intact && pairs.Any(p => p.l.intact)) continue; // prefer rooms the device still has whole
+            var (R, t) = Fit(i);
+            int support = 0; float err = 0;
+            foreach (var p in pairs)
+            {
+                float d = Vector3.Distance(R * p.l.pos + t, p.sp);
+                float a = Quaternion.Angle(R * p.l.rot, p.sr);
+                if (d < 0.15f && a < 2f) { support++; err += d; }
+            }
+            err = support > 0 ? err / support : float.MaxValue;
+            if (support > bestSupport || (support == bestSupport && err < bestErr)) { best = i; bestSupport = support; bestErr = err; }
+        }
+        if (best < 0) { AlignInfo = "not aligned"; return; }
+        // refine over the rooms that agree
+        var (R0, t0) = Fit(best);
+        var agree = pairs.Where(p => Vector3.Distance(R0 * p.l.pos + t0, p.sp) < 0.15f && Quaternion.Angle(R0 * p.l.rot, p.sr) < 2f).ToList();
+        float yawSum = 0;
+        foreach (var p in agree) yawSum += Mathf.DeltaAngle(0, Yaw(p.sr * Quaternion.Inverse(p.l.rot)) - Yaw(R0)) ;
+        var Rf = Quaternion.Euler(0, Yaw(R0) + yawSum / agree.Count, 0);
+        Vector3 tf = Vector3.zero;
+        foreach (var p in agree) tf += p.sp - Rf * p.l.pos;
+        tf /= agree.Count;
+        float res = agree.Average(p => Vector3.Distance(Rf * p.l.pos + tf, p.sp));
+        SetTrackingOffset(Matrix4x4.TRS(tf, Rf, Vector3.one));
+        WorldAligned = true;
+        AlignInfo = $"aligned to the house via {agree.Count} of {pairs.Count} shared room(s), {res * 100f:0} cm";
+        ui?.AddLog($"<color=green>Saved scan {AlignInfo}.</color>");
+        Debug.Log($"[Align] {AlignInfo}; yaw {Yaw(Rf):0.0} deg, offset {tf}; disagreeing: {string.Join(", ", pairs.Except(agree).Select(p => p.id.Substring(0, 8)))}");
+    }
+
+    /// <summary>Shifts the camera rig's tracking space (identity = the device's own frame). With MRUK world locking on,
+    /// that is MRUK's TrackingSpaceOffset (it rewrites the tracking space every frame); otherwise the transform itself.</summary>
+    static void SetTrackingOffset(Matrix4x4 m)
+    {
+        var mruk = MRUK.Instance;
+        if (mruk == null) return;
+        if (mruk.EnableWorldLock) { mruk.TrackingSpaceOffset = m; return; }
+        var rig = FindFirstObjectByType<OVRCameraRig>();
+        if (rig && rig.trackingSpace) rig.trackingSpace.SetLocalPositionAndRotation(m.GetPosition(), m.rotation);
     }
 
     /// <summary>Moves the selection by +1/-1 through the available sources and returns the new one.</summary>
@@ -94,7 +195,9 @@ public class MRUKExporter : MonoBehaviour
                 ui?.AddLog("<color=red>No valid rooms found! Make sure you have completed 'Room Setup' in Quest settings.</color>");
                 return false;
             }
-            return await RunExportPipeline(rooms, ui);
+            bool done = await RunExportPipeline(rooms, ui);
+            if (done) PendingChanges.Exported();
+            return done;
         } catch (Exception ex) {
             Debug.LogException(ex);
             ui?.AddLog("<color=red>ERROR: " + ex.Message + "</color>");
@@ -120,16 +223,31 @@ public class MRUKExporter : MonoBehaviour
         if (!forceReload && ActiveSource == SelectedSource) return true;
 
         if (SelectedSource == LiveSource) {
+            SetTrackingOffset(Matrix4x4.identity);
+            AlignInfo = "";
             if (!await EnsureLiveSceneLoaded(ui)) return false;
             WorldAligned = true;
+            PendingChanges.SeenLive(PendingChanges.Signature(MRUK.Instance.Rooms));
         } else {
             WorldAligned = false;
+            AlignInfo = "";
+            // Where the house's rooms really are right now (the live scene, no offset applied) - to line the saved
+            // scan up with them below. In the house this works even when the live scene lost rooms or walls: any
+            // room the two share is enough.
+            Dictionary<string, LiveRoom> live = null;
+            if (!Application.isEditor && !MRUKPathUtility.IsDesktop) {
+                SetTrackingOffset(Matrix4x4.identity);
+                await Task.Yield(); await Task.Yield();
+                if (await EnsureLiveSceneLoaded(null)) { live = SnapshotRooms(); PendingChanges.SeenLive(PendingChanges.Signature(MRUK.Instance.Rooms)); }
+            }
             ui?.AddLog($"Loading cached scan '{SelectedSource}'...");
             if (!await MRUKSceneCache.LoadCachedScene(MRUK.Instance, SelectedSource)) {
                 ui?.AddLog("<color=red>Failed to load cached scan.</color>");
                 return false;
             }
+            if (live != null) AlignToLive(live, ui);
         }
+        SceneVersion++;
         ActiveSource = SelectedSource;
         // Edits belong to a saved scan; the live scan has none until its first edit saves it (EditModeController).
         BindScanData(ActiveSource == LiveSource ? null : ActiveSource);
@@ -154,7 +272,10 @@ public class MRUKExporter : MonoBehaviour
             }
 
             ui?.AddLog("<color=cyan>Saving current scan to cache...</color>");
+            SetTrackingOffset(Matrix4x4.identity);
+            AlignInfo = "";
             if (!await EnsureLiveSceneLoaded(ui)) return null;
+            SceneVersion++;
             ActiveSource = LiveSource;
             WorldAligned = true;
 
@@ -165,11 +286,17 @@ public class MRUKExporter : MonoBehaviour
             }
 
             name = string.IsNullOrEmpty(name) ? $"{DateTime.Now:yyyyMMdd_HHmm}_{rooms.Count}rooms" : name;
+            string sig = PendingChanges.Signature(MRUK.Instance.Rooms);
             string saved = MRUKSceneCache.SaveCurrentScene(MRUK.Instance, name);
             if (saved != null)
+            {
+                PendingChanges.SavedLive(sig);
                 ui?.AddLog($"<color=green>Scan cached as '{saved}' ({rooms.Count} room(s)). You can export it later from anywhere.</color>");
+            }
             else
                 ui?.AddLog("<color=red>Failed to save scan to cache.</color>");
+            // back to the scan you had picked - saving never switches it
+            if (SelectedSource != LiveSource) await EnsureSelectedSourceLoaded(ui, forceReload: true);
             return saved;
         } catch (Exception ex) {
             Debug.LogException(ex);
@@ -269,7 +396,7 @@ public class MRUKExporter : MonoBehaviour
         ui?.AddLog("Calling LoadSceneFromDevice...");
         // V2FallbackV1: use the High Fidelity scene (multi-floor/ceiling, sloped ceilings) when the
         // device has it, but don't fail on rooms captured before HiFi scans existed.
-        var loadTask = MRUK.Instance.LoadSceneFromDevice(true, true, MRUK.SceneModel.V2FallbackV1);
+        var loadTask = MRUK.Instance.LoadSceneFromDevice(false, true, MRUK.SceneModel.V2FallbackV1); // never starts Space Setup by itself
 
         // Real scans (several rooms, global meshes) can legitimately take well over 8s to stream from
         // the OS the first time - that used to abort the load outright even with a valid, complete scan.

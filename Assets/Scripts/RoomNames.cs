@@ -55,6 +55,7 @@ public static class RoomNames
             var store = new Store();
             foreach (var kv in map) { store.keys.Add(kv.Key); store.values.Add(kv.Value); }
             File.WriteAllText(FilePath, JsonUtility.ToJson(store, true));
+            PendingChanges.Mark("room names");
         }
         catch (Exception ex) { Debug.LogWarning("[RoomNames] Could not save: " + ex.Message); }
     }

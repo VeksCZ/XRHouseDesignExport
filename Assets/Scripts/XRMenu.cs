@@ -49,7 +49,7 @@ public class XRMenu : MonoBehaviour
     // site - a toggle can also turn itself off from elsewhere (the floor plan panel's own Close button, or a
     // scan-source change invalidating the scan overlay/minimap), and a per-frame sync can never go stale the
     // way scattered manual updates did.
-    Button dollhouseButton, plansButton, scanOverlayButton, miniMapButton, walkButton, editButton, photosButton, routesButton, showRoutesButton, showPhotosButton, fittingsButton;
+    Button dollhouseButton, plansButton, scanOverlayButton, saveButton, exportButton, miniMapButton, walkButton, editButton, photosButton, routesButton, showRoutesButton, showPhotosButton, fittingsButton;
     XRRayInteractor rightRay;
     float flickCooldown;
     bool menuPlaced;
@@ -183,8 +183,9 @@ public class XRMenu : MonoBehaviour
         XRUi.CreateText(site, "Hint", "X = routes / photos on walls on-off  -  hold Y = edit mode", 19, TextAlignmentOptions.Center, left, Row(3) + 10, 552, 50, XRUi.MutedText);
 
         // Data: save / export; the destructive ones apart at the bottom of the tab.
-        XRUi.CreateButton(data, "Save scan", left, Row(0), w, h, OnSaveScan);
-        XRUi.CreateButton(data, "Export", right, Row(0), w, h, OnExportAll);
+        saveButton = XRUi.CreateButton(data, "Save scan", left, Row(0), w, h, OnSaveScan);
+        exportButton = XRUi.CreateButton(data, "Export", right, Row(0), w, h, OnExportAll);
+        pendingText = XRUi.CreateText(data, "PendingHint", "", 19, TextAlignmentOptions.Center, left, Row(1) + 10, 552, 50, XRUi.MutedText);
         var deleteScanButton = XRUi.CreateButton(data, "Delete scan", left, Row(3), w, h, OnDeleteScan);
         XRUi.SetTint(deleteScanButton, XRUi.ButtonDangerColor);
         var deleteExportsButton = XRUi.CreateButton(data, "Delete exports", right, Row(3), w, h, OnDeleteExports);
@@ -234,7 +235,9 @@ public class XRMenu : MonoBehaviour
         // Placed in front of you when it opens (B), then it stays put like every other panel - it no longer turns
         // with your head. Walk away from it and it comes back in front of you.
         if (!menuCanvas.gameObject.activeSelf) return;
-        if (!menuPlaced || (!menuManuallyPlaced && XRUi.LeftBehind(menuCanvas.transform, cam.transform)))
+        // The first seconds after start the head pose is still settling (tracking origin, recenter): keep it in front.
+        bool settling = Time.realtimeSinceStartup < 6f && !menuManuallyPlaced;
+        if (!menuPlaced || settling || (!menuManuallyPlaced && XRUi.LeftBehind(menuCanvas.transform, cam.transform)))
         {
             XRUi.PlaceInFront(menuCanvas.transform, cam.transform, MenuDistance, MenuDrop);
             menuPlaced = true;
@@ -341,13 +344,17 @@ public class XRMenu : MonoBehaviour
         // shortcut for Export, at the cost of one for closing the menu, not worth it - Export is still one
         // click away on the menu itself.
         if (OVRInput.GetDown(OVRInput.Button.Two, OVRInput.Controller.RTouch)) OnToggleMenu();
+        // The left menu button (three lines) too - what it does in most Quest apps (it used to open Meta's Immersive
+        // Debugger, now switched off in Resources/ImmersiveDebuggerSettings).
+        if (OVRInput.GetDown(OVRInput.Button.Start)) OnToggleMenu();
         // While walking, A leaves the walk-through (back to the Dollhouse, if it was up) instead.
         if (OVRInput.GetDown(OVRInput.Button.One, OVRInput.Controller.RTouch)) { if (walking) OnToggleWalk(); else OnToggleHouseView(); }
         HandleMenuDrag();
 
         // Left hand: Y tap = save log, Y hold (1 s) = edit mode on/off, X = routes / photos on walls (cycles; Save scan
         // is in the menu's Data tab - it used to be on X and made new scan copies by accident), stick click = floor plans
-        // (seated/standing while walking), stick left/right = scan source.
+        // (seated/standing while walking). The scan source changes only with the menu's < > - a stick flick used to switch
+        // it by accident (e.g. right after leaving the walk-through with the stick still pushed).
         if (OVRInput.GetDown(OVRInput.Button.Two, OVRInput.Controller.LTouch)) { yDownTime = Time.time; yHoldFired = false; }
         if (OVRInput.Get(OVRInput.Button.Two, OVRInput.Controller.LTouch) && !yHoldFired && Time.time - yDownTime >= EditHoldSeconds)
         {
@@ -365,7 +372,6 @@ public class XRMenu : MonoBehaviour
         if (flickCooldown > 0f) return;
 
         Vector2 right = OVRInput.Get(OVRInput.Axis2D.PrimaryThumbstick, OVRInput.Controller.RTouch);
-        Vector2 left = OVRInput.Get(OVRInput.Axis2D.PrimaryThumbstick, OVRInput.Controller.LTouch);
 
         if (plansOpen && !(dollhouse != null && dollhouse.IsDragging) && !plansPanel.IsDragging && Mathf.Abs(right.x) > FlickThreshold)
         {
@@ -378,11 +384,6 @@ public class XRMenu : MonoBehaviour
             OnCycleDollhouseMode();
             flickCooldown = FlickCooldown;
         }
-        else if (Mathf.Abs(left.x) > FlickThreshold)
-        {
-            OnCycleSource(left.x > 0 ? 1 : -1);
-            flickCooldown = FlickCooldown;
-        }
     }
 
     /// <summary>Keeps every on/off toggle button tinted to match what's actually on screen right now, regardless
@@ -393,6 +394,7 @@ public class XRMenu : MonoBehaviour
         if (plansButton != null) XRUi.SetTint(plansButton, plansOpen ? XRUi.ButtonOnColor : XRUi.ButtonToggleColor);
         if (dollhouseButton != null) XRUi.SetTint(dollhouseButton, dollhouse != null && dollhouse.IsOn ? XRUi.ButtonOnColor : XRUi.ButtonToggleColor);
         if (scanOverlayButton != null) XRUi.SetTint(scanOverlayButton, scanOverlay != null && scanOverlay.IsOn ? XRUi.ButtonOnColor : XRUi.ButtonToggleColor);
+        SyncPending();
         if (miniMapButton != null) XRUi.SetTint(miniMapButton, miniMap != null && miniMap.IsOn ? XRUi.ButtonOnColor : XRUi.ButtonToggleColor);
         if (walkButton != null) XRUi.SetTint(walkButton, walk != null && walk.IsOn ? XRUi.ButtonOnColor : XRUi.ButtonToggleColor);
         if (editButton != null) XRUi.SetTint(editButton, editMode != null && editMode.IsOn ? XRUi.ButtonOnColor : XRUi.ButtonToggleColor);
@@ -401,6 +403,26 @@ public class XRMenu : MonoBehaviour
         if (showRoutesButton != null) XRUi.SetTint(showRoutesButton, WallOverlays.ShowRoutes ? XRUi.ButtonOnColor : XRUi.ButtonToggleColor);
         if (showPhotosButton != null) XRUi.SetTint(showPhotosButton, WallOverlays.ShowPhotos ? XRUi.ButtonOnColor : XRUi.ButtonToggleColor);
         if (fittingsButton != null) XRUi.SetTint(fittingsButton, WallOverlays.ShowFittings ? XRUi.ButtonOnColor : XRUi.ButtonToggleColor);
+    }
+
+    TMP_Text pendingText;
+    float pendingAt;
+    bool lastSave, lastExport; string lastWhat;
+    /// <summary>Save scan / Export (and the Data tab) turn orange while something isn't saved / exported yet.</summary>
+    void SyncPending()
+    {
+        if (saveButton == null || Time.unscaledTime < pendingAt) return;
+        pendingAt = Time.unscaledTime + 0.5f;
+        bool save = PendingChanges.SavePending, export = PendingChanges.ExportPending;
+        string what = PendingChanges.ExportWhat;
+        if (save == lastSave && export == lastExport && what == lastWhat) return;
+        lastSave = save; lastExport = export; lastWhat = what;
+        XRUi.SetTint(saveButton, save ? XRUi.ButtonWarnColor : XRUi.ButtonColor);
+        XRUi.SetLabel(saveButton, save ? "Save scan  (new scan!)" : "Save scan");
+        XRUi.SetTint(exportButton, export ? XRUi.ButtonWarnColor : XRUi.ButtonColor);
+        XRUi.SetLabel(exportButton, export ? "Export  (changed)" : "Export");
+        pendingText.text = (save ? "A new scan in Quest - Save scan keeps it.  " : "") + (export ? $"Not exported yet: {what}." : save ? "" : "Everything saved and exported.");
+        if (tabButtons != null) XRUi.SetLabel(tabButtons[2], save || export ? "Data  <color=#ffa040>(!)</color>" : "Data");
     }
 
     /// <summary>Fittings + niches over passthrough: needs the live scan (loads it if a saved one is active).</summary>

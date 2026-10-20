@@ -131,6 +131,13 @@ public static class MRUKSceneCache
         if (!File.Exists(path)) return false;
 
         string json = File.ReadAllText(path);
+        // Clear first. A saved scan of the house has the same room UUIDs as the house's live scene: loaded on top of it,
+        // MRUK merged the two - the matching rooms kept their live poses (and, if the live room was damaged, its
+        // missing walls), the rest came in the saved scan's own frame. The house fell apart (furniture outside, stairs
+        // in the middle, the plan's orientation flipping between loads). Cleared, the saved scan always comes back
+        // exactly as saved; MRUKExporter lines it up with the real house afterwards (AlignToLive).
+        mruk.ClearScene();
+        await Task.Yield();
         var result = await mruk.LoadSceneFromJsonString(json, removeMissingRooms: true);
         return result == MRUK.LoadDeviceResult.Success;
     }

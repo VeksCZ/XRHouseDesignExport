@@ -25,12 +25,13 @@ public class RouteEditTool : MonoBehaviour
     public MRUKExporter exporter;
 
     const string KindPref = "Routes.Kind", MarkerPref = "Routes.MarkerType";
-    const float SnapToRoute = 0.05f, StraightenDeg = 7f, DeletePick = 0.12f;
+    const float SnapToRoute = 0.05f, StraightenDeg = 7f;
 
     RouteKind kind;
     int diaIdx, labelIdx;
     string drawingId;
-    bool deleteMode, wasActive, preparing, markerMode;
+    bool deleteMode, wasActive, preparing, markerMode, joinMode;
+    string joinFirstId; bool joinFirstAtStart;
     int markerIdx;
     float retryAt;
 
@@ -46,7 +47,7 @@ public class RouteEditTool : MonoBehaviour
     PanelDrag panelDrag;
     TMP_Text titleText, hintText;
     readonly Dictionary<RouteKind, Button> kindButtons = new Dictionary<RouteKind, Button>();
-    Button diaButton, labelButton, finishButton, deleteButton, photosButton, modeButton, markerButton, acceptButton;
+    Button diaButton, labelButton, finishButton, deleteButton, joinButton, modeButton, markerButton, acceptButton;
     bool panelPlaced;
     const float PW = 640f, PH = 430f, PScale = 0.00055f, RowH = 58f, Gap = 8f;
 
@@ -58,7 +59,8 @@ public class RouteEditTool : MonoBehaviour
         get
         {
             var m = MRUK.Instance;
-            int n = m != null ? m.Rooms.Count : 0;
+            // keyed by the room count AND the scene version: another scan with as many rooms must not reuse the old list
+            int n = (m != null ? m.Rooms.Count : 0) + 1000 * MRUKExporter.SceneVersion;
             if (n != roomCacheCount) { roomCache = m != null ? MRUKDataProcessor.GetValidRooms(m) : new List<MRUKRoom>(); roomCacheCount = n; }
             return roomCache;
         }
@@ -94,7 +96,7 @@ public class RouteEditTool : MonoBehaviour
             if (wasActive)
             {
                 wasActive = false;
-                drawingId = null; deleteMode = false;
+                drawingId = null; deleteMode = false; joinMode = false; joinFirstId = null;
                 WallOverlays.ForceRoutes = false;
                 ClosePanel();
                 ShowPreview(false);
@@ -133,8 +135,8 @@ public class RouteEditTool : MonoBehaviour
         retryAt = Time.time + 5f;
         try
         {
-            SetHint("Loading the live scan (routes are traced on the real walls)...");
-            if (!await exporter.EnsureLiveLoaded(uiLog)) SetHint("<color=#ff6060>Live scan not available - or walk through the model and trace there.</color>");
+            SetHint("Loading the scan onto the real walls...");
+            if (!await exporter.EnsureLiveLoaded(uiLog)) SetHint("<color=#ff6060>This scan isn't lined up with the house here - walk through the model and trace there, or pick Live scan with < >.</color>");
             else RefreshPanel();
         }
         finally { preparing = false; }
@@ -160,26 +162,66 @@ public class RouteEditTool : MonoBehaviour
 
     float Radius => RouteStyle.Diameters(kind)[Mathf.Clamp(diaIdx, 0, RouteStyle.Diameters(kind).Length - 1)] / 2f;
 
-    /// <summary>The surface point under the right controller's ray (scan frame) and its normal.</summary>
+    /// <summary>The surface point under the right controller's ray (scan frame) and its normal. The ray stops at the
+    /// walls of the room you stand in (the scan's flat walls, also under the walk-through model), so it never runs
+    /// through a wall into the next room.</summary>
     Vector3? Pointed(out Vector3 normal)
     {
         normal = Vector3.up;
         var ray = new Ray(rightHand.position, rightHand.forward);
+        Vector3 headScan = head.position;
+        Ray scanRay = ray;
+        float best = float.MaxValue; Vector3 p = default;
         if (frameIsWalk)
         {
-            if (!walk.RaycastModel(ray, out var hit)) return null;
             Quaternion gi = Quaternion.Inverse(G);
-            normal = (gi * frameRoot.InverseTransformDirection(hit.normal)).normalized;
-            return gi * frameRoot.InverseTransformPoint(hit.point) + frameCenter;
+            scanRay = new Ray(gi * frameRoot.InverseTransformPoint(ray.origin) + frameCenter,
+                              (gi * frameRoot.InverseTransformDirection(ray.direction)).normalized);
+            headScan = gi * frameRoot.InverseTransformPoint(head.position) + frameCenter;
+            if (walk.RaycastModel(ray, out var hit))
+            {
+                p = gi * frameRoot.InverseTransformPoint(hit.point) + frameCenter;
+                normal = (gi * frameRoot.InverseTransformDirection(hit.normal)).normalized;
+                best = Vector3.Distance(scanRay.origin, p);
+            }
         }
 #if META_XR_SDK_INSTALLED
-        float best = float.MaxValue; Vector3 p = default;
-        foreach (var room in Rooms)
-            if (room.Raycast(ray, 15f, out RaycastHit h, out _) && h.distance < best) { best = h.distance; p = h.point; normal = h.normal; }
-        if (best < float.MaxValue) return p;
+        // the room you stand in first: its walls, floor and ceiling face you, nothing behind them counts
+        // (walking the model: only its shell is a backstop - furniture is whatever the model shows)
+        var here = CurrentRoom(headScan);
+        var filter = frameIsWalk ? LabelFilter.Included(Shell) : new LabelFilter();
+        bool hitHere = false;
+        if (here != null && here.Raycast(scanRay, 15f, filter, out RaycastHit hh, out _) && hh.distance < best)
+        { best = hh.distance; p = hh.point; normal = hh.normal; hitHere = true; }
+        if (here == null || (!hitHere && best == float.MaxValue)) // in a doorway / outside every room: any room
+            foreach (var room in Rooms)
+                if (room != here && room.Raycast(scanRay, 15f, filter, out RaycastHit h, out _) && h.distance < best) { best = h.distance; p = h.point; normal = h.normal; }
 #endif
-        return null;
+        return best < float.MaxValue ? p : (Vector3?)null;
     }
+
+#if META_XR_SDK_INSTALLED
+    const MRUKAnchor.SceneLabels Shell = MRUKAnchor.SceneLabels.WALL_FACE | MRUKAnchor.SceneLabels.INVISIBLE_WALL_FACE
+        | MRUKAnchor.SceneLabels.FLOOR | MRUKAnchor.SceneLabels.CEILING;
+    MRUKRoom currentRoom; float currentRoomAt = -1f;
+    /// <summary>The room your head is in (scan frame), checked a few times a second.</summary>
+    MRUKRoom CurrentRoom(Vector3 headScan)
+    {
+        if (Time.unscaledTime - currentRoomAt < 0.25f && (currentRoom == null || Rooms.Contains(currentRoom))) return currentRoom;
+        currentRoomAt = Time.unscaledTime;
+        MRUKRoom found = null; float bestY = float.MaxValue;
+        foreach (var r in Rooms)
+        {
+            if (r == null || !r.IsPositionInRoom(headScan, true)) continue;
+            // stacked/overlapping rooms: the one whose floor is right below the head
+            var f = r.FloorAnchor;
+            float dy = f ? headScan.y - f.transform.position.y : 10f;
+            if (dy >= -0.2f && dy < bestY) { bestY = dy; found = r; }
+        }
+        currentRoom = found; // null in a doorway / outside: then every room counts
+        return currentRoom;
+    }
+#endif
 
     /// <summary>Where a click would put the next point: on the centre line in front of the surface, snapped onto an
     /// existing route nearby, or straightened against the previous point.</summary>
@@ -252,6 +294,7 @@ public class RouteEditTool : MonoBehaviour
         if (!Active || preparing) return;
         if (!hover.HasValue) { uiLog?.AddLog("Routes: point at a wall, floor or ceiling."); return; }
         if (deleteMode) { DeleteNearest(); return; }
+        if (joinMode) { JoinPick(); return; }
         if (markerMode) { PlaceMarker(); return; }
         Vector3 c = Candidate(out _);
 #if META_XR_SDK_INSTALLED
@@ -330,15 +373,99 @@ public class RouteEditTool : MonoBehaviour
         }
         if (r != null) uiLog?.AddLog($"Routes: {RouteStyle.Name(r.kind)} route done ({r.localPoints.Count} points).");
         drawingId = null;
+        if (r != null && r.localPoints.Count >= 2) AutoJoinThroughWall(r.id);
         RefreshPanel();
+    }
+
+    /// <summary>Join mode: the first trigger picks a route and its nearer end, the second the other route's end.</summary>
+    void JoinPick()
+    {
+#if META_XR_SDK_INSTALLED
+        var target = NearestRoute(out var pts, out _);
+        if (target == null || pts == null || pts.Count == 0) { uiLog?.AddLog("Routes: point right at a route (near its end)."); return; }
+        bool atStart = Vector3.Distance(pts[0], hover.Value) < Vector3.Distance(pts[pts.Count - 1], hover.Value);
+        if (joinFirstId == null || joinFirstId == target.id)
+        {
+            joinFirstId = target.id; joinFirstAtStart = atStart;
+            Haptic(0.4f);
+            uiLog?.AddLog($"Routes: join - {RouteStyle.Name(target.kind)} picked, now the other route's end.");
+        }
+        else
+        {
+            string a = joinFirstId; bool aStart = joinFirstAtStart;
+            joinFirstId = null;
+            if (Join(a, aStart, target.id, atStart)) { joinMode = false; Haptic(0.6f); }
+        }
+#endif
+        RefreshPanel();
+    }
+
+#if META_XR_SDK_INSTALLED
+    /// <summary>Joins route B onto route A at the given ends into one route (A's room frame, its kind and size; the
+    /// segment between the two ends runs straight through the wall). One undo step.</summary>
+    bool Join(string aId, bool aAtStart, string bId, bool bAtStart, bool auto = false)
+    {
+        var rooms = MRUKRooms();
+        var A = RouteStore.Routes.FirstOrDefault(x => x.id == aId);
+        var B = RouteStore.Routes.FirstOrDefault(x => x.id == bId);
+        if (A == null || B == null || A == B) return false;
+        if (A.kind != B.kind) { uiLog?.AddLog($"Routes: can't join {RouteStyle.Name(A.kind)} with {RouteStyle.Name(B.kind)}."); return false; }
+        var pa = new List<Vector3>(); var pb = new List<Vector3>();
+        if (!RouteStore.WorldPoints(A, rooms, pa) || !RouteStore.WorldPoints(B, rooms, pb)) return false;
+        var roomA = rooms.FirstOrDefault(x => x != null && DoorCatalog.RoomId(x) == A.roomUuid);
+        if (roomA == null) return false;
+        if (aAtStart) pa.Reverse();   // A runs towards the joint
+        if (!bAtStart) pb.Reverse();  // B runs away from it
+        string startLabel = aAtStart ? A.endLabel : A.startLabel, endLabel = bAtStart ? B.endLabel : B.startLabel;
+        float gap = Vector3.Distance(pa[pa.Count - 1], pb[0]);
+        if (gap < 0.01f) pb.RemoveAt(0);
+        var local = pa.Concat(pb).Select(p => new Vector3Data(roomA.transform.InverseTransformPoint(p))).ToList();
+        RouteStore.Apply(f =>
+        {
+            var a = f.routes.First(x => x.id == aId);
+            a.localPoints = local; a.startLabel = startLabel; a.endLabel = endLabel;
+            f.routes.RemoveAll(x => x.id == bId);
+        });
+        string msg = $"Routes: {RouteStyle.Name(A.kind)} joined{(gap > 0.1f ? $" through the wall ({gap * 100f:0} cm)" : "")} - Undo splits it again.";
+        uiLog?.AddLog(auto ? "<color=#7fe07f>" + msg + "</color>" : msg);
+        Debug.Log($"[Routes] join {aId.Substring(0, 6)}+{bId.Substring(0, 6)} gap {gap:0.00} m{(auto ? " (auto)" : "")}");
+        return true;
+    }
+#endif
+
+    /// <summary>After a route is finished: if one of its ends lies just behind a wall from an end of another route
+    /// of the same kind in another room (drawn on the other side), join them through the wall.</summary>
+    void AutoJoinThroughWall(string id)
+    {
+#if META_XR_SDK_INSTALLED
+        const float MaxGap = 0.7f; // wall + both pipes' offsets
+        var rooms = MRUKRooms();
+        var r = RouteStore.Routes.FirstOrDefault(x => x.id == id);
+        var pr = new List<Vector3>();
+        if (r == null || !RouteStore.WorldPoints(r, rooms, pr) || pr.Count < 2) return;
+        var po = new List<Vector3>();
+        string bestId = null; bool bestMineStart = false, bestOtherStart = false; float best = MaxGap;
+        foreach (var o in RouteStore.Routes)
+        {
+            if (o.id == id || o.kind != r.kind || o.roomUuid == r.roomUuid || o.proposed) continue;
+            if (!RouteStore.WorldPoints(o, rooms, po) || po.Count < 2) continue;
+            for (int i = 0; i < 2; i++)
+                for (int j = 0; j < 2; j++)
+                {
+                    float d = Vector3.Distance(i == 0 ? pr[0] : pr[pr.Count - 1], j == 0 ? po[0] : po[po.Count - 1]);
+                    if (d < best) { best = d; bestId = o.id; bestMineStart = i == 0; bestOtherStart = j == 0; }
+                }
+        }
+        if (bestId != null) Join(bestId, bestOtherStart, id, bestMineStart, auto: true);
+#endif
     }
 
     void DeleteNearest()
     {
 #if META_XR_SDK_INSTALLED
-        var marker = NearestMarker(hover.Value, out float md);
-        var target = NearestRoute(hover.Value, out var tp);
-        float rd = target != null && tp != null ? tp.Zip(tp.Skip(1), (a, b) => Vector3.Distance(ClosestOnSegment(a, b, hover.Value), hover.Value)).DefaultIfEmpty(Vector3.Distance(tp[0], hover.Value)).Min() : float.MaxValue;
+        // pick along the controller ray (the whole drawn line, not just where the ray hits the wall)
+        var marker = NearestMarker(out float md);
+        var target = NearestRoute(out _, out float rd);
         if (marker != null && md <= rd)
         {
             string mid = marker.id;
@@ -358,30 +485,79 @@ public class RouteEditTool : MonoBehaviour
     }
 
 #if META_XR_SDK_INSTALLED
-    RouteMarker NearestMarker(Vector3 p, out float dist)
+    /// <summary>The controller ray in the scan frame, up to just behind the wall it hits (so nothing is picked
+    /// through a wall).</summary>
+    bool PickRay(out Vector3 o, out Vector3 d, out float len)
+    {
+        o = d = default; len = 0;
+        if (!rightHand || !hover.HasValue) return false;
+        o = rightHand.position; d = rightHand.forward;
+        if (frameIsWalk)
+        {
+            Quaternion gi = Quaternion.Inverse(G);
+            o = gi * frameRoot.InverseTransformPoint(o) + frameCenter;
+            d = (gi * frameRoot.InverseTransformDirection(d)).normalized;
+        }
+        len = Vector3.Distance(o, hover.Value) + 0.25f;
+        return true;
+    }
+
+    /// <summary>Distance between the segment o..o+d*len and the segment a..b.</summary>
+    static float SegSegDist(Vector3 p1, Vector3 q1, Vector3 p2, Vector3 q2)
+    {
+        Vector3 d1 = q1 - p1, d2 = q2 - p2, r = p1 - p2;
+        float a = Vector3.Dot(d1, d1), e = Vector3.Dot(d2, d2), f = Vector3.Dot(d2, r);
+        float s, t;
+        if (a < 1e-9f && e < 1e-9f) return Vector3.Distance(p1, p2);
+        if (a < 1e-9f) { s = 0; t = Mathf.Clamp01(f / e); }
+        else
+        {
+            float c = Vector3.Dot(d1, r);
+            if (e < 1e-9f) { t = 0; s = Mathf.Clamp01(-c / a); }
+            else
+            {
+                float b = Vector3.Dot(d1, d2), den = a * e - b * b;
+                s = den > 1e-9f ? Mathf.Clamp01((b * f - c * e) / den) : 0f;
+                t = (b * s + f) / e;
+                if (t < 0) { t = 0; s = Mathf.Clamp01(-c / a); }
+                else if (t > 1) { t = 1; s = Mathf.Clamp01((b - c) / a); }
+            }
+        }
+        return Vector3.Distance(p1 + d1 * s, p2 + d2 * t);
+    }
+
+    /// <summary>Pick tolerance around the ray: a few cm plus the pipe's own radius.</summary>
+    const float RayPick = 0.06f;
+
+    RouteMarker NearestMarker(out float dist)
     {
         dist = float.MaxValue; RouteMarker best = null;
+        if (!PickRay(out var o, out var d, out var len)) return null;
+        Vector3 e = o + d * len;
         foreach (var m in RouteStore.Current.markers)
         {
             if (!RouteStore.WorldMarker(m, MRUKRooms(), out var mp, out _)) continue;
-            float d = Vector3.Distance(mp, p);
-            if (d < DeletePick && d < dist) { dist = d; best = m; }
+            float dd = SegSegDist(o, e, mp, mp);
+            if (dd < RayPick * 1.5f && dd < dist) { dist = dd; best = m; }
         }
         return best;
     }
 
-    PipeRoute NearestRoute(Vector3 p, out List<Vector3> points)
+    PipeRoute NearestRoute(out List<Vector3> points, out float dist)
     {
-        points = null;
-        PipeRoute best = null; float bd = DeletePick;
+        points = null; dist = float.MaxValue;
+        if (!PickRay(out var o, out var d, out var len)) return null;
+        Vector3 e = o + d * len;
+        PipeRoute best = null;
         var pts = new List<Vector3>();
         foreach (var r in RouteStore.Routes)
         {
-            if (!RouteStore.WorldPoints(r, MRUKRooms(), pts)) continue;
+            if (!RouteStore.WorldPoints(r, MRUKRooms(), pts) || pts.Count == 0) continue;
+            float tol = RayPick + RouteStyle.Diameter(r) / 2f;
             for (int i = 0; i < pts.Count; i++)
             {
-                float d = i + 1 < pts.Count ? Vector3.Distance(ClosestOnSegment(pts[i], pts[i + 1], p), p) : Vector3.Distance(pts[i], p);
-                if (d < bd) { bd = d; best = r; points = new List<Vector3>(pts); }
+                float dd = i + 1 < pts.Count ? SegSegDist(o, e, pts[i], pts[i + 1]) : SegSegDist(o, e, pts[i], pts[i]);
+                if (dd < tol && dd < dist) { dist = dd; best = r; points = new List<Vector3>(pts); }
             }
         }
         return best;
@@ -451,12 +627,12 @@ public class RouteEditTool : MonoBehaviour
         else preview.gameObject.SetActive(false);
 
 #if META_XR_SDK_INSTALLED
-        if (deleteMode && NearestRoute(hover.Value, out var pts) != null)
+        if ((deleteMode || joinMode) && NearestRoute(out var pts, out _) != null)
         {
             highlight.gameObject.SetActive(true);
             highlight.positionCount = pts.Count;
             for (int i = 0; i < pts.Count; i++) highlight.SetPosition(i, ToView(pts[i]));
-            highlight.startColor = highlight.endColor = new Color(1f, 0.2f, 0.2f, 0.9f);
+            highlight.startColor = highlight.endColor = joinMode ? new Color(0.3f, 1f, 0.4f, 0.9f) : new Color(1f, 0.2f, 0.2f, 0.9f);
             highlight.widthMultiplier = 0.03f * s;
         }
         else highlight.gameObject.SetActive(false);
@@ -540,8 +716,13 @@ public class RouteEditTool : MonoBehaviour
         float w4 = (fullW - Gap * 3) / 4f;
         var undo = XRUi.CreateButton(t, "Undo", x0, y, w4, RowH, OnUndo, 20);
         XRUi.SetTint(undo, XRUi.ButtonToggleColor);
-        deleteButton = XRUi.CreateButton(t, "Delete...", x0 + (w4 + Gap), y, w4, RowH, () => { deleteMode = !deleteMode; if (deleteMode) drawingId = null; RefreshPanel(); }, 19);
-        photosButton = XRUi.CreateButton(t, "Photos on walls", x0 + (w4 + Gap) * 2, y, w4, RowH, () => { WallOverlays.ShowPhotos = !WallOverlays.ShowPhotos; RefreshPanel(); }, 16);
+        deleteButton = XRUi.CreateButton(t, "Delete...", x0 + (w4 + Gap), y, w4, RowH, () => { deleteMode = !deleteMode; if (deleteMode) { drawingId = null; joinMode = false; } RefreshPanel(); }, 19);
+        joinButton = XRUi.CreateButton(t, "Join...", x0 + (w4 + Gap) * 2, y, w4, RowH, () =>
+        {
+            joinMode = !joinMode; joinFirstId = null;
+            if (joinMode) { Finish(); deleteMode = false; markerMode = false; }
+            RefreshPanel();
+        }, 19);
         XRUi.CreateButton(t, "Close", x0 + (w4 + Gap) * 3, y, w4, RowH, () => { if (editMode != null && editMode.IsOn) editMode.Toggle(); }, 20);
         y += RowH + 6;
         hintText = XRUi.CreateText(t, "Hint", "", 16, TextAlignmentOptions.TopLeft, x0, y, fullW, PH - y - 4, XRUi.MutedText);
@@ -568,6 +749,7 @@ public class RouteEditTool : MonoBehaviour
         titleText.text = r != null
             ? $"Drawing: {RouteStyle.Name(r.kind)} - {r.localPoints.Count} point(s)"
             : deleteMode ? "Delete: trigger on a route or a box"
+            : joinMode ? (joinFirstId == null ? "Join: trigger on the end of the first route" : "Join: now the end of the second route")
             : markerMode ? $"Boxes: {RouteStore.Current.markers.Count}   -   next: {RouteStyle.Name(kind)} {RouteStyle.MarkerTypes[markerIdx]}"
             : $"Routes: {count}   -   next: {RouteStyle.Name(kind)}";
         foreach (var kv in kindButtons)
@@ -578,7 +760,7 @@ public class RouteEditTool : MonoBehaviour
         XRUi.SetLabel(labelButton, $"Leads to: {end}");
         XRUi.SetTint(finishButton, r != null ? XRUi.ButtonOnColor : XRUi.ButtonDisabled);
         XRUi.SetTint(deleteButton, deleteMode ? XRUi.ButtonDangerColor : XRUi.ButtonToggleColor);
-        XRUi.SetTint(photosButton, WallOverlays.ShowPhotos ? XRUi.ButtonOnColor : XRUi.ButtonToggleColor);
+        XRUi.SetTint(joinButton, joinMode ? XRUi.ButtonOnColor : XRUi.ButtonToggleColor);
         XRUi.SetLabel(modeButton, markerMode ? "Placing: boxes" : "Placing: routes");
         XRUi.SetTint(modeButton, markerMode ? XRUi.ButtonOnColor : XRUi.ButtonToggleColor);
         XRUi.SetLabel(markerButton, $"Box type: {RouteStyle.MarkerTypes[markerIdx]}");
@@ -588,8 +770,9 @@ public class RouteEditTool : MonoBehaviour
         SetHint(r != null
             ? "Trigger on every bend and on the end. A point near another route joins it. Finish route (or trigger twice on the same spot) when done."
             : deleteMode ? "Point at the route or box to delete and pull the trigger. Undo brings it back."
+            : joinMode ? "Joins two routes into one - e.g. a pipe drawn in two rooms on both sides of a wall: trigger near the end of one, then near the end of the other. Undo splits them again."
             : markerMode ? "Trigger on the wall/floor where the box, socket or outlet is. Colour = the kind picked above."
-            : "Pick the kind, then trigger on the start of a pipe or cable. Pipes on the floor lie on it; chases in walls show on the face.");
+            : "Pick the kind, then trigger on the start of a pipe or cable. Pipes on the floor lie on it; chases in walls show on the face. A route that ends right behind a wall where another of the same kind ends is joined through the wall.");
     }
 
     static Color Darken(Color c) => new Color(c.r * 0.75f, c.g * 0.75f, c.b * 0.75f, 1f);
