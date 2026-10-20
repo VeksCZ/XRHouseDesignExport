@@ -19,7 +19,7 @@ public class EditModeController : MonoBehaviour
     public XRMenu uiLog;
     public MRUKExporter exporter;
 
-    const float CanvasW = 840f, CanvasH = 190f, CanvasScale = 0.0004f; // ~31 x 8 cm, in front of you, a bit low
+    const float CanvasW = 760f, CanvasH = 200f, CanvasScale = 0.0004f; // ~31 x 8 cm, in front of you, a bit low
 
     Canvas toolbar;
     TMP_Text infoText;
@@ -133,22 +133,24 @@ public class EditModeController : MonoBehaviour
         XRUi.CreateText(t, "Title", "EDIT", 26, TextAlignmentOptions.MidlineLeft, 14, 6, 90, 36, new Color(1f, 0.7f, 0.25f), FontStyles.Bold);
         infoText = XRUi.CreateText(t, "Info", "", 20, TextAlignmentOptions.MidlineRight, 100, 6, CanvasW - 114, 36, XRUi.MutedText);
 
-        const float y = 52, h = 60, g = 8;
-        float w = (CanvasW - 14 * 2 - g * 10) / 11f;
+        // Row 1: the tools, in the order of the work (house model first, then the on-site ones); row 2: undo/redo/done.
+        const float y = 50, h = 64, g = 8;
+        float w = (CanvasW - 14 * 2 - g * 7) / 8f;
         float x = 14;
-        doorsButton = XRUi.CreateButton(t, "Doors", x, y, w, h, () => SelectTool(Tool.Doors), 22); x += w + g;
-        stairsButton = XRUi.CreateButton(t, "Stairs", x, y, w, h, () => SelectTool(Tool.Stairs), 22); x += w + g;
+        doorsButton = XRUi.CreateButton(t, "Doors", x, y, w, h, () => SelectTool(Tool.Doors), 21); x += w + g;
+        stairsButton = XRUi.CreateButton(t, "Stairs", x, y, w, h, () => SelectTool(Tool.Stairs), 21); x += w + g;
         holesButton = XRUi.CreateButton(t, "Opening", x, y, w, h, () => SelectTool(Tool.Holes), 19); x += w + g;
         furnitureButton = XRUi.CreateButton(t, "Furniture", x, y, w, h, () => SelectTool(Tool.Furniture), 17); x += w + g;
-        measureButton = XRUi.CreateButton(t, "Measure", x, y, w, h, () => SelectTool(Tool.Measure), 17); x += w + g;
-        sunButton = XRUi.CreateButton(t, "Sun", x, y, w, h, () => SelectTool(Tool.Sun), 20); x += w + g;
-        photosButton = XRUi.CreateButton(t, "Photos", x, y, w, h, () => SelectTool(Tool.Photos), 19); x += w + g;
-        routesButton = XRUi.CreateButton(t, "Routes", x, y, w, h, () => SelectTool(Tool.Routes), 19); x += w + g;
-        undoButton = XRUi.CreateButton(t, "Undo", x, y, w, h, OnUndo, 22); x += w + g;
-        redoButton = XRUi.CreateButton(t, "Redo", x, y, w, h, OnRedo, 22); x += w + g;
-        XRUi.CreateButton(t, "Done", x, y, w, h, Toggle, 22);
-
-        XRUi.CreateText(t, "Hint", "Trigger = use tool  •  grip = move this bar  •  hold Y = leave", 18, TextAlignmentOptions.Center, 14, y + h + 10, CanvasW - 28, 50, XRUi.MutedText);
+        measureButton = XRUi.CreateButton(t, "Measure", x, y, w, h, () => SelectTool(Tool.Measure), 18); x += w + g;
+        sunButton = XRUi.CreateButton(t, "Sun", x, y, w, h, () => SelectTool(Tool.Sun), 21); x += w + g;
+        photosButton = XRUi.CreateButton(t, "Photos", x, y, w, h, () => SelectTool(Tool.Photos), 20); x += w + g;
+        routesButton = XRUi.CreateButton(t, "Routes", x, y, w, h, () => SelectTool(Tool.Routes), 20);
+        float y2 = y + h + g, w3 = 150;
+        undoButton = XRUi.CreateButton(t, "Undo", 14, y2, w3, h, OnUndo, 22);
+        redoButton = XRUi.CreateButton(t, "Redo", 14 + w3 + g, y2, w3, h, OnRedo, 22);
+        var done = XRUi.CreateButton(t, "Done", CanvasW - 14 - w3, y2, w3, h, Toggle, 24);
+        XRUi.SetTint(done, XRUi.ButtonOnColor);
+        XRUi.CreateText(t, "Hint", "Trigger = use tool\ngrip = move this bar  •  hold Y = leave", 17, TextAlignmentOptions.Center, 14 + 2 * (w3 + g), y2, CanvasW - 28 - 3 * w3 - 2 * g - 8, h, XRUi.MutedText);
     }
 
     Transform head;

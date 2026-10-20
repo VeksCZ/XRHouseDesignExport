@@ -505,7 +505,10 @@ public class RouteEditTool : MonoBehaviour
         panel = XRUi.CreateWorldCanvas("RoutePanel", new Vector2(PW, PH), PScale);
         var t = panel.transform;
         panelDrag = PanelDrag.Attach(panel, PW, PH);
-        PlacePanel();
+        // back where you last put it (this session), if that is still near you
+        if (savedPanel.HasValue && Vector3.Distance(savedPanel.Value.position, head.position) < 2.5f)
+        { t.SetPositionAndRotation(savedPanel.Value.position, savedPanel.Value.rotation); panelPlaced = true; }
+        else PlacePanel();
         XRUi.CreatePanel(t, "Background", XRUi.PanelColor, 0, 0, PW, PH);
 
         float x0 = 16, fullW = PW - 32, y = 8;
@@ -593,8 +596,11 @@ public class RouteEditTool : MonoBehaviour
 
     void SetHint(string s) { if (hintText) hintText.text = s; }
 
+    static Pose? savedPanel;
+
     void ClosePanel()
     {
+        if (panel && panelDrag && panelDrag.Moved) savedPanel = new Pose(panel.transform.position, panel.transform.rotation);
         if (panel) Destroy(panel.gameObject);
         panel = null;
     }

@@ -23,6 +23,8 @@ public static class XRUi
     // A toggle button's resting tint while it's OFF - distinct from a plain action button's own ButtonColor, so
     // "this button is a toggle" is visible even before it's ever been turned on (ButtonOnColor still takes over
     // once it is on).
+    /// <summary>The selected tab of a tab row.</summary>
+    public static readonly Color AccentDark = new Color(0.10f, 0.45f, 0.62f, 1f);
     public static readonly Color ButtonToggleColor = new Color(0.15f, 0.28f, 0.52f, 1f);
     public static readonly Color TextColor = new Color(0.94f, 0.95f, 0.97f, 1f);
     public static readonly Color MutedText = new Color(0.62f, 0.68f, 0.78f, 1f);

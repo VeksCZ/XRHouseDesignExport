@@ -1048,6 +1048,9 @@ public class WallPhotoCapture : MonoBehaviour
         var t = panel.transform;
         panelDrag = PanelDrag.Attach(panel, PW, PH);
         panelPlaced = false;
+        // back where you last put it (this session), if that is still near you
+        if (savedPanel.HasValue && Vector3.Distance(savedPanel.Value.position, head.position) < 2.5f)
+        { t.SetPositionAndRotation(savedPanel.Value.position, savedPanel.Value.rotation); panelPlaced = true; }
         FollowHand();
         XRUi.CreatePanel(t, "Background", XRUi.PanelColor, 0, 0, PW, PH);
 
@@ -1125,8 +1128,11 @@ public class WallPhotoCapture : MonoBehaviour
 
     void SetStatus(string s) { if (statusText) statusText.text = s; uiLog?.AddLog("Photos: " + s); }
 
+    static Pose? savedPanel;
+
     void ClosePanel()
     {
+        if (panel && panelDrag && panelDrag.Moved) savedPanel = new Pose(panel.transform.position, panel.transform.rotation);
         if (panel) Destroy(panel.gameObject);
         panel = null;
     }
