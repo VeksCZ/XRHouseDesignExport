@@ -89,6 +89,13 @@ public class WallPhotoCapture : MonoBehaviour
         }
     }
 #endif
+    // 3D-scan coverage: the surface points every dense frame saw, binned into 10 cm cells and drawn as small patches on
+    // the walls - orange = seen once, yellow = twice, green = 3+ views (what a splat needs). Shown while the 3D scan is on.
+    class CovCell { public Vector3 p, n; public int count; }
+    readonly Dictionary<Vector3Int, CovCell> coverage = new Dictionary<Vector3Int, CovCell>();
+    GameObject covGo; Mesh covMesh; bool covDirty; float covBuiltAt;
+    const float CovCellSize = 0.1f, CovPatch = 0.075f;
+
     // Pixel buffers reused between captures (5 MB each at 1280x960 - a fresh one per frame made the GC stall).
     readonly Stack<byte[]> pixelPool = new Stack<byte[]>();
     Transform head;
@@ -148,6 +155,8 @@ public class WallPhotoCapture : MonoBehaviour
         ClearOutlines();
         if (lineMat) Destroy(lineMat);
         if (fillMat) Destroy(fillMat);
+        if (covGo) Destroy(covGo);
+        if (covMesh) Destroy(covMesh);
         if (shutterClip) Destroy(shutterClip);
     }
 
@@ -157,7 +166,7 @@ public class WallPhotoCapture : MonoBehaviour
     {
         if (!Active)
         {
-            if (wasActive) { wasActive = false; started = false; StopCamera(); ClosePanel(); CloseHud(); ClearOutlines(); }
+            if (wasActive) { wasActive = false; started = false; StopCamera(); ClosePanel(); CloseHud(); ClearOutlines(); if (covGo) covGo.SetActive(false); }
             return;
         }
         wasActive = true;
@@ -179,6 +188,7 @@ public class WallPhotoCapture : MonoBehaviour
             }
         }
         PumpCapture();
+        UpdateCoverage();
 #endif
         UpdateHud();
     }
@@ -197,6 +207,9 @@ public class WallPhotoCapture : MonoBehaviour
         head = rig ? rig.centerEyeAnchor : Camera.main ? Camera.main.transform : null;
         leftHand = rig ? rig.leftHandAnchor : null;
         BuildHud();
+        // Always start in cable-photo mode: a 3D scan left on from last time would record on its own while you
+        // walk to the next room.
+        dense = false; haveDense = false;
         if (walk != null && walk.IsOn)
         {
             // Photos are taken of the real house, over passthrough - step out of the model first.
@@ -263,15 +276,10 @@ public class WallPhotoCapture : MonoBehaviour
         var denseIdx = Directory.GetFiles(denseDir, "*.json")
             .Select(f => int.TryParse(Path.GetFileNameWithoutExtension(f), out int i) ? i : 0).ToList();
         denseCount = denseIdx.Count;
-        // Per-room dense counts without parsing every (seed-laden) sidecar: just find its roomUuid.
+        var denseMetas = new List<WallPhotoMeta>();
         foreach (var f in Directory.GetFiles(denseDir, "*.json"))
         {
-            try
-            {
-                string txt = File.ReadAllText(f);
-                int i = txt.IndexOf("\"roomUuid\":\"", StringComparison.Ordinal);
-                if (i >= 0) { i += 12; int j = txt.IndexOf('"', i); if (j > i) Count(denseByRoom, txt.Substring(i, j - i)); }
-            }
+            try { var m = JsonUtility.FromJson<WallPhotoMeta>(File.ReadAllText(f)); if (m != null) { denseMetas.Add(m); Count(denseByRoom, m.roomUuid); } }
             catch { }
         }
         nextDenseIndex = denseIdx.Count == 0 ? 1 : denseIdx.Max() + 1;
@@ -281,8 +289,22 @@ public class WallPhotoCapture : MonoBehaviour
         // The house frame: the room with the smallest UUID - or the one this session already used.
         roomCacheCount = -1; // the live scan may have been (re)loaded
         var rooms = Rooms;
-        houseRoomUuid = shots.Select(x => x.houseRoomUuid).FirstOrDefault(u => !string.IsNullOrEmpty(u) && rooms.Any(r => r.Anchor.Uuid.ToString() == u))
+        houseRoomUuid = shots.Concat(denseMetas).Select(x => x.houseRoomUuid).FirstOrDefault(u => !string.IsNullOrEmpty(u) && rooms.Any(r => r.Anchor.Uuid.ToString() == u))
                         ?? rooms.Select(r => r.Anchor.Uuid.ToString()).OrderBy(u => u, StringComparer.Ordinal).FirstOrDefault();
+
+        // Coverage of the 3D frames already taken today (seed points are stored in the house frame).
+        coverage.Clear(); covDirty = true;
+        var house = HouseRoom();
+        if (house != null)
+            foreach (var m in denseMetas.Where(m => m.houseRoomUuid == houseRoomUuid))
+            {
+                Vector3 camPos = house.transform.TransformPoint(m.housePosition);
+                foreach (var sp in m.seedPoints)
+                {
+                    Vector3 p = house.transform.TransformPoint(sp);
+                    AddCoverage(p, (camPos - p).normalized);
+                }
+            }
 
         // Snapshot of exactly the scan the poses refer to (room UUIDs stay the same across re-saves of one house,
         // but this makes the folder self-contained: on the PC it is a scan source of its own).
@@ -391,8 +413,11 @@ public class WallPhotoCapture : MonoBehaviour
                 for (int x = 0; x < SeedCols; x++)
                 {
                     var uv = new Vector2((x + 0.5f) / SeedCols, (y + 0.5f) / SeedRows);
-                    if (Hit(cam.ViewportPointToRay(uv, pose), out var p, out _))
-                    { seedUv.Add(uv); seedHit.Add(houseRoom.transform.InverseTransformPoint(p)); }
+                    if (Hit(cam.ViewportPointToRay(uv, pose), out var p, out var nrm, out _))
+                    {
+                        seedUv.Add(uv); seedHit.Add(houseRoom.transform.InverseTransformPoint(p));
+                        AddCoverage(p, nrm);
+                    }
                 }
         }
 
@@ -523,16 +548,18 @@ public class WallPhotoCapture : MonoBehaviour
         return true;
     }
 
-    static bool Hit(Ray ray, out Vector3 point, out string label)
+    static bool Hit(Ray ray, out Vector3 point, out string label) => Hit(ray, out point, out _, out label);
+
+    static bool Hit(Ray ray, out Vector3 point, out Vector3 normal, out string label)
     {
-        point = Vector3.zero; label = null;
+        point = Vector3.zero; normal = Vector3.up; label = null;
         float best = float.MaxValue;
         if (MRUK.Instance == null) return false;
         foreach (var room in Rooms)
         {
             if (room.Raycast(ray, 15f, out RaycastHit hit, out MRUKAnchor anchor) && hit.distance < best)
             {
-                best = hit.distance; point = hit.point;
+                best = hit.distance; point = hit.point; normal = hit.normal;
                 label = anchor != null ? anchor.Label.ToString() : null;
             }
         }
@@ -548,6 +575,54 @@ public class WallPhotoCapture : MonoBehaviour
         currentRoomUuid = uuid;
         currentRoomName = room != null ? MRUKDataProcessor.GetRoomLabel(room) : null;
         RefreshPanel();
+    }
+
+    // ---------- 3D-scan coverage ----------
+
+    void AddCoverage(Vector3 p, Vector3 n)
+    {
+        var key = Vector3Int.FloorToInt(p / CovCellSize);
+        if (coverage.TryGetValue(key, out var c)) c.count++;
+        else coverage[key] = new CovCell { p = p, n = n, count = 1 };
+        covDirty = true;
+    }
+
+    void UpdateCoverage()
+    {
+        bool show = dense && showCoverage && coverage.Count > 0;
+        if (covGo) covGo.SetActive(show);
+        if (!show || !covDirty || Time.time - covBuiltAt < 0.3f) return;
+        covDirty = false; covBuiltAt = Time.time;
+        if (!covGo)
+        {
+            covGo = new GameObject("ScanCoverage"); // world space, no parent (see AddOutline)
+            covMesh = new Mesh { name = "ScanCoverage", indexFormat = UnityEngine.Rendering.IndexFormat.UInt32 };
+            covGo.AddComponent<MeshFilter>().sharedMesh = covMesh;
+            var mr = covGo.AddComponent<MeshRenderer>();
+            if (!fillMat) fillMat = new Material(Shader.Find("Sprites/Default")) { name = "WallPhotoFill" };
+            mr.sharedMaterial = fillMat;
+            mr.shadowCastingMode = ShadowCastingMode.Off;
+            mr.receiveShadows = false;
+        }
+        int n = coverage.Count;
+        var verts = new Vector3[n * 4]; var cols = new Color[n * 4]; var tris = new int[n * 6];
+        int i = 0;
+        foreach (var c in coverage.Values)
+        {
+            Vector3 nrm = c.n.sqrMagnitude > 1e-6f ? c.n.normalized : Vector3.up;
+            Vector3 t = Vector3.Cross(nrm, Mathf.Abs(nrm.y) > 0.9f ? Vector3.right : Vector3.up).normalized * (CovPatch * 0.5f);
+            Vector3 b = Vector3.Cross(nrm, t);
+            Vector3 o = c.p + nrm * 0.015f;
+            verts[i * 4] = o - t - b; verts[i * 4 + 1] = o + t - b; verts[i * 4 + 2] = o + t + b; verts[i * 4 + 3] = o - t + b;
+            Color col = c.count >= 3 ? new Color(0.25f, 1f, 0.45f, 0.75f) : c.count == 2 ? new Color(1f, 0.9f, 0.2f, 0.75f) : new Color(1f, 0.5f, 0.1f, 0.75f);
+            for (int k = 0; k < 4; k++) cols[i * 4 + k] = col;
+            tris[i * 6] = i * 4; tris[i * 6 + 1] = i * 4 + 1; tris[i * 6 + 2] = i * 4 + 2;
+            tris[i * 6 + 3] = i * 4; tris[i * 6 + 4] = i * 4 + 2; tris[i * 6 + 5] = i * 4 + 3;
+            i++;
+        }
+        covMesh.Clear();
+        covMesh.vertices = verts; covMesh.colors = cols; covMesh.triangles = tris;
+        covMesh.RecalculateBounds();
     }
 
     // ---------- auto shot ----------
@@ -659,7 +734,8 @@ public class WallPhotoCapture : MonoBehaviour
         if (!fillMat) fillMat = new Material(Shader.Find("Sprites/Default")) { name = "WallPhotoFill" };
 
         var fp = new Footprint { go = new GameObject("PhotoFootprint_" + s.index) };
-        fp.go.transform.SetParent(transform, false);
+        // No parent: the fill mesh is in world coordinates, and this component sits on the menu object, which isn't
+        // at the origin - parented, the fill was drawn shifted away from the walls (the outline is world-space anyway).
         var lr = fp.line = fp.go.AddComponent<LineRenderer>();
         lr.sharedMaterial = lineMat;
         lr.useWorldSpace = true;
@@ -692,7 +768,7 @@ public class WallPhotoCapture : MonoBehaviour
         if (fp.line) fp.line.startColor = fp.line.endColor = c;
         if (fp.mesh)
         {
-            var fill = new Color(c.r, c.g, c.b, 0.22f);
+            var fill = new Color(c.r, c.g, c.b, 0.45f); // over passthrough a translucent pixel also lets the camera image through, so this reads much fainter than it looks in the editor
             var cols = new Color[fp.mesh.vertexCount];
             for (int i = 0; i < cols.Length; i++) cols[i] = fill;
             fp.mesh.colors = cols;
@@ -736,6 +812,7 @@ public class WallPhotoCapture : MonoBehaviour
         panel = XRUi.CreateWorldCanvas("WallPhotoPanel", new Vector2(PW, PH), PScale);
         var t = panel.transform;
         panelDrag = PanelDrag.Attach(panel, PW, PH);
+        panelPlaced = false;
         FollowHand();
         XRUi.CreatePanel(t, "Background", XRUi.PanelColor, 0, 0, PW, PH);
 
@@ -776,15 +853,16 @@ public class WallPhotoCapture : MonoBehaviour
         RefreshPanel();
     }
 
-    /// <summary>Above the edit toolbar on the left controller, facing you - until you grip-drag it somewhere.</summary>
+    /// <summary>Just right of centre in front of you when it opens, then world-locked like the other panels; it comes
+    /// back in front of you only when you've walked away from it (and haven't grip-dragged it somewhere).</summary>
     void FollowHand()
     {
-        if (!panel || !leftHand || !head || (panelDrag && panelDrag.Moved)) return;
-        Vector3 pos = leftHand.position + Vector3.up * 0.25f;
-        Vector3 look = pos - head.position;
-        if (look.sqrMagnitude < 1e-4f) return;
-        panel.transform.SetPositionAndRotation(pos, Quaternion.LookRotation(look, Vector3.up));
+        if (!panel || !head || (panelDrag && panelDrag.Moved)) return;
+        if (panelPlaced && !XRUi.LeftBehind(panel.transform, head)) return;
+        XRUi.PlaceInFront(panel.transform, head, 0.6f, 0.12f, 0.2f);
+        panelPlaced = true;
     }
+    bool panelPlaced;
 
     void RefreshPanel()
     {
@@ -799,7 +877,7 @@ public class WallPhotoCapture : MonoBehaviour
         else roomText.text = "Outside the scanned rooms";
         if (!statusText.text.StartsWith("<color=red>"))
             statusText.text = dense
-                ? "Walk slowly round the room and look at every wall, floor and ceiling from several spots - it records by itself. Trigger = a cable photo."
+                ? "Walk slowly round the room and look at every wall, floor and ceiling from several spots - it records by itself. Patches on the walls: orange = seen once, yellow = twice, green = enough. Trigger = a cable photo."
                 : "Look at a bare wall, floor or ceiling and hold still - it clicks by itself. Trigger = photo now. Green outline = already covered.";
         XRUi.SetTint(cableButton, !dense ? XRUi.ButtonOnColor : XRUi.ButtonToggleColor);
         XRUi.SetTint(denseButton, dense ? XRUi.ButtonOnColor : XRUi.ButtonToggleColor);
@@ -870,7 +948,9 @@ public class WallPhotoCapture : MonoBehaviour
         {
             bool tooFast = headDegPerSec > DenseMaxDegPerSec || headMetersPerSec > DenseMaxMetersPerSec;
             SetHud(tooFast ? "<color=#ffb347>Slower - the images get blurry</color>"
-                           : $"<color=#ff5050>\u25CF</color> 3D scan  -  {denseCount} frames");
+                           : (currentRoomUuid != null && denseByRoom.TryGetValue(currentRoomUuid, out int inRoom)
+                               ? $"<color=#ff5050>\u25CF</color> 3D scan  -  {inRoom} frames in this room"
+                               : $"<color=#ff5050>\u25CF</color> 3D scan  -  starting..."));
             return;
         }
         switch (view)

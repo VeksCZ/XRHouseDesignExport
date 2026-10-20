@@ -34,8 +34,6 @@ public class XRMenu : MonoBehaviour
     const float CanvasWidth = 600f, CanvasHeight = 776f + 88f + 88f + HeaderH, CanvasScale = 0.0006f;
     const float MenuDistance = 0.75f;   // metres in front of the eyes
     const float MenuDrop = 0.24f;       // metres below eye level, so it doesn't cover what you look at
-    const float FollowStart = 30f;      // degrees you must turn away before the menu follows
-    const float FollowStop = 3f;        // ...and it keeps gliding until it is this close to centred
     const int VisibleLogLines = 5;
     const float FlickThreshold = 0.6f;
     const float FlickCooldown = 0.35f;
@@ -54,8 +52,7 @@ public class XRMenu : MonoBehaviour
     Button dollhouseButton, plansButton, scanOverlayButton, miniMapButton, walkButton, editButton, photosButton;
     XRRayInteractor rightRay;
     float flickCooldown;
-    float menuYaw;
-    bool menuPlaced, menuFollowing;
+    bool menuPlaced;
     // The menu is draggable by its own handle bar, like the Dollhouse/Floor plans/Minimap - once you've grabbed
     // it yourself, the head-follow behaviour above stops for good, the same way those other panels never
     // auto-reposition once placed.
@@ -204,25 +201,15 @@ public class XRMenu : MonoBehaviour
         if (cam == null || menuCanvas == null) return;
         // Once you've dragged the menu by its own handle, it stays exactly where you put it - same as the
         // Dollhouse/Floor plans/Minimap never auto-repositioning after being placed.
-        if (menuManuallyPlaced) return;
-
-        float camYaw = cam.transform.eulerAngles.y;
-        float delta = Mathf.Abs(Mathf.DeltaAngle(menuYaw, camYaw));
-        if (!menuPlaced) { menuYaw = camYaw; menuPlaced = true; }
-        else
-        {
-            if (delta > FollowStart) menuFollowing = true;
-            if (menuFollowing)
-            {
-                menuYaw = Mathf.LerpAngle(menuYaw, camYaw, 1f - Mathf.Exp(-3f * Time.deltaTime));
-                if (delta < FollowStop) menuFollowing = false;
-            }
-        }
-
-        Vector3 eye = cam.transform.position;
-        Vector3 position = eye + Quaternion.Euler(0f, menuYaw, 0f) * new Vector3(0f, -MenuDrop, MenuDistance);
-        menuCanvas.transform.SetPositionAndRotation(position, Quaternion.LookRotation(position - eye, Vector3.up));
         menuCanvas.worldCamera = cam;
+        // Placed in front of you when it opens (B), then it stays put like every other panel - it no longer turns
+        // with your head. Walk away from it and it comes back in front of you.
+        if (!menuCanvas.gameObject.activeSelf) return;
+        if (!menuPlaced || (!menuManuallyPlaced && XRUi.LeftBehind(menuCanvas.transform, cam.transform)))
+        {
+            XRUi.PlaceInFront(menuCanvas.transform, cam.transform, MenuDistance, MenuDrop);
+            menuPlaced = true;
+        }
     }
 
     /// <summary>The scene has duplicate ray interactors on both hands; keep exactly one, on the right hand, so the left hand never points at its own menu.</summary>
@@ -398,7 +385,10 @@ public class XRMenu : MonoBehaviour
     public void OnToggleMenu()
     {
         if (menuCanvas == null) return;
-        menuCanvas.gameObject.SetActive(!menuCanvas.gameObject.activeSelf);
+        bool open = !menuCanvas.gameObject.activeSelf;
+        menuCanvas.gameObject.SetActive(open);
+        // Every time it opens it appears in front of you again (also after you dragged it somewhere).
+        if (open) { menuPlaced = false; menuManuallyPlaced = false; }
     }
 
     /// <summary>Grip while pointing at the menu's own handle bar drags the whole menu, exactly like the

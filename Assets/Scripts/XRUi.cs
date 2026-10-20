@@ -45,6 +45,26 @@ public static class XRUi
         return canvas;
     }
 
+    /// <summary>
+    /// Puts a world-space panel once in front of the viewer - level (yaw only, so looking at the floor doesn't put it
+    /// on the floor), 'drop' metres below eye height, 'side' metres to the right (negative = left), facing the eyes.
+    /// Panels then stay where they are (world-locked) instead of following the head.
+    /// </summary>
+    public static void PlaceInFront(Transform t, Transform head, float dist, float drop, float side = 0f)
+    {
+        if (t == null || head == null) return;
+        Vector3 fwd = Vector3.ProjectOnPlane(head.forward, Vector3.up);
+        if (fwd.sqrMagnitude < 1e-4f) fwd = Vector3.ProjectOnPlane(head.up, Vector3.up);
+        fwd.Normalize();
+        Vector3 right = Vector3.Cross(Vector3.up, fwd);
+        Vector3 pos = head.position + fwd * dist - Vector3.up * drop + right * side;
+        t.SetPositionAndRotation(pos, Quaternion.LookRotation(pos - head.position, Vector3.up));
+    }
+
+    /// <summary>True when a placed panel has been left behind (you walked away) and should come back in front.</summary>
+    public static bool LeftBehind(Transform t, Transform head, float maxDist = 2.5f) =>
+        t != null && head != null && Vector3.Distance(t.position, head.position) > maxDist;
+
     /// <summary>Top-left anchored placement: x/y measured from the parent's top-left corner, y growing downwards.</summary>
     public static void Place(RectTransform rt, float x, float y, float width, float height)
     {

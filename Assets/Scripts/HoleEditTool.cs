@@ -282,7 +282,7 @@ public class HoleEditTool : MonoBehaviour
         if (!panelPlaced)
         {
             Vector3 fwd = Vector3.ProjectOnPlane(head.forward, Vector3.up).normalized;
-            panelPos = head.position + fwd * 0.6f - Vector3.up * 0.18f + Quaternion.Euler(0, 90, 0) * fwd * 0.25f;
+            panelPos = head.position + fwd * 0.6f - Vector3.up * 0.12f + Quaternion.Euler(0, 90, 0) * fwd * 0.14f; // just right of centre, easy to find
             panelRot = Quaternion.LookRotation(panelPos - head.position, Vector3.up);
             panelPlaced = true;
         }

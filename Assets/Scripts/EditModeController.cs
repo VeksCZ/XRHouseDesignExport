@@ -19,7 +19,7 @@ public class EditModeController : MonoBehaviour
     public XRMenu uiLog;
     public MRUKExporter exporter;
 
-    const float CanvasW = 770f, CanvasH = 190f, CanvasScale = 0.0004f; // ~31 x 8 cm above the left controller
+    const float CanvasW = 770f, CanvasH = 190f, CanvasScale = 0.0004f; // ~31 x 8 cm, in front of you, a bit low
 
     Canvas toolbar;
     TMP_Text infoText;
@@ -41,7 +41,7 @@ public class EditModeController : MonoBehaviour
     {
         IsOn = !IsOn;
         AnyOn = IsOn;
-        if (IsOn) { BuildToolbar(); toolbar.gameObject.SetActive(true); }
+        if (IsOn) { BuildToolbar(); toolbar.gameObject.SetActive(true); if (!(toolbarDrag && toolbarDrag.Moved)) FollowHand(); }
         else { CurrentTool = Tool.None; if (toolbar) toolbar.gameObject.SetActive(false); }
         RefreshInfo();
         Haptic(IsOn ? 0.6f : 0.3f);
@@ -151,20 +151,22 @@ public class EditModeController : MonoBehaviour
 
     Transform head;
 
-    /// <summary>The toolbar floats just above the left controller and always turns to face you - parenting it
-    /// to the hand made it end up edge-on or out of view depending on how the controller was held.</summary>
+    /// <summary>The toolbar appears just below your line of sight in front of you when edit mode turns on, then
+    /// stays put (world-locked, grip-drag to move). It used to ride on the left controller and turned up wherever
+    /// the hand happened to be.</summary>
     void FollowHand()
     {
-        if (!toolbar || !leftHand || !head) return;
-        Vector3 pos = leftHand.position + Vector3.up * 0.13f;
-        Vector3 look = pos - head.position;
-        if (look.sqrMagnitude < 1e-4f) return;
-        toolbar.transform.SetPositionAndRotation(pos, Quaternion.LookRotation(look, Vector3.up));
+        if (!toolbar || !head) return;
+        XRUi.PlaceInFront(toolbar.transform, head, 0.55f, 0.30f);
+        toolbarPlaced = true;
     }
+    bool toolbarPlaced;
 
     void LateUpdate()
     {
-        if (IsOn && toolbar && toolbar.gameObject.activeSelf && !(toolbarDrag && toolbarDrag.Moved)) FollowHand();
+        // Only re-placed when you've walked away from it (and haven't put it somewhere yourself).
+        if (IsOn && toolbar && toolbar.gameObject.activeSelf && !(toolbarDrag && toolbarDrag.Moved)
+            && (!toolbarPlaced || XRUi.LeftBehind(toolbar.transform, head))) FollowHand();
     }
 
     PanelDrag toolbarDrag;
