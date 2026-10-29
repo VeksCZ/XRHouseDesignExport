@@ -56,6 +56,22 @@ public class MRUKExporter : MonoBehaviour
         return ok && WorldAligned;
     }
 
+#if META_XR_SDK_INSTALLED
+    /// <summary>The newest saved scan that already holds every room of the live scan MRUK has loaded (null if none) -
+    /// edits on the live scan go there instead of into yet another copy.</summary>
+    public async Task<string> SavedScanOfLive()
+    {
+        if (MRUK.Instance == null || ActiveSource != LiveSource) return null;
+        var ids = PendingChanges.RoomIds(MRUKDataProcessor.GetValidRooms(MRUK.Instance));
+        var scans = MRUKSceneCache.ListCachedScans()
+            .Select(n => (n, MRUKSceneCache.ScanPath(n)))
+            .Where(x => File.Exists(x.Item2))
+            .OrderByDescending(x => File.GetLastWriteTime(x.Item2))
+            .ToList();
+        return await Task.Run(() => PendingChanges.ScanWithRooms(ids, scans));
+    }
+#endif
+
     public void AdoptSavedLiveScan(string savedName)
     {
         SceneVersion++;
@@ -178,6 +194,12 @@ public class MRUKExporter : MonoBehaviour
         return SelectedSource;
     }
 
+    /// <summary>Selects a saved scan by name (an explicit choice, e.g. the scan that replaces a deleted one).</summary>
+    public void Select(string name)
+    {
+        if (!string.IsNullOrEmpty(name) && Sources.Contains(name)) SelectedSource = name;
+    }
+
     /// <summary>Exports whichever source is selected.</summary>
     public async Task<bool> ExportAllRooms(XRMenu ui = null)
     {
@@ -213,7 +235,23 @@ public class MRUKExporter : MonoBehaviour
     /// Makes MRUK hold the selected source: the live device scene (needs you to be inside the space) or
     /// a cached scan, which loads without any live tracking so it works from anywhere.
     /// </summary>
+    // One load at a time: quick < > taps started overlapping loads (clear + load + align) that mixed scans and
+    // left the app looking stuck.
+    readonly System.Threading.SemaphoreSlim loadLock = new System.Threading.SemaphoreSlim(1, 1);
+
+    /// <summary>True while a scan is being (re)loaded - MRUK may briefly hold the live scene (to line a saved scan up
+    /// with the house) or nothing at all. Views never rebuild from what they see meanwhile; they follow SceneVersion.</summary>
+    public static bool Loading { get; private set; }
+
     public async Task<bool> EnsureSelectedSourceLoaded(XRMenu ui, bool forceReload = false)
+    {
+        await loadLock.WaitAsync();
+        Loading = true;
+        try { return await LoadSelectedSource(ui, forceReload); }
+        finally { Loading = false; loadLock.Release(); }
+    }
+
+    async Task<bool> LoadSelectedSource(XRMenu ui, bool forceReload)
     {
     #if META_XR_SDK_INSTALLED
         if (MRUK.Instance == null) {
@@ -227,7 +265,7 @@ public class MRUKExporter : MonoBehaviour
             AlignInfo = "";
             if (!await EnsureLiveSceneLoaded(ui)) return false;
             WorldAligned = true;
-            PendingChanges.SeenLive(PendingChanges.Signature(MRUK.Instance.Rooms));
+            PendingChanges.CheckLive(MRUK.Instance.Rooms);
         } else {
             WorldAligned = false;
             AlignInfo = "";
@@ -238,7 +276,7 @@ public class MRUKExporter : MonoBehaviour
             if (!Application.isEditor && !MRUKPathUtility.IsDesktop) {
                 SetTrackingOffset(Matrix4x4.identity);
                 await Task.Yield(); await Task.Yield();
-                if (await EnsureLiveSceneLoaded(null)) { live = SnapshotRooms(); PendingChanges.SeenLive(PendingChanges.Signature(MRUK.Instance.Rooms)); }
+                if (await EnsureLiveSceneLoaded(null)) { live = SnapshotRooms(); PendingChanges.CheckLive(MRUK.Instance.Rooms); }
             }
             ui?.AddLog($"Loading cached scan '{SelectedSource}'...");
             if (!await MRUKSceneCache.LoadCachedScene(MRUK.Instance, SelectedSource)) {
@@ -265,6 +303,8 @@ public class MRUKExporter : MonoBehaviour
     public async Task<string> SaveScanToCache(XRMenu ui = null, string name = null)
     {
     #if META_XR_SDK_INSTALLED
+        await loadLock.WaitAsync();   // never alongside a scan load
+        Loading = true;
         try {
             if (MRUK.Instance == null) {
                 ui?.AddLog("<color=red>ERROR: MRUK Instance not found in scene!</color>");
@@ -286,22 +326,24 @@ public class MRUKExporter : MonoBehaviour
             }
 
             name = string.IsNullOrEmpty(name) ? $"{DateTime.Now:yyyyMMdd_HHmm}_{rooms.Count}rooms" : name;
-            string sig = PendingChanges.Signature(MRUK.Instance.Rooms);
             string saved = MRUKSceneCache.SaveCurrentScene(MRUK.Instance, name);
             if (saved != null)
             {
-                PendingChanges.SavedLive(sig);
+                PendingChanges.LiveSaved();
                 ui?.AddLog($"<color=green>Scan cached as '{saved}' ({rooms.Count} room(s)). You can export it later from anywhere.</color>");
             }
             else
                 ui?.AddLog("<color=red>Failed to save scan to cache.</color>");
             // back to the scan you had picked - saving never switches it
-            if (SelectedSource != LiveSource) await EnsureSelectedSourceLoaded(ui, forceReload: true);
+            if (SelectedSource != LiveSource) await LoadSelectedSource(ui, true);
             return saved;
         } catch (Exception ex) {
             Debug.LogException(ex);
             ui?.AddLog("<color=red>ERROR: " + ex.Message + "</color>");
             return null;
+        } finally {
+            Loading = false;
+            loadLock.Release();
         }
     #else
         await Task.CompletedTask;
@@ -495,11 +537,11 @@ public class MRUKExporter : MonoBehaviour
         SetProgress(45, ui);
 
         ui?.AddLog("<color=cyan>[5/6] Exporting models...</color>");
-        Save(XRModelFactory.CreateAnchorAnalytical(rooms, angle, LastHouseCenter), session, MRUKPathUtility.MODEL_CLEAN_OBJ, MRUKPathUtility.MODEL_CLEAN_GLB); SetProgress(55, ui);
-        Save(XRModelFactory.CreateAnchorAnalyticalWithDimensions(rooms, angle, LastHouseCenter), session, MRUKPathUtility.MODEL_DIM_OBJ, MRUKPathUtility.MODEL_DIM_GLB); SetProgress(65, ui);
-        Save(await XRModelFactory.CreateMeshAnalytical(rooms, angle, LastHouseCenter), session, MRUKPathUtility.MODEL_MESH_ANALYTICAL_OBJ, MRUKPathUtility.MODEL_MESH_ANALYTICAL_GLB); SetProgress(75, ui);
-        Save(XRModelFactory.CreateReconstruction(rooms, angle, LastHouseCenter), session, MRUKPathUtility.MODEL_MESH_OBJ, MRUKPathUtility.MODEL_MESH_GLB); SetProgress(85, ui);
-        Save(await XRModelFactory.CreateRawScan(rooms, angle, LastHouseCenter), session, MRUKPathUtility.MODEL_RAW_OBJ, MRUKPathUtility.MODEL_RAW_GLB); SetProgress(95, ui);
+        Save(XRModelFactory.CreateAnchorAnalytical(rooms, angle, LastHouseCenter), session, MRUKPathUtility.MODEL_CLEAN_OBJ, MRUKPathUtility.MODEL_CLEAN_GLB); SetProgress(55, ui); await Task.Yield();
+        Save(XRModelFactory.CreateAnchorAnalyticalWithDimensions(rooms, angle, LastHouseCenter), session, MRUKPathUtility.MODEL_DIM_OBJ, MRUKPathUtility.MODEL_DIM_GLB); SetProgress(65, ui); await Task.Yield();
+        Save(await XRModelFactory.CreateMeshAnalytical(rooms, angle, LastHouseCenter), session, MRUKPathUtility.MODEL_MESH_ANALYTICAL_OBJ, MRUKPathUtility.MODEL_MESH_ANALYTICAL_GLB); SetProgress(75, ui); await Task.Yield();
+        Save(XRModelFactory.CreateReconstruction(rooms, angle, LastHouseCenter), session, MRUKPathUtility.MODEL_MESH_OBJ, MRUKPathUtility.MODEL_MESH_GLB); SetProgress(85, ui); await Task.Yield();
+        Save(await XRModelFactory.CreateRawScan(rooms, angle, LastHouseCenter), session, MRUKPathUtility.MODEL_RAW_OBJ, MRUKPathUtility.MODEL_RAW_GLB); SetProgress(95, ui); await Task.Yield();
 
         File.WriteAllText(Path.Combine(session, MRUKPathUtility.MODEL_MTL), OBJWriter.GenerateMTL());
 
@@ -511,6 +553,7 @@ public class MRUKExporter : MonoBehaviour
             string rPath = Path.Combine(session, rDirName);
             Directory.CreateDirectory(rPath);
             var rList = new List<MRUKRoom> { r };
+            await Task.Yield();   // a frame between rooms - the export used to freeze the headset for seconds
 
             Save(XRModelFactory.CreateAnchorAnalytical(rList, angle, LastHouseCenter), rPath, MRUKPathUtility.MODEL_CLEAN_OBJ, MRUKPathUtility.MODEL_CLEAN_GLB);
             Save(XRModelFactory.CreateAnchorAnalyticalWithDimensions(rList, angle, LastHouseCenter), rPath, MRUKPathUtility.MODEL_DIM_OBJ, MRUKPathUtility.MODEL_DIM_GLB);

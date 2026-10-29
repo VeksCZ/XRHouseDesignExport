@@ -305,13 +305,56 @@ public static class MRUKEditorTools {
         AssetDatabase.Refresh();
 
         string apk = "Builds/XRHouseExporter.apk"; Directory.CreateDirectory("Builds");
-        var report = BuildPipeline.BuildPlayer(new[] { "Assets/Scenes/MRUKExportScene.unity" }, apk, BuildTarget.Android, o);
+        bool signed = ApplyReleaseSigning();
+        UnityEditor.Build.Reporting.BuildReport report;
+        try { report = BuildPipeline.BuildPlayer(new[] { "Assets/Scenes/MRUKExportScene.unity" }, apk, BuildTarget.Android, o); }
+        finally { if (signed) ClearReleaseSigning(); }
         if (report.summary.result == UnityEditor.Build.Reporting.BuildResult.Succeeded) {
+            // what was built - Tools/UploadQuest.ps1 only uploads a release-signed non-development build
+            File.WriteAllText("Builds/XRHouseExporter.build.txt",
+                $"versionCode={PlayerSettings.Android.bundleVersionCode}\nversion={PlayerSettings.bundleVersion}\n" +
+                $"development={((o & BuildOptions.Development) != 0 ? 1 : 0)}\nreleaseSigned={(signed ? 1 : 0)}\nbuilt={DateTime.Now:s}\n");
             Debug.Log($"<color=green>BUILD COMPLETED SUCCESSFULLY</color> in {report.summary.totalTime.TotalSeconds:0} s.");
             return apk;
         }
         Debug.LogError("<color=red>BUILD FAILED!</color> Check Console for details.");
         return null;
+    }
+
+    // ---------- release signing ----------
+    // Every build (also the fast development ones) is signed with the app's own release key, so a build installed over
+    // USB and the one the Meta Horizon release channel installs are the same app and update each other - with the
+    // debug key Android would refuse the update (different signature) and only an uninstall, which wipes the app's
+    // data (saved scans, routes, photos), would help. The key and its password live outside the project:
+    // %USERPROFILE%\.xrhouse\signing.json {"keystore","alias","password"} - never in ProjectSettings or git.
+    // Losing the key means the store app can never be updated again: keep a backup of that folder.
+
+    static string SigningFile => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".xrhouse", "signing.json");
+
+    [Serializable] class SigningInfo { public string keystore, alias, password; }
+
+    static bool ApplyReleaseSigning() {
+        try {
+            if (!File.Exists(SigningFile)) { Debug.LogWarning("Release signing: " + SigningFile + " not found - signed with the debug key."); return false; }
+            var s = JsonUtility.FromJson<SigningInfo>(File.ReadAllText(SigningFile));
+            if (s == null || string.IsNullOrEmpty(s.keystore) || !File.Exists(s.keystore)) { Debug.LogWarning("Release signing: keystore missing - signed with the debug key."); return false; }
+            PlayerSettings.Android.useCustomKeystore = true;
+            PlayerSettings.Android.keystoreName = s.keystore;
+            PlayerSettings.Android.keystorePass = s.password;
+            PlayerSettings.Android.keyaliasName = s.alias;
+            PlayerSettings.Android.keyaliasPass = s.password;
+            Debug.Log("<color=cyan>Release signing: " + Path.GetFileName(s.keystore) + " / " + s.alias + "</color>");
+            return true;
+        } catch (Exception e) { Debug.LogWarning("Release signing failed: " + e.Message + " - signed with the debug key."); return false; }
+    }
+
+    // back to the default after the build, so neither the key's path nor its use ends up in ProjectSettings.asset
+    static void ClearReleaseSigning() {
+        PlayerSettings.Android.useCustomKeystore = false;
+        PlayerSettings.Android.keystoreName = "";
+        PlayerSettings.Android.keystorePass = "";
+        PlayerSettings.Android.keyaliasName = "";
+        PlayerSettings.Android.keyaliasPass = "";
     }
 
     // Android debug symbol level lives in UnityEditor.Android.UserBuildSettings.DebugSymbols, a type that only exists

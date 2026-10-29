@@ -100,6 +100,78 @@ public static class MRUKSceneCache
         return true;
     }
 
+    /// <summary>An old saved scan that a newer one fully covers.</summary>
+    public class Redundant { public string name, keptIn; }
+
+    /// <summary>Saved scans that can go: every room they have is in a newer saved scan (keptIn), and they hold nothing
+    /// of their own - no furniture spec, no edits (doors, stairs, holes), no doorway written into their JSON. On the PC
+    /// only pulled headset scans (Scan_ folders) count, never export folders. Collects paths here (main thread), reads
+    /// the files in the background.</summary>
+    public static Task<List<Redundant>> FindRedundantAsync()
+    {
+        var scans = ListCachedScans()
+            .Where(n => !FolderMode || n.StartsWith(ScanFolderPrefix))
+            .Select(n => (name: n, scene: ScanPath(n), edits: EditsPath(n), furniture: FurniturePath(n)))
+            .ToList();
+        return Task.Run(() => FindRedundant(scans));
+    }
+
+    static List<Redundant> FindRedundant(List<(string name, string scene, string edits, string furniture)> scans)
+    {
+        var info = new List<(string name, DateTime time, HashSet<string> rooms, bool own)>();
+        foreach (var s in scans)
+        {
+            try
+            {
+                var rooms = RoomIdsOf(s.scene);
+                if (rooms.Count == 0) continue;
+                bool own = File.Exists(s.furniture) || HasEdits(s.edits)
+                           || Directory.GetFiles(Path.GetDirectoryName(s.scene), Path.GetFileName(s.scene) + ".bak_doors*").Length > 0;
+                info.Add((s.name, File.GetLastWriteTimeUtc(s.scene), rooms, own));
+            }
+            catch (Exception e) { Debug.LogWarning($"[Cleanup] {s.name}: {e.Message}"); }
+        }
+        bool Newer((string name, DateTime time, HashSet<string> rooms, bool own) a, (string name, DateTime time, HashSet<string> rooms, bool own) b)
+            => a.time > b.time || (a.time == b.time && string.CompareOrdinal(a.name, b.name) > 0);
+        var gone = new HashSet<string>(info.Where(s => !s.own && info.Any(t => t.name != s.name && Newer(t, s) && s.rooms.IsSubsetOf(t.rooms))).Select(s => s.name));
+        var res = new List<Redundant>();
+        foreach (var s in info.Where(x => gone.Contains(x.name)))
+        {
+            // kept in: the newest scan that stays and has all its rooms
+            var t = info.Where(x => !gone.Contains(x.name) && s.rooms.IsSubsetOf(x.rooms)).OrderByDescending(x => x.time).FirstOrDefault();
+            if (t.name != null) res.Add(new Redundant { name = s.name, keptIn = t.name });
+        }
+        return res;
+    }
+
+    /// <summary>The room ids in a scene JSON (V1 rooms with roomLayoutMETA, V2 with roomMeshMETA), streamed - the file
+    /// holds the whole global mesh.</summary>
+    public static HashSet<string> RoomIdsOf(string path)
+    {
+        var ids = new HashSet<string>();
+        using var reader = new Newtonsoft.Json.JsonTextReader(new StreamReader(path));
+        string uuid = null; bool room = false;
+        while (reader.Read())
+        {
+            if (reader.TokenType == Newtonsoft.Json.JsonToken.StartObject && reader.Depth == 2) { uuid = null; room = false; }
+            else if (reader.TokenType == Newtonsoft.Json.JsonToken.PropertyName && reader.Depth == 3)
+            {
+                string p = (string)reader.Value;
+                if (p == "uuid") uuid = reader.ReadAsString();
+                else if (p == "roomLayoutMETA" || p == "roomMeshMETA") room = true;
+            }
+            else if (reader.TokenType == Newtonsoft.Json.JsonToken.EndObject && reader.Depth == 2 && room && uuid != null) ids.Add(uuid.ToLowerInvariant());
+        }
+        return ids;
+    }
+
+    static bool HasEdits(string path)
+    {
+        if (!File.Exists(path)) return false;
+        var e = JsonUtility.FromJson<HouseEdits>(File.ReadAllText(path));
+        return e != null && ((e.doors?.Count ?? 0) + (e.stairs?.Count ?? 0) + (e.holes?.Count ?? 0)) > 0;
+    }
+
 #if META_XR_SDK_INSTALLED
     /// <summary>
     /// Snapshots whatever MRUK currently has loaded (all rooms, anchors and the global mesh) to a

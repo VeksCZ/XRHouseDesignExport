@@ -62,8 +62,37 @@ and exports 3D models, floor plans and reports from the scan.
   `WallDrawings` writes `97_Walls_Routes.html` (plans + wall elevations with openings, niches and routes, cm from the left
   corner and the rough floor, check boxes to hide routes/dimensions): on Export, and desktop key E (scan folder).
   Desktop tests: `-routes <file>` (never the real file) `-addroutes "kind:x,y,z;...|..."` (GLB frame), `-test walls`.
+  Routes/boxes carry `spec` (material preset per kind), `circuit`, `note` and a per-item `modified` (RouteStore.Apply
+  stamps what a change touched; Merge keeps the newer copy). Tool panel: Pick... selects a route/box for Spec / Circuit
+  / Leads to; points snap onto boxes, plumb above/below boxes and to other routes' levels. Pointing at a route / box /
+  photo icon shows a label (WallOverlays.UpdateAim; a photo pops up after a short dwell). "No-drill zones" (Layers tab,
+  `WallOverlays.ShowZones`): bands of route width + 10 cm per side on the surface. Export also writes trade sheets
+  `98_Elektro.html` / `98_Voda_Odpad_Topeni.html` (material totals, route/box lists, only walls with that work, A4
+  landscape print). Desktop: `-overlays routes,zones`, `-test views -views routes` (one shot per route; give `-out`
+  as an absolute path).
+- **Old scans clean-up** (Data tab): `MRUKSceneCache.FindRedundantAsync` - a saved scan whose rooms are all in a newer
+  one and that has no furniture, edits or added doorway (`*.bak_doors`); press twice to delete. PC: only `Scan_` folders.
+  The menu's state line (under the scan row) shows lined-up / not saved / not exported.
+- **Main menu** (`XRMenu`): tabs View (walk, Dollhouse, plans, minimap, finished/rough) / Layers (routes, photos,
+  zones everywhere; fittings + scan outline real walls only, greyed when the loaded scan is of another place) / Tools
+  (every edit tool directly - `OnTool` -> `EditModeController.UseTool`; again = leave) / Data. Hold Y still opens the
+  edit toolbar (Undo/Redo).
 - **Niches** (furniture spec item `"type": "niche"`): cut into the walls by `XRModelFactory` (`Niches`, installed with the
   spec's ceilings by `Furniture.InstallCeilings`); `furnish.py` only marks them on the wall face.
+- **Scan sources**: the selected scan never changes by itself (only the menu's < >; taps are debounced, loads
+  serialized). A saved scan's edits/routes/names save themselves - "Save live scan" (Data tab) only saves the Quest's
+  live scene, orange when the live scan has a room no saved scan has (PendingChanges.CheckLive, by room ids). Edits on
+  the live scan go to the newest saved scan with the same rooms (else a new copy). On the headset a saved scan is
+  lined up with the house via shared room UUIDs (AlignToLive -> TrackingSpaceOffset).
+- **Finished vs rough model** (menu View tab toggle, `Furniture.Finished`, desktop `-finished 1|0`): spec
+  `"floor_buildup": [m per storey, bottom first]` raises floors/furniture/stairs to the finished floor and
+  `"suspended_ceilings": [{"rooms": [...], "h"}]` lowers ceilings; off (default) = the rough shell, for tracing pipes in
+  the floor and cables above the ceiling.
+- **New doorway** (Doors tool: trigger on a bare wall): `SceneJsonEdit.AddDoor` writes a DOOR_FRAME into the saved
+  scan's own JSON (V1 entity or V2 room-mesh face; JSON/Unity axis flip calibrated from the walls; backup
+  `*.bak_doors`). Desktop test `-test adddoor` (run it on a copy of a scan).
+- **Sliding furniture parts** (shower doors, spec glass `{"side":"front","sliding":true}`): parts named `@slide...`
+  move in the walk-through (WalkDoors.SetFurnitureSliders) - open when you come close or on the trigger.
 - **Logs**: headset session logs are in `persistentDataPath/Logs` (menu "Pull logs from Quest" -> `Logs/Quest`),
   never in the export folder.
 - **Build + install to a USB Quest**: call `MRUKExporter.EditorFastBuildAndInstall()` (e.g. via the Unity MCP

@@ -147,7 +147,13 @@ public class DoorEditTool : MonoBehaviour
         if (!Active) return;
         if (!frameRoot) { uiLog?.AddLog("Doors: open the Dollhouse or Walk first."); return; }
         selected = hovered;
-        if (selected == null) { ClosePanel(); return; }
+        if (selected == null)
+        {
+            // no door there: on a bare wall, offer a new doorway (one the Space Setup missed)
+            if (WallUnderRay(out var room, out var hit)) OpenAddPanel(room, hit);
+            else ClosePanel();
+            return;
+        }
         if (DoorCatalog.FindEdit(HouseEditsStore.Current, selected, rooms) == null) GuessAndOpen(selected);
         else OpenPanel();
     }
@@ -168,6 +174,96 @@ public class DoorEditTool : MonoBehaviour
         var e = DoorCatalog.NewEdit(d);
         DoorCatalog.Guess(d, e, rooms, ViewerSideRoomId(d));
         return e;
+    }
+
+    // ---------- a new doorway on a bare wall ----------
+
+    static readonly float[] NewDoorWidths = { 0.6f, 0.7f, 0.8f, 0.9f, 1.0f, 1.2f, 1.6f };
+    int newDoorWidthIdx = 2;
+    MRUKRoom newDoorRoom; Vector3 newDoorPoint; bool adding;
+    TMP_Text addTitle;
+
+    /// <summary>The wall (scan frame) under the ray: the nearest wall face of any room.</summary>
+    bool WallUnderRay(out MRUKRoom room, out Vector3 point)
+    {
+        room = null; point = default;
+        Vector3 o = WorldToScan(rightHand.position);
+        Vector3 dir = (WorldToScan(rightHand.position + rightHand.forward) - o).normalized;
+        var ray = new Ray(o, dir);
+        float best = 30f;
+        var walls = new LabelFilter(MRUKAnchor.SceneLabels.WALL_FACE | MRUKAnchor.SceneLabels.INVISIBLE_WALL_FACE);
+        foreach (var r in rooms)
+            if (r != null && r.Raycast(ray, best, walls, out RaycastHit h, out _) && h.distance < best) { best = h.distance; room = r; point = h.point; }
+        return room != null;
+    }
+
+    void OpenAddPanel(MRUKRoom room, Vector3 point)
+    {
+        ClosePanel();
+        newDoorRoom = room; newDoorPoint = point;
+        const float ph = 300f;
+        panel = XRUi.CreateWorldCanvas("NewDoorPanel", new Vector2(PW, ph), PScale);
+        var t = panel.transform;
+        if (userPlaced) t.SetPositionAndRotation(userPos, userRot);
+        else
+        {
+            Vector3 fwd = Vector3.ProjectOnPlane(head.forward, Vector3.up).normalized;
+            Vector3 pos = head.position + fwd * 0.6f - Vector3.up * 0.18f;
+            t.SetPositionAndRotation(pos, Quaternion.LookRotation(pos - head.position, Vector3.up));
+        }
+        panelDrag = PanelDrag.Attach(panel, PW, ph);
+        XRUi.CreatePanel(t, "Background", XRUi.PanelColor, 0, 0, PW, ph);
+        addTitle = XRUi.CreateText(t, "Title", "", 24, TextAlignmentOptions.MidlineLeft, 20, 8, PW - 40, 44, XRUi.TextColor, FontStyles.Bold);
+        float x0 = 20, rowH = 64, gap = 8, y = 60;
+        XRUi.CreateText(t, "WidthLbl", "Width", 20, TextAlignmentOptions.MidlineLeft, x0, y, 110, rowH, XRUi.MutedText);
+        float bw = (PW - 130 - 20 - gap * 3) / 4f;
+        XRUi.CreateButton(t, "-", 130, y, bw, rowH, () => { newDoorWidthIdx = Mathf.Max(0, newDoorWidthIdx - 1); RefreshAddPanel(); }, 30);
+        XRUi.CreateButton(t, "+", 130 + bw + gap, y, bw, rowH, () => { newDoorWidthIdx = Mathf.Min(NewDoorWidths.Length - 1, newDoorWidthIdx + 1); RefreshAddPanel(); }, 30);
+        y += rowH + gap;
+        XRUi.CreateText(t, "Hint", "A doorway the scan missed, centred where you pointed, standing on the floor (height 197 cm). It becomes part of this saved scan; then set its type like any door. Undo: the scan file is backed up (*.bak_doors).",
+            16, TextAlignmentOptions.TopLeft, x0, y, PW - 40, 80, XRUi.MutedText);
+        y += 86;
+        var add = XRUi.CreateButton(t, "Add doorway", x0, y, (PW - 40 - gap) / 2f, rowH, AddDoorway, 22);
+        XRUi.SetTint(add, XRUi.ButtonOnColor);
+        XRUi.CreateButton(t, "Cancel", x0 + (PW - 40 - gap) / 2f + gap, y, (PW - 40 - gap) / 2f, rowH, ClosePanel, 22);
+        RefreshAddPanel();
+    }
+
+    void RefreshAddPanel()
+    {
+        if (addTitle) addTitle.text = $"New doorway in {RoomLabel(newDoorRoom)}:  {NewDoorWidths[newDoorWidthIdx] * 100:0} cm";
+    }
+
+    async void AddDoorway()
+    {
+        if (adding || newDoorRoom == null) return;
+        adding = true;
+        try
+        {
+            // the doorway goes into the saved scan's own file - on the live scan that is the saved copy edits use;
+            // its file is in its own frame, so load it first and point again
+            var exporter = FindFirstObjectByType<MRUKExporter>();
+            bool wasLive = exporter != null && exporter.ActiveSource == MRUKExporter.LiveSource;
+            if (!await editMode.EnsureEditable()) return;
+            if (wasLive)
+            {
+                ClosePanel();
+                if (uiLog != null) await uiLog.ReloadAfterScanEdit();
+                frameRoot = null;
+                uiLog?.AddLog($"New doorway: now on saved scan '{HouseEditsStore.CurrentScan}' - point at the wall and pull the trigger again.");
+                return;
+            }
+            string scan = HouseEditsStore.CurrentScan;
+            float w = NewDoorWidths[newDoorWidthIdx];
+            string err = SceneJsonEdit.AddDoor(scan, newDoorRoom, newDoorPoint, w, SceneJsonEdit.DefaultDoorHeight);
+            if (err != null) { uiLog?.AddLog($"<color=red>New doorway: {err}.</color>"); return; }
+            ClosePanel();
+            uiLog?.AddLog($"<color=green>Doorway {w * 100:0} cm added to '{scan}' - reloading the scan...</color>");
+            PendingChanges.Mark("edits");
+            if (uiLog != null) await uiLog.ReloadAfterScanEdit();
+            frameRoot = null;   // the rooms were reloaded: rebuild the door list
+        }
+        finally { adding = false; }
     }
 
     // ---------- drawing ----------

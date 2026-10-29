@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 using TMPro;
@@ -31,7 +32,8 @@ public class XRMenu : MonoBehaviour
 
     // Canvas units; the canvas is scaled to CanvasScale metres per unit (600 units -> 36 cm at 0.75 m from the eyes).
     const float HeaderH = 40f;          // the draggable handle strip at the very top
-    const float CanvasWidth = 600f, CanvasHeight = 766f + HeaderH, CanvasScale = 0.0006f;
+    const float CanvasWidth = 600f, CanvasHeight = 766f + StateH + HeaderH, CanvasScale = 0.0006f;
+    const float StateH = 30f;           // the one-line state under the scan row
     const float MenuDistance = 0.75f;   // metres in front of the eyes
     const float MenuDrop = 0.24f;       // metres below eye level, so it doesn't cover what you look at
     const int VisibleLogLines = 5;
@@ -49,7 +51,7 @@ public class XRMenu : MonoBehaviour
     // site - a toggle can also turn itself off from elsewhere (the floor plan panel's own Close button, or a
     // scan-source change invalidating the scan overlay/minimap), and a per-frame sync can never go stale the
     // way scattered manual updates did.
-    Button dollhouseButton, plansButton, scanOverlayButton, saveButton, exportButton, miniMapButton, walkButton, editButton, photosButton, routesButton, showRoutesButton, showPhotosButton, fittingsButton;
+    Button dollhouseButton, plansButton, scanOverlayButton, saveButton, exportButton, finishedButton, modeButton, miniMapButton, walkButton, photosButton, routesButton, showRoutesButton, showPhotosButton, fittingsButton;
     XRRayInteractor rightRay;
     float flickCooldown;
     bool menuPlaced;
@@ -146,14 +148,18 @@ public class XRMenu : MonoBehaviour
         scanLabelButton = XRUi.CreateButton(root, MRUKExporter.LiveSource, left + 90, top, 372, h, OnLoadSource, 28);
         XRUi.CreateButton(root, ">", left + 472, top, 80, h, () => OnCycleSource(1), 40);
 
-        // Three tabs by what you are doing: looking at the model, documenting the real house, managing data.
-        float tabY = top + h + gap, tabH = 60, tabW = (552f - 2 * gap) / 3f;
-        string[] tabNames = { "Model", "On site", "Data" };
-        tabPages = new GameObject[3]; tabButtons = new Button[3];
-        for (int i = 0; i < 3; i++)
+        // One line, always visible: is this scan lined up with the place you stand in, and is anything not exported.
+        stateText = XRUi.CreateText(root, "State", "", 19, TextAlignmentOptions.MidlineLeft, left + 4, top + h + 4, 548, StateH - 2, XRUi.MutedText);
+        stateText.richText = true;
+
+        // Four tabs by what you are doing: look at the model, choose what is drawn on the walls, work with a tool, data.
+        float tabY = top + h + gap + StateH, tabH = 60, tabW = (552f - 3 * gap) / 4f;
+        string[] tabNames = { "View", "Layers", "Tools", "Data" };
+        tabPages = new GameObject[tabNames.Length]; tabButtons = new Button[tabNames.Length];
+        for (int i = 0; i < tabNames.Length; i++)
         {
             int k = i;
-            tabButtons[i] = XRUi.CreateButton(root, tabNames[i], left + i * (tabW + gap), tabY, tabW, tabH, () => ShowTab(k), 26);
+            tabButtons[i] = XRUi.CreateButton(root, tabNames[i], left + i * (tabW + gap), tabY, tabW, tabH, () => ShowTab(k), 25);
             var page = new GameObject("Tab_" + tabNames[i], typeof(RectTransform));
             page.layer = root.gameObject.layer;
             page.transform.SetParent(root, false);
@@ -162,46 +168,74 @@ public class XRMenu : MonoBehaviour
         }
         float y0 = tabY + tabH + gap;
         float Row(int r) => y0 + r * (h + gap);
-        Transform model = tabPages[0].transform, site = tabPages[1].transform, data = tabPages[2].transform;
+        Transform view = tabPages[0].transform, layers = tabPages[1].transform, tools = tabPages[2].transform, data = tabPages[3].transform;
 
-        // Model: walk through / look at the house and edit it. Toggles left (tinted), their options right.
-        walkButton = XRUi.CreateButton(model, "Walk", left, Row(0), w, h, OnToggleWalk);
-        XRUi.CreateButton(model, "Next floor", right, Row(0), w, h, OnNextFloor);
-        dollhouseButton = XRUi.CreateButton(model, "Dollhouse", left, Row(1), w, h, OnToggleHouseView);
-        XRUi.CreateButton(model, "Mode", right, Row(1), w, h, OnCycleDollhouseMode, 22);
-        plansButton = XRUi.CreateButton(model, "Floor plans", left, Row(2), w, h, OnShowPlans);
-        miniMapButton = XRUi.CreateButton(model, "Minimap", right, Row(2), w, h, OnToggleMiniMap);
-        editButton = XRUi.CreateButton(model, "Edit  -  doors, stairs, openings, furniture...", left, Row(3), right + w - left, h, () => editMode?.Toggle(), 24);
+        // View: the house as a model. Left/right pairs; every on/off button is tinted while on.
+        walkButton = XRUi.CreateButton(view, "Walk", left, Row(0), w, h, OnToggleWalk);
+        dollhouseButton = XRUi.CreateButton(view, "Dollhouse", right, Row(0), w, h, OnToggleHouseView);
+        plansButton = XRUi.CreateButton(view, "Floor plans", left, Row(1), w, h, OnShowPlans);
+        miniMapButton = XRUi.CreateButton(view, "Minimap", right, Row(1), w, h, OnToggleMiniMap);
+        XRUi.CreateButton(view, "Next floor", left, Row(2), w, h, OnNextFloor);
+        modeButton = XRUi.CreateButton(view, "", right, Row(2), w, h, OnCycleDollhouseMode, 22);
+        finishedButton = XRUi.CreateButton(view, "", left, Row(3), 552, h, OnToggleFinished, 24);
 
-        // On site: over passthrough in the real house - photograph, trace, and what to show on the real walls.
-        photosButton = XRUi.CreateButton(site, "Wall photos", left, Row(0), w, h, OnWallPhotos);
-        routesButton = XRUi.CreateButton(site, "Trace routes", right, Row(0), w, h, OnTraceRoutes);
-        showRoutesButton = XRUi.CreateButton(site, "Show routes", left, Row(1), w, h, () => WallOverlays.ShowRoutes = !WallOverlays.ShowRoutes);
-        showPhotosButton = XRUi.CreateButton(site, "Photos on walls", right, Row(1), w, h, () => WallOverlays.ShowPhotos = !WallOverlays.ShowPhotos);
-        fittingsButton = XRUi.CreateButton(site, "Fittings + niches", left, Row(2), w, h, OnToggleFittings, 26);
-        scanOverlayButton = XRUi.CreateButton(site, "Scan overlay", right, Row(2), w, h, OnToggleScanOverlay);
-        XRUi.CreateText(site, "Hint", "X = routes / photos on walls on-off  -  hold Y = edit mode", 19, TextAlignmentOptions.Center, left, Row(3) + 10, 552, 50, XRUi.MutedText);
+        // Layers: what is drawn onto the walls. Routes, photos and zones show wherever the house is - the real walls (when
+        // this scan is of the place you stand in), the walk-through and the Dollhouse; the last two need the real walls.
+        layersText = XRUi.CreateText(layers, "Where", "", 18, TextAlignmentOptions.TopLeft, left, y0 - 2, 552, 58, XRUi.MutedText);
+        layersText.richText = true;
+        float L(int r) => y0 + 60 + r * (h + gap);
+        showRoutesButton = XRUi.CreateButton(layers, "Routes", left, L(0), w, h, () => WallOverlays.ShowRoutes = !WallOverlays.ShowRoutes);
+        showPhotosButton = XRUi.CreateButton(layers, "Photos", right, L(0), w, h, () => WallOverlays.ShowPhotos = !WallOverlays.ShowPhotos);
+        zonesButton = XRUi.CreateButton(layers, "No-drill zones", left, L(1), w, h, () =>
+        {
+            WallOverlays.ShowZones = !WallOverlays.ShowZones;
+            if (WallOverlays.ShowZones && !WallOverlays.ShowRoutes) WallOverlays.ShowRoutes = true;
+            AddLog(WallOverlays.ShowZones ? $"No-drill zones: {WallOverlays.ZoneMargin * 100:0} cm either side of every route and box." : "No-drill zones off.");
+        });
+        fittingsButton = XRUi.CreateButton(layers, "Fittings + niches\n<size=70%>real walls only</size>", right, L(1), w, h, OnToggleFittings, 24);
+        scanOverlayButton = XRUi.CreateButton(layers, "Scan outline\n<size=70%>real walls only</size>", left, L(2), w, h, OnToggleScanOverlay, 24);
+        siteText = XRUi.CreateText(layers, "Hint", "", 17, TextAlignmentOptions.MidlineLeft, right + 6, L(2), w - 6, h, XRUi.MutedText);
+
+        // Tools: each one straight away (edit mode comes on with it; its bar has Undo/Redo). Again = leave the tool.
+        toolButtons.Clear();
+        void ToolButton(EditModeController.Tool t, string label, float x, float y)
+        {
+            var btn = XRUi.CreateButton(tools, label, x, y, w, h, () => OnTool(t), 24);
+            toolButtons[t] = btn;
+        }
+        ToolButton(EditModeController.Tool.Routes, "Trace routes", left, Row(0));
+        ToolButton(EditModeController.Tool.Photos, "Wall photos", right, Row(0));
+        ToolButton(EditModeController.Tool.Doors, "Doors + windows", left, Row(1));
+        ToolButton(EditModeController.Tool.Stairs, "Stairs", right, Row(1));
+        ToolButton(EditModeController.Tool.Holes, "Floor opening", left, Row(2));
+        ToolButton(EditModeController.Tool.Furniture, "Move furniture", right, Row(2));
+        ToolButton(EditModeController.Tool.Measure, "Measure", left, Row(3));
+        ToolButton(EditModeController.Tool.Sun, "Sun", right, Row(3));
+        routesButton = toolButtons[EditModeController.Tool.Routes];
+        photosButton = toolButtons[EditModeController.Tool.Photos];
 
         // Data: save / export; the destructive ones apart at the bottom of the tab.
-        saveButton = XRUi.CreateButton(data, "Save scan", left, Row(0), w, h, OnSaveScan);
+        saveButton = XRUi.CreateButton(data, "Save live scan", left, Row(0), w, h, OnSaveScan);
         exportButton = XRUi.CreateButton(data, "Export", right, Row(0), w, h, OnExportAll);
-        pendingText = XRUi.CreateText(data, "PendingHint", "", 19, TextAlignmentOptions.Center, left, Row(1) + 10, 552, 50, XRUi.MutedText);
+        pendingText = XRUi.CreateText(data, "PendingHint", "", 19, TextAlignmentOptions.Top, left, Row(1) + 6, 552, h, XRUi.MutedText);
+        cleanupButton = XRUi.CreateButton(data, "Clean up old scans...", left, Row(2), 552, h, OnCleanupScans, 24);
         var deleteScanButton = XRUi.CreateButton(data, "Delete scan", left, Row(3), w, h, OnDeleteScan);
         XRUi.SetTint(deleteScanButton, XRUi.ButtonDangerColor);
         var deleteExportsButton = XRUi.CreateButton(data, "Delete exports", right, Row(3), w, h, OnDeleteExports);
         XRUi.SetTint(deleteExportsButton, XRUi.ButtonDangerColor);
 
-        foreach (var b in new[] { walkButton, dollhouseButton, plansButton, miniMapButton, editButton, photosButton, routesButton, showRoutesButton, showPhotosButton, fittingsButton, scanOverlayButton })
+        foreach (var b in new[] { walkButton, dollhouseButton, plansButton, miniMapButton, showRoutesButton, showPhotosButton, fittingsButton, scanOverlayButton, zonesButton })
             XRUi.SetTint(b, XRUi.ButtonToggleColor);
+        foreach (var b in toolButtons.Values) XRUi.SetTint(b, XRUi.ButtonToggleColor);
 
         float logTop = Row(4) + 2;
         logText = XRUi.CreateText(root, "Log", "", 22, TextAlignmentOptions.TopLeft, 24, logTop, 552, CanvasHeight - logTop - 10, XRUi.MutedText);
         logText.overflowMode = TextOverflowModes.Truncate;
 
-        ShowTab(Mathf.Clamp(PlayerPrefs.GetInt(TabPref, 0), 0, 2));
+        ShowTab(Mathf.Clamp(PlayerPrefs.GetInt(TabPref, 0), 0, tabPages.Length - 1));
     }
 
-    const string TabPref = "Menu.Tab";
+    const string TabPref = "Menu.Tab4"; // 4 tabs now - the old index meant something else
     GameObject[] tabPages;
     Button[] tabButtons;
     int currentTab;
@@ -323,6 +357,10 @@ public class XRMenu : MonoBehaviour
         // own separate, draggable object (like the Dollhouse), so the menu stays up and usable alongside it.
         bool plansOpen = plansPanel != null && plansPanel.IsOpen;
         SyncToggleTints(plansOpen);
+        SyncLabels();
+        WatchScene();
+        TrackUiUnderRay();
+        ReturnMenuAfterTool();
 
         // Right trigger clicks whatever button the ray points at. The XR UI module only handles hover here
         // (the scene never enables the Input System actions that would deliver "press"), and the rest of the
@@ -393,36 +431,102 @@ public class XRMenu : MonoBehaviour
     {
         if (plansButton != null) XRUi.SetTint(plansButton, plansOpen ? XRUi.ButtonOnColor : XRUi.ButtonToggleColor);
         if (dollhouseButton != null) XRUi.SetTint(dollhouseButton, dollhouse != null && dollhouse.IsOn ? XRUi.ButtonOnColor : XRUi.ButtonToggleColor);
-        if (scanOverlayButton != null) XRUi.SetTint(scanOverlayButton, scanOverlay != null && scanOverlay.IsOn ? XRUi.ButtonOnColor : XRUi.ButtonToggleColor);
+        // the real-wall-only layers are greyed out while the loaded scan is of another place
+        bool here = exporter != null && exporter.WorldAligned && !MRUKExporter.Loading;
+        if (scanOverlayButton != null) XRUi.SetTint(scanOverlayButton, scanOverlay != null && scanOverlay.IsOn ? XRUi.ButtonOnColor : here ? XRUi.ButtonToggleColor : XRUi.ButtonDisabled);
         SyncPending();
         if (miniMapButton != null) XRUi.SetTint(miniMapButton, miniMap != null && miniMap.IsOn ? XRUi.ButtonOnColor : XRUi.ButtonToggleColor);
         if (walkButton != null) XRUi.SetTint(walkButton, walk != null && walk.IsOn ? XRUi.ButtonOnColor : XRUi.ButtonToggleColor);
-        if (editButton != null) XRUi.SetTint(editButton, editMode != null && editMode.IsOn ? XRUi.ButtonOnColor : XRUi.ButtonToggleColor);
-        if (photosButton != null) XRUi.SetTint(photosButton, PhotosOn ? XRUi.ButtonOnColor : XRUi.ButtonToggleColor);
-        if (routesButton != null) XRUi.SetTint(routesButton, RoutesOn ? XRUi.ButtonOnColor : XRUi.ButtonToggleColor);
+        foreach (var kv in toolButtons)
+            XRUi.SetTint(kv.Value, editMode != null && editMode.IsOn && editMode.CurrentTool == kv.Key ? XRUi.ButtonOnColor : XRUi.ButtonToggleColor);
         if (showRoutesButton != null) XRUi.SetTint(showRoutesButton, WallOverlays.ShowRoutes ? XRUi.ButtonOnColor : XRUi.ButtonToggleColor);
         if (showPhotosButton != null) XRUi.SetTint(showPhotosButton, WallOverlays.ShowPhotos ? XRUi.ButtonOnColor : XRUi.ButtonToggleColor);
-        if (fittingsButton != null) XRUi.SetTint(fittingsButton, WallOverlays.ShowFittings ? XRUi.ButtonOnColor : XRUi.ButtonToggleColor);
+        if (fittingsButton != null) XRUi.SetTint(fittingsButton, WallOverlays.ShowFittings ? XRUi.ButtonOnColor : here ? XRUi.ButtonToggleColor : XRUi.ButtonDisabled);
+        if (zonesButton != null) XRUi.SetTint(zonesButton, WallOverlays.ShowZones ? XRUi.ButtonOnColor : XRUi.ButtonToggleColor);
+        if (finishedButton != null)
+        {
+            bool f = Furniture.Finished;
+            XRUi.SetTint(finishedButton, f ? XRUi.ButtonOnColor : XRUi.ButtonToggleColor);
+            if (finishedShown != f) { finishedShown = f; XRUi.SetLabel(finishedButton, f ? "Finished floors + ceilings" : "Rough shell (as scanned)"); }
+        }
+    }
+
+    bool? finishedShown;
+    string modeShown, siteShown, stateShown;
+    TMP_Text siteText, stateText, layersText;
+    string layersShown;
+    readonly Dictionary<EditModeController.Tool, Button> toolButtons = new Dictionary<EditModeController.Tool, Button>();
+    Button zonesButton, cleanupButton;
+
+    /// <summary>Labels that show state: the Dollhouse mode, and where the Layers tab draws (real walls or only the models).</summary>
+    void SyncLabels()
+    {
+        if (modeButton != null && dollhouse != null)
+        {
+            string m = "Dollhouse: " + dollhouse.ModeLabel;
+            if (m != modeShown) { modeShown = m; XRUi.SetLabel(modeButton, m); }
+        }
+        if (siteText != null)
+        {
+            const string t = "Point at a route, box or photo to see what it is. Left X = routes / photos.";
+            if (t != siteShown) { siteShown = t; siteText.text = t; }
+        }
+        if (layersText != null && exporter != null)
+        {
+            string t = MRUKExporter.Loading ? "Loading the scan..."
+                : exporter.WorldAligned
+                    ? "<color=#7fe07f>On the real walls here</color>, in Walk and in the Dollhouse."
+                    : "<color=#ffa040>This scan is of another place</color> - layers show in Walk and the Dollhouse only. Real-wall layers need the scan of the place you stand in (pick it with < >).";
+            if (t != layersShown) { layersShown = t; layersText.text = t; }
+        }
+        if (stateText != null && exporter != null)
+        {
+            bool live = exporter.SelectedSource == MRUKExporter.LiveSource;
+            string place = MRUKExporter.Loading ? "loading..."
+                : exporter.ActiveSource != exporter.SelectedSource ? "<color=#ffa040>not loaded yet</color>"
+                : exporter.WorldAligned ? "<color=#7fe07f>lined up here</color>"
+                : "<color=#ffa040>another place (not on these walls)</color>";
+            string save = live && PendingChanges.LiveUnsaved ? "  |  <color=#ffa040>live scan not saved</color>" : "";
+            string exp = PendingChanges.ExportPending ? $"  |  <color=#ffa040>not exported: {PendingChanges.ExportWhat}</color>" : "  |  exported";
+            string t = (live ? "Live scan: " : "Saved scan: ") + place + save + exp;
+            if (t != stateShown) { stateShown = t; stateText.text = t; }
+        }
+    }
+
+    /// <summary>Finished floors (build-up) + suspended ceilings on/off - off is the rough shell, for tracing pipes in the
+    /// floor and cables above the ceiling. Rebuilds whatever shows the model.</summary>
+    async void OnToggleFinished()
+    {
+        Furniture.Finished = !Furniture.Finished;
+        AddLog(Furniture.Finished ? "Model: finished floors + suspended ceilings" : "Model: rough shell as scanned (pipes in the floor, cables above the ceiling)");
+        await RefreshViews();
     }
 
     TMP_Text pendingText;
     float pendingAt;
-    bool lastSave, lastExport; string lastWhat;
-    /// <summary>Save scan / Export (and the Data tab) turn orange while something isn't saved / exported yet.</summary>
+    string lastPendingKey;
+    /// <summary>The Data tab: "Save live scan" only means something on the live scan (orange when it has a room no
+    /// saved scan has); a saved scan saves its edits by itself. Export turns orange after any change since the last
+    /// export. The tab shows (!) while either is waiting.</summary>
     void SyncPending()
     {
         if (saveButton == null || Time.unscaledTime < pendingAt) return;
         pendingAt = Time.unscaledTime + 0.5f;
-        bool save = PendingChanges.SavePending, export = PendingChanges.ExportPending;
+        bool live = exporter == null || exporter.SelectedSource == MRUKExporter.LiveSource;
+        bool save = live && PendingChanges.LiveUnsaved, export = PendingChanges.ExportPending;
         string what = PendingChanges.ExportWhat;
-        if (save == lastSave && export == lastExport && what == lastWhat) return;
-        lastSave = save; lastExport = export; lastWhat = what;
-        XRUi.SetTint(saveButton, save ? XRUi.ButtonWarnColor : XRUi.ButtonColor);
-        XRUi.SetLabel(saveButton, save ? "Save scan  (new scan!)" : "Save scan");
+        string key = $"{live}|{save}|{export}|{what}";
+        if (key == lastPendingKey) return;
+        lastPendingKey = key;
+        XRUi.SetTint(saveButton, save ? XRUi.ButtonWarnColor : live ? XRUi.ButtonColor : XRUi.ButtonDisabled);
+        XRUi.SetLabel(saveButton, live ? (save ? "Save live scan  (new!)" : "Save live scan") : "Saved automatically");
         XRUi.SetTint(exportButton, export ? XRUi.ButtonWarnColor : XRUi.ButtonColor);
         XRUi.SetLabel(exportButton, export ? "Export  (changed)" : "Export");
-        pendingText.text = (save ? "A new scan in Quest - Save scan keeps it.  " : "") + (export ? $"Not exported yet: {what}." : save ? "" : "Everything saved and exported.");
-        if (tabButtons != null) XRUi.SetLabel(tabButtons[2], save || export ? "Data  <color=#ffa040>(!)</color>" : "Data");
+        string s1 = live
+            ? (save ? "Quest has rooms no saved scan has - Save live scan keeps them. " : "The live scan is saved. ")
+            : "Edits, routes and names of this scan save by themselves. ";
+        pendingText.text = s1 + (export ? $"Not exported yet: {what}." : "Exported.");
+        if (tabButtons != null) XRUi.SetLabel(tabButtons[3], save || export ? "Data <color=#ffa040>(!)</color>" : "Data");
     }
 
     /// <summary>Fittings + niches over passthrough: needs the live scan (loads it if a saved one is active).</summary>
@@ -447,13 +551,37 @@ public class XRMenu : MonoBehaviour
 
     bool RoutesOn => editMode != null && editMode.IsOn && editMode.CurrentTool == EditModeController.Tool.Routes;
 
+    // Wall photos / Trace routes from the menu hide the menu (a clear view); when that tool is left - its Done, the
+    // edit toolbar, the menu button again - the menu comes back, so nothing is ever left with no menu at all.
+    bool menuHiddenForTool;
+    void HideMenuForTool()
+    {
+        if (menuCanvas != null && menuCanvas.gameObject.activeSelf) { OnToggleMenu(); menuHiddenForTool = true; }
+    }
+    void ReturnMenuAfterTool()
+    {
+        if (!menuHiddenForTool || RoutesOn || PhotosOn) return;
+        menuHiddenForTool = false;
+        if (menuCanvas != null && !menuCanvas.gameObject.activeSelf) OnToggleMenu();
+    }
+
     /// <summary>Main-menu shortcut to tracing routes (edit mode + Routes tool); hides the menu. Again = leave.</summary>
     public void OnTraceRoutes()
     {
         if (editMode == null) return;
         if (RoutesOn) { editMode.Toggle(); return; }
         editMode.UseTool(EditModeController.Tool.Routes);
-        if (menuCanvas != null && menuCanvas.gameObject.activeSelf) OnToggleMenu();
+        HideMenuForTool();
+    }
+
+    /// <summary>Tools tab: the tool on (edit mode comes on with it), pressed again off. Routes and wall photos hide the
+    /// menu for a clear view (it comes back when the tool is left).</summary>
+    void OnTool(EditModeController.Tool t)
+    {
+        if (editMode == null) return;
+        if (editMode.IsOn && editMode.CurrentTool == t) { editMode.LeaveTool(); return; }
+        editMode.UseTool(t);
+        if (t == EditModeController.Tool.Routes || t == EditModeController.Tool.Photos) HideMenuForTool();
     }
 
     bool PhotosOn => editMode != null && editMode.IsOn && editMode.CurrentTool == EditModeController.Tool.Photos;
@@ -465,7 +593,7 @@ public class XRMenu : MonoBehaviour
         if (editMode == null) return;
         if (PhotosOn) { editMode.Toggle(); return; }
         editMode.UseTool(EditModeController.Tool.Photos);
-        if (menuCanvas != null && menuCanvas.gameObject.activeSelf) OnToggleMenu();
+        HideMenuForTool();
     }
 
     /// <summary>Opens/closes the whole wrist menu (bound to B - see the comment where it's read).</summary>
@@ -518,8 +646,23 @@ public class XRMenu : MonoBehaviour
     {
         if (rightRay == null || !rightRay.TryGetCurrentUIRaycastResult(out RaycastResult hit) || hit.gameObject == null) return false;
         var button = hit.gameObject.GetComponentInParent<Button>();
+        var canvas = hit.gameObject.GetComponentInParent<Canvas>();
+        // every click in the log: "the button didn't work" can then be told apart from "the ray wasn't on it"
+        string label = button != null ? (button.GetComponentInChildren<TMP_Text>()?.text ?? button.name) : hit.gameObject.name;
+        Debug.Log($"[UI] click '{label}' on {(canvas ? canvas.name : "?")}{(button == null ? " (not a button)" : !button.IsInteractable() ? " (disabled)" : "")}");
         if (button != null && button.IsInteractable()) button.onClick.Invoke();
         return true;
+    }
+
+    static GameObject uiUnderRay;
+    /// <summary>True while the right ray is on UI under t (a panel must not move away from under it).</summary>
+    public static bool PointingAt(Transform t) => uiUnderRay != null && t != null && uiUnderRay.transform.IsChildOf(t);
+    /// <summary>True while the right ray is on any panel/button.</summary>
+    public static bool PointingAtAnyUI => uiUnderRay != null;
+
+    void TrackUiUnderRay()
+    {
+        uiUnderRay = rightRay != null && rightRay.TryGetCurrentUIRaycastResult(out RaycastResult hit) ? hit.gameObject : null;
     }
 
     void OnNextFloor()
@@ -600,6 +743,10 @@ public class XRMenu : MonoBehaviour
         return false;
     }
 
+    int cycleVersion;
+
+    /// <summary>&lt; / &gt;: picks the previous/next scan and loads it (quick taps step through the list, only the scan
+    /// you stop on is loaded). What is selected is always what is loaded - every view follows it (WatchScene).</summary>
     async void OnCycleSource(int direction)
     {
         if (!RequireExporter()) return;
@@ -607,37 +754,84 @@ public class XRMenu : MonoBehaviour
         if (walk != null && walk.IsOn) OnToggleWalk();
         exporter.CycleSource(direction, this);
         RefreshScanLabel();
-
-        bool dollhouseOn = dollhouse != null && dollhouse.IsOn;
-        bool overlayOn = scanOverlay != null && scanOverlay.IsOn;
-        bool miniMapOn = miniMap != null && miniMap.IsOn;
-        if (!dollhouseOn && !overlayOn && !miniMapOn) return;
-
+        int my = ++cycleVersion;
+        await Task.Delay(700);
+        if (my != cycleVersion) return;
         await Busy("Loading...");
         bool loaded = await exporter.EnsureSelectedSourceLoaded(this, forceReload: true) && exporter.HasValidRooms();
+        SetStatus(loaded ? "Ready" : "No rooms");
+    }
 
-        // The dollhouse keeps showing its previous view if the new scan has no rooms, rather than vanish -
-        // RebuildInPlace() keeps it exactly where it was.
-        if (dollhouseOn)
+    // ---------- every view follows the loaded scan ----------
+
+    int seenSceneVersion = -1;
+    bool refreshing, refreshAgain;
+
+    /// <summary>Whenever a scan load finishes (MRUKExporter.SceneVersion) - switching scans, a tool lining a scan up,
+    /// saving, a doorway added - everything showing the model is rebuilt from it: walk-through, Dollhouse, scan
+    /// overlay, minimap (WallOverlays does the same by itself). Nothing is rebuilt halfway through a load.</summary>
+    void WatchScene()
+    {
+        if (exporter == null || MRUKExporter.Loading) return;
+        int v = MRUKExporter.SceneVersion;
+        if (v == seenSceneVersion) return;
+        bool first = seenSceneVersion < 0;
+        seenSceneVersion = v;
+        if (!first) _ = RefreshViews();
+    }
+
+    async Task RefreshViews()
+    {
+        if (refreshing) { refreshAgain = true; return; }
+        refreshing = true;
+        try
         {
-            if (loaded) { dollhouse.RebuildInPlace(); SetStatus($"Dollhouse: {dollhouse.ModeLabel}"); }
-            else AddLog("<color=red>No rooms in this scan - dollhouse left showing the previous one.</color>");
+            do
+            {
+                refreshAgain = false;
+                bool loaded = exporter != null && exporter.HasValidRooms();
+                if (walk != null && walk.IsOn)
+                {
+                    // back where you stood, in the rebuilt model
+                    bool here = walk.TryGetFeetScan(out var feet, out _);
+                    walk.Exit();
+                    if (loaded && await walk.Enter(null, null))
+                    {
+                        dollhouse?.SetHidden(true);
+                        if (here) walk.TeleportToScanPoint(feet, feet.y);
+                    }
+                    else dollhouse?.SetHidden(false);
+                }
+                if (dollhouse != null && dollhouse.IsOn)
+                {
+                    if (loaded) dollhouse.RebuildInPlace();
+                    else AddLog("<color=orange>No rooms in this scan - the Dollhouse keeps the previous one.</color>");
+                }
+                if (scanOverlay != null && scanOverlay.IsOn)
+                {
+                    if (loaded) scanOverlay.RebuildInPlace(); else scanOverlay.ForceOff();
+                    if (!scanOverlay.IsOn) AddLog("<color=orange>Scan overlay turned off - no rooms in this scan.</color>");
+                    else if (exporter != null && !exporter.WorldAligned) AddLog($"<color=orange>Scan overlay: '{exporter.SelectedSource}' isn't lined up with this place.</color>");
+                }
+                if (miniMap != null && miniMap.IsOn)
+                {
+                    if (loaded) miniMap.RebuildInPlace(); else miniMap.ForceOff();
+                }
+            } while (refreshAgain);
         }
-        // The scan overlay and minimap have no equivalent fallback - their content is tied to the anchors of
-        // whatever was loaded before, which are gone once the scan underneath them changes. They either rebuild
-        // against the new scan or turn themselves off (ForceOff), instead of what used to happen: silently
-        // going stale on screen (or invisible) while still reporting themselves as "on" forever after.
-        if (overlayOn)
-        {
-            if (loaded) scanOverlay.RebuildInPlace(); else scanOverlay.ForceOff();
-            if (!scanOverlay.IsOn) AddLog("<color=orange>Scan overlay turned off - no rooms in this scan.</color>");
-        }
-        if (miniMapOn)
-        {
-            if (loaded) miniMap.RebuildInPlace(); else miniMap.ForceOff();
-            if (!miniMap.IsOn) AddLog("<color=orange>Minimap turned off - no rooms in this scan.</color>");
-        }
-        if (!dollhouseOn) SetStatus(loaded ? "Ready" : "No rooms");
+        finally { refreshing = false; }
+    }
+
+    /// <summary>The scan's own file changed (a doorway added): reload it - the views follow (WatchScene), the
+    /// walk-through comes back where you stood.</summary>
+    public async Task ReloadAfterScanEdit()
+    {
+        if (!RequireExporter()) return;
+        await Busy("Loading...");
+        bool ok = await exporter.EnsureSelectedSourceLoaded(this, forceReload: true);
+        WatchScene();
+        while (refreshing) await Task.Yield();
+        SetStatus(ok ? "Ready" : "ERROR");
     }
 
     async void OnLoadSource()
@@ -717,7 +911,8 @@ public class XRMenu : MonoBehaviour
             return;
         }
         bool on = scanOverlay.ToggleOnOff();
-        AddLog(on ? "<color=green>Scan overlay ON</color>" : "<color=red>Scan overlay failed</color>");
+        AddLog(on ? $"<color=green>Scan overlay ON - '{exporter.SelectedSource}'</color>" : "<color=red>Scan overlay failed</color>");
+        if (on && !exporter.WorldAligned) AddLog($"<color=orange>'{exporter.SelectedSource}' isn't lined up with this place - its outlines won't sit on these walls.</color>");
         SetStatus(on ? "Scan overlay ON" : "Ready");
     }
 
@@ -743,10 +938,57 @@ public class XRMenu : MonoBehaviour
     public async void OnSaveScan()
     {
         if (!RequireExporter()) return;
+        if (exporter.SelectedSource != MRUKExporter.LiveSource)
+        {
+            // Saving the live scan from here used to load it and make yet another copy - never what was meant.
+            AddLog($"'{exporter.SelectedSource}' saves its edits by itself - nothing to save. Export writes the files for the PC. (To save the Quest's live scan, pick Live scan with < > first.)");
+            return;
+        }
         await Busy("Saving...");
         string name = await exporter.SaveScanToCache(this);
         SetStatus(name != null ? "Scan saved" : "Save failed");
         RefreshScanLabel();
+    }
+
+    List<MRUKSceneCache.Redundant> cleanupList;
+    float cleanupUntil;
+
+    /// <summary>First press: finds saved scans that a newer saved scan fully covers (same rooms or more) and that hold
+    /// nothing of their own (no furniture spec, no edits, no doorway added to their JSON) and lists them. A second press
+    /// within 15 s deletes them. Routes, photos and room names are house-wide - they stay.</summary>
+    async void OnCleanupScans()
+    {
+        if (!RequireExporter()) return;
+        if (cleanupList != null && Time.unscaledTime < cleanupUntil)
+        {
+            var list = cleanupList; cleanupList = null;
+            XRUi.SetLabel(cleanupButton, "Clean up old scans...");
+            XRUi.SetTint(cleanupButton, XRUi.ButtonColor);
+            int n = 0;
+            string selected = exporter.SelectedSource;
+            foreach (var r in list)
+            {
+                if (MRUKSceneCache.DeleteCachedScan(r.name)) { HouseEditsStore.DeleteFor(r.name); n++; Debug.Log($"[Cleanup] deleted '{r.name}' (covered by '{r.keptIn}')"); }
+                else AddLog($"<color=orange>Could not delete '{r.name}'.</color>");
+            }
+            // the scan you had picked is gone: pick the one that covers it (never the live scan by itself)
+            var mine = list.FirstOrDefault(r => r.name == selected);
+            if (mine != null) { exporter.Select(mine.keptIn); RefreshScanLabel(); _ = ReloadAfterScanEdit(); }
+            AddLog($"<color=green>Deleted {n} old scan(s).</color>");
+            SetStatus("Cleaned up");
+            return;
+        }
+        await Busy("Checking...");
+        var found = await MRUKSceneCache.FindRedundantAsync();
+        if (found.Count == 0) { AddLog("Clean up: no old scan is fully covered by a newer one - nothing to delete."); SetStatus("Ready"); return; }
+        cleanupList = found;
+        cleanupUntil = Time.unscaledTime + 15f;
+        foreach (var r in found) AddLog($"Old: '{r.name}' - all its rooms are in '{r.keptIn}'.");
+        XRUi.SetLabel(cleanupButton, $"Delete {found.Count} old scan(s)? Press again");
+        XRUi.SetTint(cleanupButton, XRUi.ButtonDangerColor);
+        SetStatus("Confirm delete");
+        await Task.Delay(15000);
+        if (cleanupList == found) { cleanupList = null; XRUi.SetLabel(cleanupButton, "Clean up old scans..."); XRUi.SetTint(cleanupButton, XRUi.ButtonColor); }
     }
 
     /// <summary>Deletes the currently selected cached scan (a saved sample) from local storage.</summary>

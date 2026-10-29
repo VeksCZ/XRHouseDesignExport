@@ -41,6 +41,7 @@ public class EditModeController : MonoBehaviour
     {
         IsOn = !IsOn;
         AnyOn = IsOn;
+        openedForTool = false;
         if (IsOn) { BuildToolbar(); toolbar.gameObject.SetActive(true); if (!(toolbarDrag && toolbarDrag.Moved)) FollowHand(); }
         else { CurrentTool = Tool.None; if (toolbar) toolbar.gameObject.SetActive(false); }
         RefreshInfo();
@@ -72,8 +73,21 @@ public class EditModeController : MonoBehaviour
         saving = true;
         try
         {
+            // A saved scan with these very rooms already exists (saved earlier here): edits go there - no new copy
+            // every time something is edited on the live scan.
+            string name = null;
+#if META_XR_SDK_INSTALLED
+            name = await exporter.SavedScanOfLive();
+#endif
+            if (name != null)
+            {
+                exporter.AdoptSavedLiveScan(name);
+                uiLog?.RefreshSourceLabel();
+                uiLog?.AddLog($"<color=green>Edits go to saved scan '{name}' (same rooms as the live scan).</color>");
+                return true;
+            }
             uiLog?.AddLog("Edit on the live scan - saving it first, your edits will belong to the saved copy...");
-            string name = await exporter.SaveScanToCache(uiLog);
+            name = await exporter.SaveScanToCache(uiLog);
             if (name == null) { uiLog?.AddLog("<color=red>Edit: could not save the live scan - edit not applied.</color>"); return false; }
             exporter.AdoptSavedLiveScan(name);
             uiLog?.RefreshSourceLabel();
@@ -92,11 +106,23 @@ public class EditModeController : MonoBehaviour
         return ok;
     }
 
+    bool openedForTool;
+
     /// <summary>Edit mode on with this tool selected (from the main menu's shortcuts).</summary>
     public void UseTool(Tool t)
     {
-        if (!IsOn) Toggle();
+        if (!IsOn) { Toggle(); openedForTool = true; }
         if (CurrentTool != t) SelectTool(t);
+    }
+
+    /// <summary>A tool panel's Done: leaves the tool. Edit mode opened just for it (the menu's Wall photos / Trace
+    /// routes) closes with it; opened by hand, it stays with its toolbar to pick the next tool.</summary>
+    public void LeaveTool()
+    {
+        if (!IsOn) return;
+        if (openedForTool) { Toggle(); return; }
+        CurrentTool = Tool.None;
+        RefreshInfo();
     }
 
     void SelectTool(Tool t)

@@ -392,7 +392,11 @@ public class DollHouseVisualizer : MonoBehaviour
         Vector2 s = OVRInput.Get(OVRInput.Axis2D.PrimaryThumbstick, OVRInput.Controller.RTouch);
         if (StairEditTool.StickCapture) s = Vector2.zero;
         if (!grabbed) {
-            if (GrabLock.GripPressed && Physics.Raycast(hand.position, hand.forward, out RaycastHit hit) && hit.collider.gameObject == root && GrabLock.TryTake(this)) {
+            // its own box, whatever else the ray passes through first (the walk-through model, panels...) - grabbing it
+            // while walking used to fail because the first physics hit wasn't the Dollhouse
+            var box = root.GetComponent<Collider>();
+            if (GrabLock.GripPressed && box != null && box.enabled && !XRMenu.PointingAtAnyUI
+                && box.Raycast(new Ray(hand.position, hand.forward), out _, 30f) && GrabLock.TryTake(this)) {
                 grabbed = true;
                 OVRInput.SetControllerVibration(0.1f, 0.1f, OVRInput.Controller.RTouch); Invoke(nameof(StopVib), 0.05f);
                 off = hand.InverseTransformPoint(root.transform.position);
@@ -407,4 +411,4 @@ public class DollHouseVisualizer : MonoBehaviour
         }
     }
     private void StopVib() => OVRInput.SetControllerVibration(0, 0, OVRInput.Controller.RTouch);
-}
+}

@@ -54,6 +54,17 @@ public static class StairGeometry
         return true;
     }
 
+    /// <summary>The highest scanned floor at most 0.45 m above y (y itself if there is none).</summary>
+    static float RoughFloorBelow(List<MRUKRoom> rooms, float y)
+    {
+        float best = float.MinValue;
+        foreach (var r in rooms)
+            if (r != null)
+                foreach (var f in r.FloorAnchors)
+                    if (f != null && f.transform.position.y <= y + 0.05f && f.transform.position.y > y - 0.45f) best = Mathf.Max(best, f.transform.position.y);
+        return best > float.MinValue ? best : y;
+    }
+
     /// <summary>Floor height of the story above 'bottomY' (lowest floor anchor at least 1.5 m higher).</summary>
     public static float TopFloorY(List<MRUKRoom> rooms, float bottomY)
     {
@@ -151,6 +162,14 @@ public static class StairGeometry
         float tread = TreadOf(s);
         var r = new Resolved { width = Mathf.Max(0.5f, s.width), bottomY = pts[0].y, tread = tread };
         r.topY = TopFloorY(rooms, r.bottomY);
+        // from finished floor to finished floor (the scan is the rough shell; see XRModelFactory.Buildup) - the start
+        // point may have been clicked on the rough floor or on the finished one, so start from the rough floor under it
+        if (XRModelFactory.FloorBuildupAt != null)
+        {
+            float rough = RoughFloorBelow(rooms, r.bottomY);
+            r.bottomY = rough + XRModelFactory.Buildup(rough);
+            r.topY += XRModelFactory.Buildup(r.topY);
+        }
         var risers = s.risers != null && s.risers.Count == pts.Count - 1 ? s.risers : DefaultRisers(pts, r.width, r.topY - r.bottomY, tread);
         int total = Mathf.Max(1, risers.Sum());
         r.rise = (r.topY - r.bottomY) / total;

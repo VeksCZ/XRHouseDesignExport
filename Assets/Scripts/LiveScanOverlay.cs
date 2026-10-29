@@ -128,7 +128,7 @@ public class LiveScanOverlay : MonoBehaviour
                     AddPolygonEdges(a.transform.position, a.transform.rotation, a.PlaneBoundary2D, WallColor);
             }
         }
-        uiLog?.AddLog($"<color=green>Scan overlay ON ({lines.Count} edges)</color>");
+        Debug.Log($"[ScanOverlay] {lines.Count} edges from {rooms.Count} room(s)");
     }
 
     void Hide()

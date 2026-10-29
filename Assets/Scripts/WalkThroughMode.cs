@@ -262,6 +262,7 @@ public class WalkThroughMode : MonoBehaviour
         if (!Furniture.MoveItem(spec, walkRooms, yaw, center, movingKey, movingIndex, delta.x, -delta.z)) return "Can't move this one";
         Furniture.Save(furniture.ScanName, spec);
         furniture.Reload();
+        walkDoors.SetFurnitureSliders(walkVisual, furniture.Sliders());
         Physics.SyncTransforms();
         return $"Moved {delta.magnitude:0.00} m";
     }
@@ -281,6 +282,7 @@ public class WalkThroughMode : MonoBehaviour
         if (!Furniture.RotateItem(spec, walkRooms, yaw, center, key, index)) return "Can't turn this one";
         Furniture.Save(furniture.ScanName, spec);
         furniture.Reload();
+        walkDoors.SetFurnitureSliders(walkVisual, furniture.Sliders());
         Physics.SyncTransforms();
         if (held) TryGrabFurniture(ray);   // keep holding the rebuilt item
         return "Turned 90°";
@@ -525,7 +527,7 @@ public class WalkThroughMode : MonoBehaviour
     {
         if (!root || walkRooms == null) return false;
         stairs.Dispose();
-        walkDoors.Clear();
+        walkDoors.ClearAll();
         furniture.Clear();
         if (walkVisual)
         {
@@ -565,6 +567,7 @@ public class WalkThroughMode : MonoBehaviour
         long tColliders = sw.ElapsedMilliseconds;
         ApplyStairs();
         furniture.Apply(walkVisual, yaw, center, walkRooms, HouseEditsStore.CurrentScan, WalkLayer);
+        walkDoors.SetFurnitureSliders(walkVisual, furniture.Sliders());   // sliding shower doors
         Physics.SyncTransforms();
         if (sun.On) RebuildSun();
         Debug.Log($"TIMING walk {walkModel}: model {tModel} ms, meshes {tMeshes - tModel} ms, colliders {tColliders - tMeshes} ms, " +
@@ -579,7 +582,7 @@ public class WalkThroughMode : MonoBehaviour
         sun.SetOn(false); measure.Clear();
         if (Active == this) Active = null;
         stairs.Dispose();
-        walkDoors.Clear();
+        walkDoors.ClearAll();
         furniture.Clear();
         walkVisual = null; walkRooms = null;
         if (root)
@@ -633,6 +636,16 @@ public class WalkThroughMode : MonoBehaviour
     /// <summary>Physics hit against the walk-through's own walls/floors (for occlusion checks by edit tools).</summary>
     public bool RaycastModel(Ray ray, out RaycastHit hit, float maxDistance = 50f) =>
         Physics.Raycast(ray, out hit, maxDistance, WalkMask, QueryTriggerInteraction.Ignore);
+
+    /// <summary>Your feet (on the floor you stand on) in the scan's own world frame, and which way you face (yaw).</summary>
+    public bool TryGetFeetScan(out Vector3 feet, out float facingYaw)
+    {
+        feet = default; facingYaw = 0f;
+        if (!TryGetScanWorldPose(out var p, out var f)) return false;
+        feet = p - Vector3.up * (head.position.y - TargetFloorY);
+        facingYaw = Mathf.Atan2(f.x, f.z) * Mathf.Rad2Deg;
+        return true;
+    }
 
     /// <summary>Your virtual head in the scan's own world frame (where MRUK's anchors are) - for the minimap.</summary>
     public bool TryGetScanWorldPose(out Vector3 pos, out Vector3 forward)
@@ -791,8 +804,19 @@ public class WalkThroughMode : MonoBehaviour
         if (fwd.sqrMagnitude < 1e-4f) fwd = Vector3.ProjectOnPlane(head.up, Vector3.up); // looking straight down
         fwd.Normalize();
         Vector3 right = Vector3.Cross(Vector3.up, fwd);
-        Vector3 move = Vector3.ClampMagnitude(fwd * s.y + right * s.x, 1f) * speed * dt;
-        move = Collide(move);
+        Vector3 want = Vector3.ClampMagnitude(fwd * s.y + right * s.x, 1f) * speed * dt;
+        Vector3 move = Collide(want);
+        // Stick held but (almost) no movement for a while: say what blocks it (the log is all there is on the headset).
+        if (move.sqrMagnitude < want.sqrMagnitude * 0.01f)
+        {
+            blockedFor += dt;
+            if (blockedFor > 1f && Time.unscaledTime - blockedLogAt > 5f)
+            {
+                blockedLogAt = Time.unscaledTime;
+                Debug.Log($"[Walk] stick ({s.x:0.00},{s.y:0.00}) but blocked {blockedFor:0.0} s: {LastBlocker}");
+            }
+        }
+        else blockedFor = 0f;
         if (move.sqrMagnitude < 1e-8f) return;
         root.transform.position -= move; // moving the world back == you moving forward
         Physics.SyncTransforms();
@@ -800,11 +824,20 @@ public class WalkThroughMode : MonoBehaviour
 
     /// <summary>Capsule from just above step height up to your head - steps/thresholds below it never block,
     /// walls/windows do. Slides along whatever it hits instead of stopping dead.</summary>
+    float blockedFor, blockedLogAt = -10f;
+
     Vector3 Collide(Vector3 move)
     {
         Vector3 hp = head.position;
         Vector3 p1 = new Vector3(hp.x, TargetFloorY + StepUp + BodyRadius, hp.z);
         Vector3 p2 = new Vector3(hp.x, Mathf.Max(p1.y, hp.y - 0.15f), hp.z);
+        // Already inside something (teleported next to a wall, a raised floor, furniture): a sweep that starts
+        // overlapping can report a hit at distance 0 every frame and you could never walk out. Let the move through.
+        if (Physics.CheckCapsule(p1, p2, BodyRadius * 0.9f, WalkMask, QueryTriggerInteraction.Ignore))
+        {
+            LastBlocker = "started inside a collider - moving freely";
+            return move;
+        }
         for (int i = 0; i < 3; i++)
         {
             float dist = move.magnitude;

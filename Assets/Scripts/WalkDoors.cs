@@ -49,6 +49,39 @@ public class WalkDoors
         public readonly List<Collider> handles = new List<Collider>(); // trigger zones around the handles
         public float open;          // 0 closed .. 1 open
         public bool manual;         // opened by hand (trigger on a handle)
+        public bool nearOpens;      // opens by itself when you come close (sliding shower doors)
+    }
+
+    // Sliding parts of the furniture (shower doors) - registered by the walk-through after the furniture is built,
+    // kept across door rebuilds (Build), dropped with the furniture.
+    readonly List<Door> furnitureDoors = new List<Door>();
+    const float NearOpenDist = 0.75f;
+
+    /// <summary>Makes the furniture's sliding parts move: each group slides by its opening vector (model space =
+    /// visual-local) when you come close, or on the trigger pointed at it.</summary>
+    public void SetFurnitureSliders(GameObject visual, List<(List<Transform> parts, Vector3 open)> sliders)
+    {
+        furnitureDoors.Clear();
+        if (!visual || sliders == null) return;
+        foreach (var (parts, open) in sliders)
+        {
+            if (parts == null || parts.Count == 0 || open.sqrMagnitude < 1e-4f) continue;
+            var bounds = new Bounds(visual.transform.InverseTransformPoint(parts[0].position), Vector3.zero);
+            var door = new Door { nearOpens = true };
+            foreach (var t in parts)
+            {
+                if (!t) continue;
+                var r = t.GetComponent<Renderer>();
+                if (r) { bounds.Encapsulate(visual.transform.InverseTransformPoint(r.bounds.min)); bounds.Encapsulate(visual.transform.InverseTransformPoint(r.bounds.max)); }
+                // the opening vector in the part's parent space (what localPosition moves in)
+                Vector3 local = t.parent ? t.parent.InverseTransformVector(visual.transform.TransformVector(open)) : open;
+                door.leaves.Add(new Leaf { pivot = t, motion = Motion.Slide, closedPos = t.localPosition, slideDir = local.normalized, slide = local.magnitude });
+                var col = t.GetComponent<Collider>();
+                if (col) door.handles.Add(col);   // trigger on the glass opens/closes it
+            }
+            door.center = new Vector3(bounds.center.x, bounds.min.y, bounds.center.z);
+            furnitureDoors.Add(door);
+        }
     }
 
     readonly List<Door> doors = new List<Door>();
@@ -289,9 +322,14 @@ public class WalkDoors
     public bool Tick(Vector3 headLocal, float dt, bool autoOpen)
     {
         bool moved = false;
-        foreach (var d in doors)
+        foreach (var d in doors.Concat(furnitureDoors))
         {
             bool target = d.manual;
+            if (d.nearOpens)
+            {
+                float dist = Vector2.Distance(new Vector2(headLocal.x, headLocal.z), new Vector2(d.center.x, d.center.z));
+                target |= dist < NearOpenDist && headLocal.y > d.center.y && headLocal.y < d.center.y + 2.5f;
+            }
             if (autoOpen && !d.isWindow)
             {
                 float dist = Vector2.Distance(new Vector2(headLocal.x, headLocal.z), new Vector2(d.center.x, d.center.z));
@@ -327,7 +365,7 @@ public class WalkDoors
     /// <summary>Trigger on a handle: open it if it's (mostly) closed, else close it.</summary>
     public bool Toggle(Collider c)
     {
-        var d = doors.FirstOrDefault(x => x.handles.Contains(c));
+        var d = doors.Concat(furnitureDoors).FirstOrDefault(x => x.handles.Contains(c));
         if (d == null) return false;
         d.manual = d.open < 0.5f;
         return true;
@@ -350,5 +388,12 @@ public class WalkDoors
         created.Clear();
         materials.Clear();
         doors.Clear();
+    }
+
+    /// <summary>Everything, the furniture's sliding doors too (leaving the walk-through).</summary>
+    public void ClearAll()
+    {
+        Clear();
+        furnitureDoors.Clear();
     }
 }

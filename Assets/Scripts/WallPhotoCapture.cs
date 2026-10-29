@@ -1088,7 +1088,7 @@ public class WallPhotoCapture : MonoBehaviour
         }, 20);
         var undo = XRUi.CreateButton(t, "Undo photo", x0 + w3 + Gap, y, w3, RowH, UndoLast, 19);
         XRUi.SetTint(undo, XRUi.ButtonDangerColor);
-        XRUi.CreateButton(t, "Finish", x0 + (w3 + Gap) * 2, y, w3, RowH, () => { if (editMode != null && editMode.IsOn) editMode.Toggle(); }, 22);
+        XRUi.CreateButton(t, "Done", x0 + (w3 + Gap) * 2, y, w3, RowH, () => editMode?.LeaveTool(), 22);
         y += RowH + 4;
         statusText = XRUi.CreateText(t, "Hint", "", 16, TextAlignmentOptions.TopLeft, x0, y, fullW, PH - y - 4, XRUi.MutedText);
         RefreshPanel();

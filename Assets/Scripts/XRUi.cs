@@ -66,7 +66,8 @@ public static class XRUi
 
     /// <summary>True when a placed panel has been left behind (you walked away) and should come back in front.</summary>
     public static bool LeftBehind(Transform t, Transform head, float maxDist = 2.5f) =>
-        t != null && head != null && (Vector3.Distance(t.position, head.position) > maxDist
+        t != null && head != null && !XRMenu.PointingAt(t) // never jump away from under the ray you're about to click with
+        && (Vector3.Distance(t.position, head.position) > maxDist
             // or far above/below the eyes: placed before tracking had settled (startup, recenter) - it ended up ~1 m
             // under the floor-level origin while the head was still at 0
             || Mathf.Abs(t.position.y - head.position.y) > 0.9f);

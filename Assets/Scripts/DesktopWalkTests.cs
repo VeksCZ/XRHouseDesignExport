@@ -56,6 +56,7 @@ public partial class DesktopWalkApp
                     "ceilfit" => CeilFit(),
                     "walls" => !ExportWallDrawings(false, outDir).Contains("failed"),
                     "detect" => !DetectRoutes().Contains("failed") && ExportWallDrawings(false, outDir) != null,
+                    "adddoor" => await TestAddDoor(),
                     _ => false,
                 };
             }
@@ -65,6 +66,40 @@ public partial class DesktopWalkApp
         await Frames(3);
         Application.Quit(ok ? 0 : 3);
         return true;
+    }
+
+    /// <summary>adddoor: adds an 80 cm door to the longest wall of the room with most walls in the scan's JSON (run it
+    /// on a copy of a scan!), reloads it and checks a door came back there, standing on the floor.</summary>
+    async Task<bool> TestAddDoor()
+    {
+#if META_XR_SDK_INSTALLED
+        string scan = HouseEditsStore.CurrentScan;
+        var rooms = MRUKDataProcessor.GetValidRooms(MRUK.Instance);
+        var room = rooms.OrderByDescending(r => r.WallAnchors.Count).First();
+        var wall = room.WallAnchors.Where(w => w != null && w.PlaneRect.HasValue).OrderByDescending(w => w.PlaneRect.Value.width).First();
+        float floorY = room.FloorAnchors.Min(f => f.transform.position.y);
+        Vector3 target = wall.transform.position + wall.transform.right * (wall.PlaneRect.Value.width * 0.25f);
+        target.y = floorY + 1f;
+        string roomId = DoorCatalog.RoomId(room);
+        int before = room.Anchors.Count(a => a != null && a.Label == MRUKAnchor.SceneLabels.DOOR_FRAME);
+        string err = SceneJsonEdit.AddDoor(scan, room, target, 0.8f, SceneJsonEdit.DefaultDoorHeight);
+        if (err != null) { Debug.Log("TEST adddoor: " + err); return false; }
+        walk.Exit();
+        if (!await MRUKSceneCache.LoadCachedScene(MRUK.Instance, scan)) { Debug.Log("TEST adddoor: reload failed"); return false; }
+        await Frames(2);
+        room = MRUK.Instance.Rooms.FirstOrDefault(r => DoorCatalog.RoomId(r) == roomId);
+        if (room == null) { Debug.Log("TEST adddoor: room gone"); return false; }
+        var doorsNow = room.Anchors.Where(a => a != null && a.Label == MRUKAnchor.SceneLabels.DOOR_FRAME && a.PlaneRect.HasValue).ToList();
+        var d = doorsNow.OrderBy(a => Vector2.Distance(new Vector2(a.transform.position.x, a.transform.position.z), new Vector2(target.x, target.z))).FirstOrDefault();
+        if (d == null) { Debug.Log("TEST adddoor: no door after reload"); return false; }
+        float dist = Vector2.Distance(new Vector2(d.transform.position.x, d.transform.position.z), new Vector2(target.x, target.z));
+        float bottom = d.transform.position.y - d.PlaneRect.Value.height / 2f;
+        Debug.Log($"TEST adddoor: doors {before} -> {doorsNow.Count}, new one {dist * 100:0.0} cm from the target, w {d.PlaneRect.Value.width:0.00} h {d.PlaneRect.Value.height:0.00}, bottom {(bottom - floorY) * 100:0.0} cm above the floor");
+        return doorsNow.Count == before + 1 && dist < 0.06f && Mathf.Abs(bottom - floorY) < 0.06f && Mathf.Abs(d.PlaneRect.Value.width - 0.8f) < 0.03f;
+#else
+        await Task.Yield();
+        return false;
+#endif
     }
 
     static async Task Frames(int n)
@@ -172,6 +207,26 @@ public partial class DesktopWalkApp
                 Vector3 pos = gi * new Vector3(f[0], f[1], -f[2]) + ctr;
                 Vector3 dir = gi * new Vector3(f[3] - f[0], 0f, -(f[4] - f[2]));
                 await StandAt(pos, Yaw(dir), f.Length > 5 ? f[5] : 15f);
+                await Shot(Path.Combine(outDir, $"view_{i++}.png"));
+            }
+            return i > 0;
+        }
+        // -views routes: one shot per route - from the middle of its room, looking at the route's middle
+        if (Arg("-views") == "routes")
+        {
+            var rooms = Rooms();
+            var pts = new List<Vector3>();
+            foreach (var r in RouteStore.Routes)
+            {
+                var room = rooms.FirstOrDefault(x => DoorCatalog.RoomId(x) == r.roomUuid);
+                if (room == null || !RouteStore.WorldPoints(r, rooms, pts)) continue;
+                Vector3 mid = pts[pts.Count / 2], c = room.GetRoomBounds().center;
+                float floorY = room.FloorAnchors.Where(a => a != null).Min(a => a.transform.position.y);
+                Vector3 stand = new Vector3(c.x, floorY, c.z);
+                Vector3 dir = mid - stand; float dist = new Vector2(dir.x, dir.z).magnitude;
+                float pitch = -Mathf.Atan2(mid.y - (floorY + 1.6f), Mathf.Max(0.3f, dist)) * Mathf.Rad2Deg;
+                await StandAt(stand, Yaw(new Vector3(dir.x, 0, dir.z)), pitch);
+                Debug.Log($"TEST view {i}: route {RouteStyle.Name(r.kind)} {r.spec} at {mid}");
                 await Shot(Path.Combine(outDir, $"view_{i++}.png"));
             }
             return i > 0;

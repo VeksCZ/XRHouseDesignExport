@@ -48,6 +48,8 @@ public partial class DesktopWalkApp : MonoBehaviour
             WallOverlays.ShowRoutes = ov.Contains("routes");
             WallOverlays.ShowPhotos = ov.Contains("photos");
             WallOverlays.ShowFittings = WallOverlays.FittingsInWalk = ov.Contains("fittings");
+            WallOverlays.ShowZones = ov.Contains("zones");
+            WallOverlays.LogZones = WallOverlays.ShowZones;
         }
         Application.targetFrameRate = -1;
         QualitySettings.vSyncCount = Array.IndexOf(Environment.GetCommandLineArgs(), "-novsync") >= 0 ? 0 : 1;
@@ -63,6 +65,8 @@ public partial class DesktopWalkApp : MonoBehaviour
     {
         if (Arg("-shot") != null || Arg("-test") != null) Application.runInBackground = true; // a test window may never get focus
         RefreshScans();
+        // -finished 1|0: finished floors + suspended ceilings on/off (the headset menu's toggle; remembered)
+        if (Arg("-finished") != null) Furniture.Finished = Arg("-finished") == "1";
         string last = Arg("-scan") ?? PlayerPrefs.GetString(PrefLastScan, "");
         selected = Mathf.Max(0, scans.IndexOf(last));
         if (scans.Count == 0) status = $"No scans in {DataFolder}. Pull data from the Quest in the Editor (MRUK > 5. Pull data from Quest).";

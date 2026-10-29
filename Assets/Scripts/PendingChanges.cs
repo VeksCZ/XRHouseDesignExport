@@ -3,13 +3,14 @@ using System.Linq;
 using UnityEngine;
 
 /// <summary>
-/// What hasn't been saved or exported yet, so the menu can light up "Save scan" / "Export" instead of relying on
-/// memory. Export: any change since the last export (routes, boxes, edits, room names, photos). Save scan: the live
-/// device scan differs from the last one saved (a new Space Setup). Kept in PlayerPrefs, so it survives a restart.
+/// What hasn't been saved or exported yet, so the menu can light up "Save live scan" / "Export" instead of relying on
+/// memory. Export: any change since the last export (routes, boxes, edits, room names, photos) - kept in PlayerPrefs,
+/// so it survives a restart. Save live scan: the live device scan has a room that no saved scan has. Edits, routes and
+/// room names of a saved scan save themselves - there is nothing to "save" for them.
 /// </summary>
 public static class PendingChanges
 {
-    const string ExportKey = "Pending.Export", LiveSigKey = "Pending.LiveSig", SavedSigKey = "Pending.SavedLiveSig";
+    const string ExportKey = "Pending.Export";
 
     static HashSet<string> exportKinds;
     static HashSet<string> Kinds
@@ -45,62 +46,64 @@ public static class PendingChanges
         PlayerPrefs.Save();
     }
 
-    /// <summary>True when the live scan (as last seen) differs from the one last saved.</summary>
-    public static bool SavePending
+    // ---------- the live scan: is it saved somewhere already? ----------
+    // Not a fingerprint of the last save (that lit "Save live scan" in the flat because the house was saved last):
+    // the live scan counts as saved when some saved scan holds all of its rooms (same room ids).
+    static volatile int liveState;      // 0 unknown, 1 saved, 2 not saved
+    static int liveCheck;
+
+    /// <summary>True when the live scan has a room no saved scan has (a new Space Setup worth saving).</summary>
+    public static bool LiveUnsaved => liveState == 2;
+
+    /// <summary>Both spellings of a room/anchor id: C# Guid order and the native (byte) order the scene JSON may use.</summary>
+    public static (string a, string b) IdForms(System.Guid g)
     {
-        get
+        string hex = System.BitConverter.ToString(g.ToByteArray()).Replace("-", "").ToLowerInvariant();
+        string native = $"{hex.Substring(0, 8)}-{hex.Substring(8, 4)}-{hex.Substring(12, 4)}-{hex.Substring(16, 4)}-{hex.Substring(20)}";
+        return (g.ToString(), native);
+    }
+
+    /// <summary>The newest saved scan that holds all these rooms (null if none). Reads the saved JSONs - call off
+    /// the main thread when it can wait.</summary>
+    public static string ScanWithRooms(List<(string a, string b)> ids, List<(string name, string path)> scans)
+    {
+        if (ids == null || ids.Count == 0) return null;
+        foreach (var (name, path) in scans)
         {
-            string live = PlayerPrefs.GetString(LiveSigKey, ""), saved = PlayerPrefs.GetString(SavedSigKey, "");
-            return live.Length > 0 && saved.Length > 0 && live != saved;
+            try
+            {
+                string text = System.IO.File.ReadAllText(path);
+                if (ids.All(p => text.Contains(p.a) || text.Contains(p.b))) return name;
+            }
+            catch (System.Exception) { }
         }
-    }
-
-    /// <summary>The live scan was just read from the device. The first time ever it counts as saved (nothing to
-    /// compare with); after that a different scan means it should be saved.</summary>
-    public static void SeenLive(string sig)
-    {
-        if (string.IsNullOrEmpty(sig)) return;
-        PlayerPrefs.SetString(LiveSigKey, sig);
-        if (!PlayerPrefs.HasKey(SavedSigKey)) PlayerPrefs.SetString(SavedSigKey, sig);
-        PlayerPrefs.Save();
-    }
-
-    public static void SavedLive(string sig)
-    {
-        if (string.IsNullOrEmpty(sig)) return;
-        PlayerPrefs.SetString(LiveSigKey, sig);
-        PlayerPrefs.SetString(SavedSigKey, sig);
-        PlayerPrefs.Save();
-        Mark("scan");
+        return null;
     }
 
 #if META_XR_SDK_INSTALLED
-    /// <summary>A fingerprint of the rooms MRUK holds: room ids, anchors and their sizes/positions in the room
-    /// (cm) - independent of where tracking put the house today.</summary>
-    public static string Signature(IEnumerable<Meta.XR.MRUtilityKit.MRUKRoom> rooms)
+    public static List<(string a, string b)> RoomIds(IEnumerable<Meta.XR.MRUtilityKit.MRUKRoom> rooms) =>
+        rooms.Where(r => r != null).Select(r => IdForms(r.Anchor.Uuid)).ToList();
+
+    /// <summary>The live scan was just read from the device: find out (in the background) whether it is saved.</summary>
+    public static void CheckLive(IEnumerable<Meta.XR.MRUtilityKit.MRUKRoom> rooms)
     {
-        var parts = new List<string>();
-        foreach (var r in rooms)
+        var ids = RoomIds(rooms);
+        int my = ++liveCheck;
+        if (ids.Count == 0) { liveState = 0; return; }
+        var scans = MRUKSceneCache.ListCachedScans().Select(n => (n, MRUKSceneCache.ScanPath(n))).ToList();
+        System.Threading.Tasks.Task.Run(() =>
         {
-            if (r == null) continue;
-            var anchors = new List<string>();
-            foreach (var a in r.Anchors)
-            {
-                if (a == null) continue;
-                Vector3 p = r.transform.InverseTransformPoint(a.transform.position);
-                Vector2 sz = a.PlaneRect.HasValue ? a.PlaneRect.Value.size : Vector2.zero;
-                Vector3 vs = a.VolumeBounds.HasValue ? a.VolumeBounds.Value.size : Vector3.zero;
-                anchors.Add($"{a.Label}:{Mathf.RoundToInt(p.x * 100)},{Mathf.RoundToInt(p.y * 100)},{Mathf.RoundToInt(p.z * 100)}:" +
-                            $"{Mathf.RoundToInt(sz.x * 100)}x{Mathf.RoundToInt(sz.y * 100)}:{Mathf.RoundToInt(vs.x * 100)}x{Mathf.RoundToInt(vs.y * 100)}x{Mathf.RoundToInt(vs.z * 100)}");
-            }
-            anchors.Sort(System.StringComparer.Ordinal);
-            parts.Add(DoorCatalog.RoomId(r) + "|" + string.Join(";", anchors));
-        }
-        parts.Sort(System.StringComparer.Ordinal);
-        string all = string.Join("#", parts);
-        using var sha = System.Security.Cryptography.SHA1.Create();
-        var h = sha.ComputeHash(System.Text.Encoding.UTF8.GetBytes(all));
-        return System.BitConverter.ToString(h, 0, 8).Replace("-", "");
+            string hit = ScanWithRooms(ids, scans);
+            if (my == liveCheck) liveState = hit != null ? 1 : 2;
+        });
     }
 #endif
+
+    /// <summary>The live scan was just saved.</summary>
+    public static void LiveSaved()
+    {
+        liveCheck++;
+        liveState = 1;
+        Mark("scan");
+    }
 }

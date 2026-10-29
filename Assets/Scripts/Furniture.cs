@@ -66,6 +66,29 @@ public static class Furniture
     /// <summary>Glass parts are named so the viewer can make them see-through.</summary>
     public const string GlassPart = "FURN_glass";
 
+    // ---------- sliding parts (shower doors): they move in the walk-through ----------
+    const string SlideMat = "_slide";
+    [ThreadStatic] static float lastSlide;
+    /// <summary>Name suffix of a part that slides open: "@slide&lt;group&gt;;dx;dy;dz" (model-space opening vector, m).</summary>
+    public const string SlideMarker = "@slide";
+    static string SlideTag(int group, Vector3 v) => FormattableString.Invariant($"{SlideMarker}{group};{v.x:0.###};{v.y:0.###};{v.z:0.###}");
+
+    /// <summary>Parses a sliding part's name: its group (parts of one door move together) and opening vector.</summary>
+    public static bool TryParseSlide(string partName, out string group, out Vector3 open)
+    {
+        group = null; open = default;
+        int i = partName?.IndexOf(SlideMarker, StringComparison.Ordinal) ?? -1;
+        if (i < 0) return false;
+        var f = partName.Substring(i + SlideMarker.Length).Split(';');
+        if (f.Length < 4) return false;
+        var ci = System.Globalization.CultureInfo.InvariantCulture;
+        if (!float.TryParse(f[1], System.Globalization.NumberStyles.Float, ci, out float x) ||
+            !float.TryParse(f[2], System.Globalization.NumberStyles.Float, ci, out float y) ||
+            !float.TryParse(f[3], System.Globalization.NumberStyles.Float, ci, out float z)) return false;
+        group = f[0]; open = new Vector3(x, y, z);
+        return true;
+    }
+
     /// <summary>Room's floor in GLB axes (model space with Z mirrored).</summary>
     struct RoomBox { public float xmin, xmax, zmin, zmax, y; }
 
@@ -76,12 +99,15 @@ public static class Furniture
         var model = new XRHouseModel();
         if (spec?["rooms"] is not JArray specRooms) return model;
         Quaternion g = Quaternion.Euler(0, yaw, 0);
+        var buildup = BuildupFunc(spec, rooms);
         foreach (var rs in specRooms.OfType<JObject>())
         {
             string key = ((string)rs["room"] ?? "").ToLowerInvariant();
             if (key.StartsWith("room_")) key = key.Substring(5);
             var room = rooms.FirstOrDefault(r => DoorCatalog.RoomId(r).ToLowerInvariant().StartsWith(key));
             if (room == null || !TryRoomBox(room, g, center, out var box)) { Debug.LogWarning($"[Furniture] room '{rs["room"]}' not found"); continue; }
+            // furniture stands on the finished floor (the build-up above the scanned rough floor)
+            if (buildup != null) box.y += buildup(box.y + center.y);
             int k = 0;
             foreach (var item in (rs["items"] as JArray ?? new JArray()).OfType<JObject>())
             {
@@ -103,13 +129,19 @@ public static class Furniture
                     h = Mathf.Max(0.1f, ceil - box.y - F(item, "y", 0f));
                 }
                 else h = F(item, "h", def.h);
+                lastSlide = 0f;
                 var boxes = Shape(item, type, w, d, h, out float lift);
+                // a sliding part opens towards u = 0 (model space: GLB z mirrored back)
+                var (ox, oz) = toXZ(0f, 0f); var (ux, uz) = toXZ(1f, 0f);
+                Vector3 slideDir = new Vector3(ox - ux, 0f, -(oz - uz)).normalized;
                 foreach (var (mat, u0, u1, v0, v1, y0, y1) in boxes)
                 {
                     var (xa, za) = toXZ(u0, v0);
                     var (xb, zb) = toXZ(u1, v1);
                     float yb = box.y + lift;
-                    rm.parts.Add(Box((string)item["name"] ?? $"{type}_{k}", mat, xa, xb, yb + y0, yb + y1, za, zb));
+                    var part = Box((string)item["name"] ?? $"{type}_{k}", mat, xa, xb, yb + y0, yb + y1, za, zb);
+                    if (mat.EndsWith(SlideMat)) part.name += SlideTag(k, slideDir * lastSlide);
+                    rm.parts.Add(part);
                 }
             }
         }
@@ -118,7 +150,8 @@ public static class Furniture
             // floor, ceiling and only the listed walls (the others are neighbours' walls that already exist)
             var rm = new XRRoomModel { roomName = "Extra_" + er.name };
             const float slab = 0.05f;
-            rm.parts.Add(Box(er.name + "_floor", "floor", er.x0, er.x1, er.floor - slab, er.floor, er.z0, er.z1, "FLOOR"));
+            float bu = buildup != null ? buildup(er.floor + center.y) : 0f;   // the finished floor, as in the scanned rooms
+            rm.parts.Add(Box(er.name + "_floor", "floor", er.x0, er.x1, er.floor - slab, er.floor + bu, er.z0, er.z1, "FLOOR"));
             var ceilAt = er.CeilAt;
             // "ceiling_x0/x1/z0/z1": a part of the room without its own ceiling (under the stairs)
             rm.parts.Add(SlopedBox(er.name + "_ceiling", "ceiling", F(er.spec, "ceiling_x0", er.x0), F(er.spec, "ceiling_x1", er.x1),
@@ -246,9 +279,21 @@ public static class Furniture
         XRModelFactory.CeilingOverride = null;
         XRModelFactory.Niches = new List<XRModelFactory.WallNiche>();
         var spec = string.IsNullOrEmpty(scanName) ? null : Load(scanName);
+        XRModelFactory.FloorBuildupAt = BuildupFunc(spec, rooms);
         XRModelFactory.ExteriorWallThickness = spec?["walls"] is JObject wj ? F(wj, "exterior", 0.25f) : 0.25f;
         if (spec != null && rooms != null && rooms.Count > 0) InstallNiches(spec, rooms, scanName);
-        if (spec?["ceilings"] is not JArray || rooms == null || rooms.Count == 0) return;
+        if (rooms == null || rooms.Count == 0) return;
+        // suspended ceilings (finished model only): world height per room
+        var suspended = new List<(MRUKRoom room, float y)>();
+        foreach (var r in rooms)
+        {
+            if (r == null || r.FloorAnchors.Count == 0) continue;
+            var sh = SuspendedHeight(spec, DoorCatalog.RoomId(r));
+            if (!sh.HasValue) continue;
+            float rough = r.FloorAnchors.Where(f => f != null).Select(f => f.transform.position.y).DefaultIfEmpty(r.transform.position.y).Min();
+            suspended.Add((r, rough + XRModelFactory.Buildup(rough) + sh.Value));
+        }
+        if (spec?["ceilings"] is not JArray && suspended.Count == 0) return;
         Vector3 center = DollHouseVisualizer.CalculateCenter(rooms);
         Quaternion g = Quaternion.Euler(0, FloorPlanBuilder.CorrectionYaw(MRUKPlanExtractor.Extract(rooms)), 0);
         var planes = new List<(MRUKRoom room, (float a, float bx, float bz) p)>();
@@ -270,20 +315,77 @@ public static class Furniture
             }
         }
         CeilingFit.ResetCache();
-        if (planes.Count == 0) return;
+        if (planes.Count == 0 && suspended.Count == 0) return;
         XRModelFactory.CeilingOverride = (anchors, probe) =>
         {
             if (anchors == null) return null;
             var first = anchors.FirstOrDefault(a => a != null);
+            bool Mine(MRUKRoom room) => ReferenceEquals(room.CeilingAnchors, anchors) || (first != null && room.CeilingAnchors.Contains(first));
+            float? y = null;
             foreach (var (room, p) in planes)
             {
-                if (!ReferenceEquals(room.CeilingAnchors, anchors) && (first == null || !room.CeilingAnchors.Contains(first))) continue;
+                if (!Mine(room)) continue;
                 Vector3 m = g * (probe - center);
-                return center.y + p.a + p.bx * m.x + p.bz * -m.z;   // GLB z = -model z
+                y = center.y + p.a + p.bx * m.x + p.bz * -m.z;   // GLB z = -model z
+                break;
             }
-            return null;
+            foreach (var (room, sy) in suspended)
+            {
+                if (!Mine(room)) continue;
+                // the suspended ceiling, never above the real one
+                float real = y ?? room.CeilingAnchors.Where(c => c != null).Select(c => c.transform.position.y).DefaultIfEmpty(float.MaxValue).Max();
+                y = Mathf.Min(real, sy);
+                break;
+            }
+            return y;
         };
+        if (suspended.Count > 0) Debug.Log($"[Furniture] {scanName}: suspended ceilings in {suspended.Count} room(s)");
         Debug.Log($"[Furniture] {scanName}: ceilings from the spec for {planes.Count} room(s)");
+    }
+
+    // ---------- finished floors + suspended ceilings (switchable) ----------
+
+    const string FinishedPref = "Model.Finished";
+    /// <summary>On: the model shows the finished floors ("floor_buildup") and the suspended ceilings
+    /// ("suspended_ceilings"). Off (default): the rough shell as scanned - what pipes in the floor and cables above the
+    /// ceiling are traced on. Remembered; models built afterwards follow it.</summary>
+    public static bool Finished
+    {
+        get { try { return PlayerPrefs.GetInt(FinishedPref, 0) == 1; } catch { return false; } }
+        set { PlayerPrefs.SetInt(FinishedPref, value ? 1 : 0); PlayerPrefs.Save(); }
+    }
+
+    /// <summary>The spec's "suspended_ceilings": [{"rooms": [room ids / extra room names], "h": m above the finished
+    /// floor}] - the height (above the finished floor) for this room, or null (none, or Finished is off).</summary>
+    static float? SuspendedHeight(JObject spec, string roomKey)
+    {
+        if (!Finished || spec?["suspended_ceilings"] is not JArray list || string.IsNullOrEmpty(roomKey)) return null;
+        string k = roomKey.ToLowerInvariant();
+        foreach (var e in list.OfType<JObject>())
+            foreach (var r in (e["rooms"] as JArray ?? new JArray()).Select(x => ((string)x ?? "").ToLowerInvariant()))
+                if (r.Length > 0 && (k == r || k.StartsWith(r))) return F(e, "h", 2.5f);
+        return null;
+    }
+
+    /// <summary>The spec's "floor_buildup": [m per storey, bottom storey first] (e.g. [0.23, 0.12]) as rough floor height
+    /// (world y) -> build-up. Storeys are the rooms' floor levels, a new storey from 1.2 m higher; a storey past the
+    /// list takes the last value. Null when the spec has none.</summary>
+    public static Func<float, float> BuildupFunc(JObject spec, List<MRUKRoom> rooms)
+    {
+        if (!Finished || spec?["floor_buildup"] is not JArray arr || arr.Count == 0 || rooms == null) return null;
+        var t = arr.Select(v => v.Type == JTokenType.Float || v.Type == JTokenType.Integer ? (float)v : 0f).ToList();
+        var levels = new List<float>();
+        foreach (var y in rooms.Where(r => r != null && r.FloorAnchors.Count > 0)
+                     .Select(r => r.FloorAnchors.Where(f => f != null).Select(f => f.transform.position.y).DefaultIfEmpty(float.NaN).Min())
+                     .Where(y => !float.IsNaN(y)).OrderBy(y => y))
+            if (levels.Count == 0 || y > levels[levels.Count - 1] + 1.2f) levels.Add(y);
+        if (levels.Count == 0) return null;
+        return y =>
+        {
+            int i = 0;
+            for (int k = 0; k < levels.Count; k++) if (y > levels[k] - 0.6f) i = k;
+            return t[Mathf.Min(i, t.Count - 1)];
+        };
     }
 
     /// <summary>Item type of a recess in a wall: "w" along the wall, "h" tall, "d" deep, "y" = bottom edge above the
@@ -352,7 +454,7 @@ public static class Furniture
         var v = new List<Vector3>(); var col = new List<Color>(); var tri = new List<int>();
         foreach (var part in model.rooms.Where(r => TryParseItem(r.roomName, out _, out _)).SelectMany(r => r.parts))
         {
-            var c = part.color; c.a = part.name == GlassPart ? alpha * 0.4f : alpha;
+            var c = part.color; c.a = part.name.StartsWith(GlassPart) ? alpha * 0.4f : alpha;
             for (int i = 0; i + 2 < part.triangles.Count; i += 3)
             {
                 Vector3 a = gi * part.vertices[part.triangles[i]] + center, b = gi * part.vertices[part.triangles[i + 1]] + center, d = gi * part.vertices[part.triangles[i + 2]] + center;
@@ -389,7 +491,8 @@ public static class Furniture
     {
         public string name; public JObject spec; public float x0, x1, z0, z1, floor, ceil;
         public (float a, float bx, float bz)? plane;   // its own "ceilings" entry (sloped), else flat at ceil
-        public Func<float, float, float> CeilAt { get { var p = plane; float c = ceil; return p.HasValue ? (x, z) => p.Value.a + p.Value.bx * x + p.Value.bz * z : (x, z) => c; } }
+        public float? suspended;                        // a suspended ceiling (model y) below it, if any
+        public Func<float, float, float> CeilAt { get { var p = plane; float c = ceil; var s = suspended; return p.HasValue ? (x, z) => Mathf.Min(p.Value.a + p.Value.bx * x + p.Value.bz * z, s ?? float.MaxValue) : (x, z) => Mathf.Min(c, s ?? float.MaxValue); } }
     }
 
     static IEnumerable<ExtraRoom> ExtraRooms(JObject spec, List<MRUKRoom> rooms, Quaternion g, Vector3 center)
@@ -411,6 +514,13 @@ public static class Furniture
             if (TryCeilingPlane(spec, name, out var p))
             {
                 x.plane = p;
+                x.ceil = x.CeilAt((x0 + x1) / 2f, (z0 + z1) / 2f);
+            }
+            var sh = SuspendedHeight(spec, name);
+            if (sh.HasValue)
+            {
+                var bu = BuildupFunc(spec, rooms);
+                x.suspended = floor + (bu != null ? bu(floor + center.y) : 0f) + sh.Value;
                 x.ceil = x.CeilAt((x0 + x1) / 2f, (z0 + z1) / 2f);
             }
             yield return x;
@@ -564,9 +674,11 @@ public static class Furniture
                         // (opens towards u=0 over the fixed one), top rail, handle at the open end
                         float a1 = F((JObject)side, "to", w), mid = (a0 + a1) / 2f, rail = 0.03f;
                         B.Add(("glass", a0, mid + 0.05f, d - gl, d, tray, h - rail));
-                        B.Add(("glass", mid - 0.05f, a1, d - 2 * gl - 0.012f, d - gl - 0.012f, tray, h - rail));
+                        // the sliding panel and its handle move together in the walk-through (opens towards u = 0)
+                        B.Add(("glass" + SlideMat, mid - 0.05f, a1, d - 2 * gl - 0.012f, d - gl - 0.012f, tray, h - rail));
                         B.Add(("chrome", a0, a1, d - 0.04f, d, h - rail, h));
-                        B.Add(("chrome", a1 - 0.10f, a1 - 0.08f, d - gl - 0.012f, d + 0.02f, 0.95f, 1.25f));
+                        B.Add(("chrome" + SlideMat, a1 - 0.10f, a1 - 0.08f, d - gl - 0.012f, d + 0.02f, 0.95f, 1.25f));
+                        lastSlide = a1 - mid - 0.05f;
                     }
                     else if (s == "front") B.Add(("glass", a0, side.Type == JTokenType.Object ? F((JObject)side, "to", w) : w, d - gl, d, tray, h));
                     else if (s == "left") B.Add(("glass", 0, gl, a0, side.Type == JTokenType.Object ? F((JObject)side, "to", d) : d, tray, h));
@@ -866,6 +978,7 @@ public static class Furniture
         float az = Mathf.Min(-z0, -z1), bz = Mathf.Max(-z0, -z1);
         var size = new Vector3(Mathf.Max(0.002f, bx - ax), Mathf.Max(0.002f, by - ay), Mathf.Max(0.002f, bz - az));
         var c = new Vector3((ax + bx) / 2f, (ay + by) / 2f, (az + bz) / 2f);
+        if (mat.EndsWith(SlideMat)) mat = mat.Substring(0, mat.Length - SlideMat.Length);
         var part = XRModelFactory.CreateSolidBoxPart(mat == "glass" ? GlassPart : "FURN_" + name, c, Quaternion.identity, size, modelMat, Vector3.zero, 0f);
         part.color = ColorOf(mat);
         return part;
@@ -912,6 +1025,23 @@ public class FurnitureInModel
         return null;
     }
 
+    /// <summary>The sliding parts (shower doors) grouped per door, each with its opening vector in model space.</summary>
+    public List<(List<Transform> parts, Vector3 open)> Sliders()
+    {
+        var res = new List<(List<Transform>, Vector3)>();
+        if (!go) return res;
+        var groups = new Dictionary<string, (List<Transform>, Vector3)>();
+        foreach (var mf in go.GetComponentsInChildren<MeshFilter>(true))
+        {
+            if (!Furniture.TryParseSlide(mf.name, out var gname, out var open)) continue;
+            string key = (mf.transform.parent ? mf.transform.parent.name : "") + "/" + gname;
+            if (!groups.TryGetValue(key, out var g)) { g = (new List<Transform>(), open); groups[key] = g; }
+            g.Item1.Add(mf.transform);
+        }
+        res.AddRange(groups.Values);
+        return res;
+    }
+
     public void Apply(GameObject visual, float yaw, Vector3 center, List<MRUKRoom> rooms, string scanName, int layer)
     {
         Build(visual, yaw, center, rooms, scanName, layer, string.IsNullOrEmpty(scanName) ? null : Furniture.Load(scanName));
@@ -937,7 +1067,7 @@ public class FurnitureInModel
             mf.gameObject.layer = layer;
             if (mf.sharedMesh) mf.gameObject.AddComponent<MeshCollider>().sharedMesh = mf.sharedMesh;
             bool roof = mf.name == Furniture.RoofPart && RoofAlpha < 1f;
-            if ((mf.name != Furniture.GlassPart && !roof) || glass == null) continue;
+            if ((!mf.name.StartsWith(Furniture.GlassPart) && !roof) || glass == null) continue;
             var mr = mf.GetComponent<MeshRenderer>();
             if (mr.sharedMaterial) UnityEngine.Object.Destroy(mr.sharedMaterial);
             var m = new Material(glass) { color = roof ? new Color(0.27f, 0.28f, 0.30f, RoofAlpha) : new Color(1f, 1f, 1f, 0.3f) };

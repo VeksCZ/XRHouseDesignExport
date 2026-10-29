@@ -32,6 +32,11 @@ public class PipeRoute
     /// <summary>Proposals: how sure the detector was (0..1) and where it came from.</summary>
     public float confidence;
     public string source;
+    /// <summary>What it is made of ("CYKY 3x2,5", "PPR 20", "HT 110"...), the circuit / breaker it belongs to ("5"),
+    /// a free note (PC) - shown when you point at it and in the drawings.</summary>
+    public string spec, circuit, note;
+    /// <summary>Last change (ISO) - "Pull" keeps the newer copy of a route/box edited on both sides.</summary>
+    public string modified;
 }
 
 /// <summary>A point item on a route or on its own: an electrical box, socket, switch, a water/waste outlet, a floor
@@ -46,6 +51,9 @@ public class RouteMarker
     public Vector3Data localPos, localNormal;
     public string label;
     public string created;
+    /// <summary>Circuit / breaker of an electrical box ("5"), as for routes.</summary>
+    public string circuit;
+    public string modified;
 }
 
 [Serializable]
@@ -114,6 +122,39 @@ public static class RouteStyle
         "Radiator", "Manifold", "Riser", "Socket", "Switch", "Light", "Panel", "Outside",
     };
 
+    /// <summary>What a route is made of - picked on the panel (first = not said).</summary>
+    public static string[] Specs(RouteKind k) => k switch
+    {
+        RouteKind.Electric => new[] { "", "CYKY 3x1,5", "CYKY 3x2,5", "CYKY 5x1,5", "CYKY 5x2,5", "CYKY 2x1,5", "CYKY 4x1,5", "CYKY 5x4", "CYKY 5x6", "UTP Cat6", "Koax", "Chránička" },
+        RouteKind.ColdWater or RouteKind.HotWater => new[] { "", "PPR 20", "PPR 25", "PPR 32", "PEX-AL 16", "PEX-AL 20", "PEX-AL 26", "Cu 15", "Cu 18" },
+        RouteKind.Waste => new[] { "", "HT 32", "HT 40", "HT 50", "HT 75", "HT 110", "KG 110", "KG 125", "KG 160" },
+        RouteKind.Heating => new[] { "", "PEX 16 podlahovka", "PEX 17 podlahovka", "PEX-AL 16", "PEX-AL 20", "Cu 15", "Cu 18" },
+        _ => new[] { "", "Chránička 25", "Chránička 32", "Chránička 50" },
+    };
+
+    /// <summary>Circuit / breaker numbers offered (as text, "" = not said).</summary>
+    public const int MaxCircuit = 40;
+
+    /// <summary>One line for labels: "CYKY 3x2,5 · circuit 5 · -> Socket".</summary>
+    public static string Describe(PipeRoute r, bool cz = false)
+    {
+        var parts = new List<string>();
+        if (!string.IsNullOrEmpty(r.spec)) parts.Add(r.spec);
+        if (!string.IsNullOrEmpty(r.circuit)) parts.Add((cz ? "okruh " : "circuit ") + r.circuit);
+        string a = cz ? LabelCz(r.startLabel) : r.startLabel, b = cz ? LabelCz(r.endLabel) : r.endLabel;
+        if (!string.IsNullOrEmpty(a) || !string.IsNullOrEmpty(b))
+            parts.Add($"{(string.IsNullOrEmpty(a) ? "" : a + " ")}-> {(string.IsNullOrEmpty(b) ? "?" : b)}");
+        if (!string.IsNullOrEmpty(r.note)) parts.Add(r.note);
+        return string.Join(" · ", parts);
+    }
+
+    /// <summary>Length of the route's centre line (m).</summary>
+    public static float Length(IList<Vector3> pts)
+    {
+        float l = 0; for (int i = 1; i < pts.Count; i++) l += Vector3.Distance(pts[i - 1], pts[i]);
+        return l;
+    }
+
     /// <summary>Point items (RouteMarker.type).</summary>
     public static readonly string[] MarkerTypes = { "Box", "Socket", "Switch", "Light", "Outlet", "Valve", "Floor drain", "Panel", "Data" };
 
@@ -167,6 +208,9 @@ public static class RouteStore
         ? Path.GetFullPath(MRUKPathUtility.GetExportRoot())
         : Application.persistentDataPath, Folder, FileName);
 
+    /// <summary>Stamps a route/box as just edited (Merge keeps the newer one).</summary>
+    public static string Now => DateTime.Now.ToString("s");
+
     public static PipeRouteFile Current { get { if (current == null) Reload(); return current; } }
     public static List<PipeRoute> Routes => Current.routes;
     public static int UndoCount => undo.Count;
@@ -199,10 +243,20 @@ public static class RouteStore
         if (change == null) return;
         undo.Add(JsonUtility.ToJson(Current));
         if (undo.Count > MaxUndo) undo.RemoveAt(0);
+        // every route/box this change touched gets a new 'modified' (Merge keeps the newer copy of each)
+        var before = new Dictionary<string, string>();
+        foreach (var r in Current.routes) if (r.id != null) before[r.id] = Stamp(r);
+        foreach (var m in Current.markers) if (m.id != null) before[m.id] = Stamp(m);
         change(Current);
+        string now = Now;
+        foreach (var r in Current.routes) if (r.id == null || !before.TryGetValue(r.id, out var b) || b != Stamp(r)) r.modified = now;
+        foreach (var m in Current.markers) if (m.id == null || !before.TryGetValue(m.id, out var b) || b != Stamp(m)) m.modified = now;
         Save();
         PendingChanges.Mark("routes");
     }
+
+    static string Stamp(PipeRoute r) { string m = r.modified; r.modified = null; string j = JsonUtility.ToJson(r); r.modified = m; return j; }
+    static string Stamp(RouteMarker x) { string m = x.modified; x.modified = null; string j = JsonUtility.ToJson(x); x.modified = m; return j; }
 
     public static bool Undo()
     {
@@ -227,7 +281,7 @@ public static class RouteStore
         Changed?.Invoke();
     }
 
-    /// <summary>Routes of 'b' added to 'a' (same id: the one with more points wins - routes only grow while drawn).</summary>
+    /// <summary>Routes and boxes of 'b' added to 'a' (same id: the newer edit wins).</summary>
     public static PipeRouteFile Merge(PipeRouteFile a, PipeRouteFile b)
     {
         var res = new PipeRouteFile
@@ -236,12 +290,18 @@ public static class RouteStore
             markers = new List<RouteMarker>(a?.markers ?? new List<RouteMarker>()),
         };
         foreach (var m in b?.markers ?? new List<RouteMarker>())
-            if (res.markers.All(x => x.id != m.id)) res.markers.Add(m);
+        {
+            int i = res.markers.FindIndex(x => x.id == m.id);
+            if (i < 0) res.markers.Add(m);
+            else if (string.CompareOrdinal(m.modified ?? "", res.markers[i].modified ?? "") > 0) res.markers[i] = m;
+        }
         foreach (var r in b?.routes ?? new List<PipeRoute>())
         {
             int i = res.routes.FindIndex(x => x.id == r.id);
-            if (i < 0) res.routes.Add(r);
-            else if (r.localPoints.Count > res.routes[i].localPoints.Count) res.routes[i] = r;
+            if (i < 0) { res.routes.Add(r); continue; }
+            // the newer edit wins; without dates (older files) the longer one - routes only grow while drawn
+            int c = string.CompareOrdinal(r.modified ?? "", res.routes[i].modified ?? "");
+            if (c > 0 || (c == 0 && r.localPoints.Count > res.routes[i].localPoints.Count)) res.routes[i] = r;
         }
         res.modified = DateTime.Now.ToString("s");
         return res;

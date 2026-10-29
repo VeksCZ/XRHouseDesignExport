@@ -25,12 +25,14 @@ public class RouteEditTool : MonoBehaviour
     public MRUKExporter exporter;
 
     const string KindPref = "Routes.Kind", MarkerPref = "Routes.MarkerType";
-    const float SnapToRoute = 0.05f, StraightenDeg = 7f;
+    const float SnapToRoute = 0.05f, StraightenDeg = 7f, SnapToMarker = 0.06f, SnapAlign = 0.025f;
 
     RouteKind kind;
     int diaIdx, labelIdx;
     string drawingId;
-    bool deleteMode, wasActive, preparing, markerMode, joinMode;
+    bool deleteMode, wasActive, preparing, markerMode, joinMode, pickMode;
+    /// <summary>The route or box picked with "Pick..." - Spec / Circuit / Leads to change it.</summary>
+    string selRouteId, selMarkerId;
     string joinFirstId; bool joinFirstAtStart;
     int markerIdx;
     float retryAt;
@@ -47,9 +49,9 @@ public class RouteEditTool : MonoBehaviour
     PanelDrag panelDrag;
     TMP_Text titleText, hintText;
     readonly Dictionary<RouteKind, Button> kindButtons = new Dictionary<RouteKind, Button>();
-    Button diaButton, labelButton, finishButton, deleteButton, joinButton, modeButton, markerButton, acceptButton;
+    Button diaButton, labelButton, finishButton, deleteButton, joinButton, modeButton, markerButton, acceptButton, specButton, circuitDown, circuitUp, pickButton;
     bool panelPlaced;
-    const float PW = 640f, PH = 430f, PScale = 0.00055f, RowH = 58f, Gap = 8f;
+    const float PW = 640f, PH = 496f, PScale = 0.00055f, RowH = 58f, Gap = 8f;
 
 #if META_XR_SDK_INSTALLED
     static List<MRUKRoom> roomCache = new List<MRUKRoom>();
@@ -96,7 +98,7 @@ public class RouteEditTool : MonoBehaviour
             if (wasActive)
             {
                 wasActive = false;
-                drawingId = null; deleteMode = false; joinMode = false; joinFirstId = null;
+                drawingId = null; deleteMode = false; joinMode = false; joinFirstId = null; pickMode = false;
                 WallOverlays.ForceRoutes = false;
                 ClosePanel();
                 ShowPreview(false);
@@ -249,12 +251,44 @@ public class RouteEditTool : MonoBehaviour
             }
         }
         if (snapped) return bestP;
-        if (LastPoint(out var last))
+        // a box/socket right there: start/end on it
+        foreach (var m in RouteStore.Current.markers)
+        {
+            if (!RouteStore.WorldMarker(m, MRUKRooms(), out var mp, out var mn)) continue;
+            Vector3 q = mp + mn * Radius;
+            if (Vector3.Distance(q, c) < SnapToMarker) { snapped = true; return q; }
+        }
+        bool hasLast = LastPoint(out var last);
+        bool level = false, plumb = false;
+        if (hasLast)
         {
             Vector3 d = c - last;
             float h = new Vector2(d.x, d.z).magnitude;
-            if (h > 1e-3f && Mathf.Atan2(Mathf.Abs(d.y), h) * Mathf.Rad2Deg < StraightenDeg) c.y = last.y;       // level
-            else if (Mathf.Atan2(h, Mathf.Abs(d.y)) * Mathf.Rad2Deg < StraightenDeg) { c.x = last.x; c.z = last.z; } // plumb
+            if (h > 1e-3f && Mathf.Atan2(Mathf.Abs(d.y), h) * Mathf.Rad2Deg < StraightenDeg) { c.y = last.y; level = true; }       // level
+            else if (Mathf.Atan2(h, Mathf.Abs(d.y)) * Mathf.Rad2Deg < StraightenDeg) { c.x = last.x; c.z = last.z; plumb = true; } // plumb
+        }
+        // straight up/down from a box on this wall (a cable rising from a socket): line up with it
+        if (!plumb)
+            foreach (var m in RouteStore.Current.markers)
+            {
+                if (!RouteStore.WorldMarker(m, MRUKRooms(), out var mp, out var mn) || Mathf.Abs(mn.y) > 0.5f) continue;
+                Vector3 q = mp + mn * Radius;
+                if (new Vector2(q.x - c.x, q.z - c.z).magnitude < SnapAlign && Mathf.Abs(Vector3.Dot(c - q, mn)) < 0.05f)
+                { c.x = q.x; c.z = q.z; snapped = true; break; }
+            }
+        // the same height as a bend of another route nearby (pipes and cables run on common levels)
+        if (!level && (!hasLast || !plumb))
+        {
+            float bestDy = SnapAlign;
+            foreach (var r in RouteStore.Routes)
+            {
+                if (r.id == drawingId || !RouteStore.WorldPoints(r, MRUKRooms(), pts)) continue;
+                foreach (var p in pts)
+                {
+                    float dy = Mathf.Abs(p.y - c.y);
+                    if (dy < bestDy && dy > 1e-4f && new Vector2(p.x - c.x, p.z - c.z).magnitude < 3f) { bestDy = dy; c.y = p.y; snapped = true; }
+                }
+            }
         }
 #endif
         return c;
@@ -294,6 +328,7 @@ public class RouteEditTool : MonoBehaviour
         if (!Active || preparing) return;
         if (!hover.HasValue) { uiLog?.AddLog("Routes: point at a wall, floor or ceiling."); return; }
         if (deleteMode) { DeleteNearest(); return; }
+        if (pickMode) { PickNearest(); return; }
         if (joinMode) { JoinPick(); return; }
         if (markerMode) { PlaceMarker(); return; }
         Vector3 c = Candidate(out _);
@@ -312,7 +347,7 @@ public class RouteEditTool : MonoBehaviour
             };
             r.localPoints.Add(new Vector3Data(room.transform.InverseTransformPoint(c)));
             RouteStore.Apply(f => f.routes.Add(r));
-            drawingId = r.id; labelIdx = 0;
+            drawingId = r.id; labelIdx = 0; selRouteId = selMarkerId = null;
             Haptic(0.5f);
             Debug.Log($"[Routes] new {RouteStyle.Name(kind)} route {r.id.Substring(0, 6)} in {DoorCatalog.RoomId(room).Substring(0, 8)} at {c} ({(frameIsWalk ? "walk" : "passthrough")})");
         }
@@ -348,6 +383,7 @@ public class RouteEditTool : MonoBehaviour
             localNormal = new Vector3Data(room.transform.InverseTransformDirection(hoverNormal)),
         };
         RouteStore.Apply(f => f.markers.Add(m));
+        selMarkerId = m.id; selRouteId = null;
         Haptic(0.5f);
         uiLog?.AddLog($"Routes: {m.type} placed ({RouteStyle.Name(kind)}).");
 #endif
@@ -564,6 +600,49 @@ public class RouteEditTool : MonoBehaviour
     }
 #endif
 
+    /// <summary>Pick...: the route or box under the ray becomes the one Spec / Circuit / Leads to change.</summary>
+    void PickNearest()
+    {
+#if META_XR_SDK_INSTALLED
+        var marker = NearestMarker(out float md);
+        var route = NearestRoute(out _, out float rd);
+        if (marker != null && md <= rd) { selMarkerId = marker.id; selRouteId = null; Haptic(0.4f); uiLog?.AddLog($"Routes: picked a {marker.type}."); }
+        else if (route != null) { selRouteId = route.id; selMarkerId = null; kind = route.kind; Haptic(0.4f); uiLog?.AddLog($"Routes: picked a {RouteStyle.Name(route.kind)} route."); }
+        else { uiLog?.AddLog("Routes: point right at a route or a box."); return; }
+#endif
+        pickMode = false;
+        RefreshPanel();
+    }
+
+    PipeRoute SelRoute => selRouteId == null ? null : RouteStore.Routes.FirstOrDefault(r => r.id == selRouteId);
+    RouteMarker SelMarker => selMarkerId == null ? null : RouteStore.Current.markers.FirstOrDefault(m => m.id == selMarkerId);
+    /// <summary>What Spec / Circuit / Leads to change: the route being drawn, else the picked one, else the last one.</summary>
+    PipeRoute Target => Drawing ?? SelRoute ?? (SelMarker == null ? RouteStore.Routes.LastOrDefault() : null);
+
+    void CycleSpec()
+    {
+        var r = Target;
+        if (r == null) { uiLog?.AddLog("Routes: draw or pick a route first."); return; }
+        var specs = RouteStyle.Specs(r.kind);
+        string next = specs[(Array.IndexOf(specs, r.spec ?? "") + 1 + specs.Length) % specs.Length];
+        string id = r.id;
+        RouteStore.Apply(f => f.routes.First(q => q.id == id).spec = next);
+        RefreshPanel();
+    }
+
+    void StepCircuit(int d)
+    {
+        var r = Target; var m = r == null ? SelMarker : null;
+        if (r == null && m == null) { uiLog?.AddLog("Routes: draw or pick a route or a box first."); return; }
+        string cur = r != null ? r.circuit : m.circuit;
+        int n = int.TryParse(cur, out var v) ? v : 0;
+        n = Mathf.Clamp(n + d, 0, RouteStyle.MaxCircuit);
+        string val = n == 0 ? "" : n.ToString();
+        if (r != null) { string id = r.id; RouteStore.Apply(f => f.routes.First(q => q.id == id).circuit = val); }
+        else { string id = m.id; RouteStore.Apply(f => f.markers.First(q => q.id == id).circuit = val); }
+        RefreshPanel();
+    }
+
     void SetKind(RouteKind k)
     {
         kind = k; diaIdx = 0;
@@ -584,8 +663,8 @@ public class RouteEditTool : MonoBehaviour
     /// <summary>What the end of the route (being drawn, else the last one) leads to.</summary>
     void CycleLabel()
     {
-        var r = Drawing ?? RouteStore.Routes.LastOrDefault();
-        if (r == null) { uiLog?.AddLog("Routes: draw a route first."); return; }
+        var r = Target;
+        if (r == null) { uiLog?.AddLog("Routes: draw or pick a route first."); return; }
         labelIdx = (Array.IndexOf(RouteStyle.EndLabels, r.endLabel ?? "") + 1) % RouteStyle.EndLabels.Length;
         string id = r.id, label = RouteStyle.EndLabels[labelIdx];
         RouteStore.Apply(f => f.routes.First(q => q.id == id).endLabel = label);
@@ -627,12 +706,22 @@ public class RouteEditTool : MonoBehaviour
         else preview.gameObject.SetActive(false);
 
 #if META_XR_SDK_INSTALLED
-        if ((deleteMode || joinMode) && NearestRoute(out var pts, out _) != null)
+        List<Vector3> hl = null; Color hc = default;
+        if ((deleteMode || joinMode || pickMode) && NearestRoute(out var pts, out _) != null)
+        { hl = pts; hc = joinMode ? new Color(0.3f, 1f, 0.4f, 0.9f) : pickMode ? new Color(1f, 1f, 1f, 0.9f) : new Color(1f, 0.2f, 0.2f, 0.9f); }
+        else if (SelRoute != null && Drawing == null)
+        {
+            var sp = new List<Vector3>();
+            if (RouteStore.WorldPoints(SelRoute, MRUKRooms(), sp)) { hl = sp; hc = new Color(1f, 1f, 1f, 0.55f); }
+        }
+        else if (SelMarker != null && RouteStore.WorldMarker(SelMarker, MRUKRooms(), out var mp, out var mn))
+        { hl = new List<Vector3> { mp + mn * 0.02f - Vector3.up * 0.06f, mp + mn * 0.02f + Vector3.up * 0.06f }; hc = new Color(1f, 1f, 1f, 0.7f); }
+        if (hl != null)
         {
             highlight.gameObject.SetActive(true);
-            highlight.positionCount = pts.Count;
-            for (int i = 0; i < pts.Count; i++) highlight.SetPosition(i, ToView(pts[i]));
-            highlight.startColor = highlight.endColor = joinMode ? new Color(0.3f, 1f, 0.4f, 0.9f) : new Color(1f, 0.2f, 0.2f, 0.9f);
+            highlight.positionCount = hl.Count;
+            for (int i = 0; i < hl.Count; i++) highlight.SetPosition(i, ToView(hl[i]));
+            highlight.startColor = highlight.endColor = hc;
             highlight.widthMultiplier = 0.03f * s;
         }
         else highlight.gameObject.SetActive(false);
@@ -704,6 +793,11 @@ public class RouteEditTool : MonoBehaviour
         labelButton = XRUi.CreateButton(t, "", x0 + w3 + Gap, y, w3, RowH, CycleLabel, 17);
         finishButton = XRUi.CreateButton(t, "Finish route", x0 + (w3 + Gap) * 2, y, w3, RowH, Finish, 20);
         y += RowH + Gap;
+        float w4a = (fullW - Gap * 3) / 4f;
+        specButton = XRUi.CreateButton(t, "", x0, y, w4a * 2 + Gap, RowH, CycleSpec, 17);
+        circuitDown = XRUi.CreateButton(t, "Circuit -", x0 + (w4a + Gap) * 2, y, w4a, RowH, () => StepCircuit(-1), 17);
+        circuitUp = XRUi.CreateButton(t, "", x0 + (w4a + Gap) * 3, y, w4a, RowH, () => StepCircuit(1), 17);
+        y += RowH + Gap;
         modeButton = XRUi.CreateButton(t, "", x0, y, w3, RowH, () => { markerMode = !markerMode; deleteMode = false; if (markerMode) Finish(); RefreshPanel(); }, 18);
         markerButton = XRUi.CreateButton(t, "", x0 + w3 + Gap, y, w3, RowH, () =>
         {
@@ -713,17 +807,23 @@ public class RouteEditTool : MonoBehaviour
         }, 18);
         acceptButton = XRUi.CreateButton(t, "", x0 + (w3 + Gap) * 2, y, w3, RowH, AcceptProposals, 16);
         y += RowH + Gap;
-        float w4 = (fullW - Gap * 3) / 4f;
-        var undo = XRUi.CreateButton(t, "Undo", x0, y, w4, RowH, OnUndo, 20);
+        float w5 = (fullW - Gap * 4) / 5f;
+        var undo = XRUi.CreateButton(t, "Undo", x0, y, w5, RowH, OnUndo, 19);
         XRUi.SetTint(undo, XRUi.ButtonToggleColor);
-        deleteButton = XRUi.CreateButton(t, "Delete...", x0 + (w4 + Gap), y, w4, RowH, () => { deleteMode = !deleteMode; if (deleteMode) { drawingId = null; joinMode = false; } RefreshPanel(); }, 19);
-        joinButton = XRUi.CreateButton(t, "Join...", x0 + (w4 + Gap) * 2, y, w4, RowH, () =>
+        pickButton = XRUi.CreateButton(t, "Pick...", x0 + (w5 + Gap), y, w5, RowH, () =>
         {
-            joinMode = !joinMode; joinFirstId = null;
-            if (joinMode) { Finish(); deleteMode = false; markerMode = false; }
+            pickMode = !pickMode;
+            if (pickMode) { Finish(); deleteMode = false; joinMode = false; }
             RefreshPanel();
         }, 19);
-        XRUi.CreateButton(t, "Close", x0 + (w4 + Gap) * 3, y, w4, RowH, () => { if (editMode != null && editMode.IsOn) editMode.Toggle(); }, 20);
+        deleteButton = XRUi.CreateButton(t, "Delete...", x0 + (w5 + Gap) * 2, y, w5, RowH, () => { deleteMode = !deleteMode; if (deleteMode) { drawingId = null; joinMode = false; pickMode = false; } RefreshPanel(); }, 19);
+        joinButton = XRUi.CreateButton(t, "Join...", x0 + (w5 + Gap) * 3, y, w5, RowH, () =>
+        {
+            joinMode = !joinMode; joinFirstId = null;
+            if (joinMode) { Finish(); deleteMode = false; markerMode = false; pickMode = false; }
+            RefreshPanel();
+        }, 19);
+        XRUi.CreateButton(t, "Done", x0 + (w5 + Gap) * 4, y, w5, RowH, () => editMode?.LeaveTool(), 19);
         y += RowH + 6;
         hintText = XRUi.CreateText(t, "Hint", "", 16, TextAlignmentOptions.TopLeft, x0, y, fullW, PH - y - 4, XRUi.MutedText);
         RefreshPanel();
@@ -746,8 +846,10 @@ public class RouteEditTool : MonoBehaviour
         if (!panel) return;
         var r = Drawing;
         int count = RouteStore.Routes.Count;
+        var tr = Target; var tm = tr == null ? SelMarker : null;
         titleText.text = r != null
             ? $"Drawing: {RouteStyle.Name(r.kind)} - {r.localPoints.Count} point(s)"
+            : pickMode ? "Pick: trigger on a route or a box to change it"
             : deleteMode ? "Delete: trigger on a route or a box"
             : joinMode ? (joinFirstId == null ? "Join: trigger on the end of the first route" : "Join: now the end of the second route")
             : markerMode ? $"Boxes: {RouteStore.Current.markers.Count}   -   next: {RouteStyle.Name(kind)} {RouteStyle.MarkerTypes[markerIdx]}"
@@ -755,9 +857,12 @@ public class RouteEditTool : MonoBehaviour
         foreach (var kv in kindButtons)
             XRUi.SetTint(kv.Value, kv.Key == kind ? Darken(RouteStyle.Color(kv.Key)) : XRUi.ButtonColor);
         XRUi.SetLabel(diaButton, $"Size: {Mathf.RoundToInt(Radius * 2000f)} mm");
-        var lr = r ?? RouteStore.Routes.LastOrDefault();
-        string end = lr != null && !string.IsNullOrEmpty(lr.endLabel) ? lr.endLabel : "-";
+        string end = tr != null && !string.IsNullOrEmpty(tr.endLabel) ? tr.endLabel : "-";
         XRUi.SetLabel(labelButton, $"Leads to: {end}");
+        XRUi.SetLabel(specButton, tr != null ? $"Spec: {(string.IsNullOrEmpty(tr.spec) ? "-" : tr.spec)}" : tm != null ? $"{tm.type} (no spec)" : "Spec: -");
+        string circ = tr != null ? tr.circuit : tm?.circuit;
+        XRUi.SetLabel(circuitUp, $"Circuit {(string.IsNullOrEmpty(circ) ? "-" : circ)} +");
+        XRUi.SetTint(pickButton, pickMode ? XRUi.ButtonOnColor : XRUi.ButtonToggleColor);
         XRUi.SetTint(finishButton, r != null ? XRUi.ButtonOnColor : XRUi.ButtonDisabled);
         XRUi.SetTint(deleteButton, deleteMode ? XRUi.ButtonDangerColor : XRUi.ButtonToggleColor);
         XRUi.SetTint(joinButton, joinMode ? XRUi.ButtonOnColor : XRUi.ButtonToggleColor);
@@ -767,12 +872,24 @@ public class RouteEditTool : MonoBehaviour
         int prop = RouteStore.Routes.Count(x => x.proposed);
         XRUi.SetLabel(acceptButton, prop > 0 ? $"Keep {prop} from photos" : "No photo proposals");
         XRUi.SetTint(acceptButton, prop > 0 ? XRUi.ButtonOnColor : XRUi.ButtonDisabled);
-        SetHint(r != null
+        string sel = tr != null && r == null && SelRoute != null ? $"<b>Picked:</b> {RouteStyle.Name(tr.kind)} {RouteLength(tr)} {RouteStyle.Describe(tr)}\n"
+                   : tm != null ? $"<b>Picked:</b> {tm.type}{(string.IsNullOrEmpty(tm.circuit) ? "" : ", circuit " + tm.circuit)}\n" : "";
+        SetHint(sel + (r != null
             ? "Trigger on every bend and on the end. A point near another route joins it. Finish route (or trigger twice on the same spot) when done."
             : deleteMode ? "Point at the route or box to delete and pull the trigger. Undo brings it back."
             : joinMode ? "Joins two routes into one - e.g. a pipe drawn in two rooms on both sides of a wall: trigger near the end of one, then near the end of the other. Undo splits them again."
             : markerMode ? "Trigger on the wall/floor where the box, socket or outlet is. Colour = the kind picked above."
-            : "Pick the kind, then trigger on the start of a pipe or cable. Pipes on the floor lie on it; chases in walls show on the face. A route that ends right behind a wall where another of the same kind ends is joined through the wall.");
+            : pickMode ? "Point at a route or a box and pull the trigger - then Spec, Circuit and Leads to change it."
+            : "Pick the kind, then trigger on the start of a pipe or cable. Points snap to boxes, straight above/below them and to the levels of other routes (white cursor). Pick... to label an existing route."));
+    }
+
+    static string RouteLength(PipeRoute r)
+    {
+#if META_XR_SDK_INSTALLED
+        var pts = new List<Vector3>();
+        if (RouteStore.WorldPoints(r, MRUKRooms(), pts)) return $"{RouteStyle.Length(pts):0.0} m";
+#endif
+        return "";
     }
 
     static Color Darken(Color c) => new Color(c.r * 0.75f, c.g * 0.75f, c.b * 0.75f, 1f);

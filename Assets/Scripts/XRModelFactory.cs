@@ -283,7 +283,7 @@ public static class XRModelFactory
                     var p = floor.PlaneBoundary2D[i];
                     Vector3 worldPt = pos + rot * new Vector3(p.x, p.y, 0);
                     ceilY[i] = SampleCeilingHeight(room.CeilingAnchors, worldPt, worldPt.y + fallbackH);
-                    fp.vertices.Add(gRot * (worldPt - center));
+                    fp.vertices.Add(gRot * (worldPt - center) + Vector3.up * Buildup(pos.y));
                     cp.vertices.Add(gRot * (new Vector3(worldPt.x, ceilY[i], worldPt.z) - center));
                 }
                 // Ear clipping: L-shaped rooms are common, a triangle fan would cut across the notch.
@@ -549,6 +549,12 @@ return model;
     /// null to keep the scanned one. Installed per scan by Furniture.InstallCeilings.</summary>
     public static System.Func<IEnumerable<MRUKAnchor>, Vector3, float?> CeilingOverride;
 
+    /// <summary>Finished-floor build-up (m) above a rough floor at world height y - the scan is the bare shell, the real
+    /// floor (insulation, screed, tiles) comes on top of it. Per scan from the furniture spec's "floor_buildup"
+    /// (Furniture.InstallCeilings); null = the scanned floor as is.</summary>
+    public static System.Func<float, float> FloorBuildupAt;
+    public static float Buildup(float roughFloorY) => FloorBuildupAt?.Invoke(roughFloorY) ?? 0f;
+
     /// <summary>A blind recess in a wall (a niche from the furniture spec): the wall face edge a-b (world, horizontal),
     /// world heights y0..y1, depth into the wall and the face's normal pointing into the room it opens to.</summary>
     public struct WallNiche { public Vector3 a, b, inward; public float y0, y1, depth; }
@@ -559,6 +565,7 @@ return model;
 
     /// <summary>A niche on one wall panel, in the panel's local frame: x/y rectangle and the slab (local z) it hollows.</summary>
     struct NicheRect { public float x0, x1, y0, y1, z0, z1; public bool own; }
+    const float MinNicheBack = 0.04f;
 
     /// <summary>The niches that hollow out a wall panel (centre pos, rotation rot, w x h) whose box spans local z
     /// boxZ0..boxZ1. The panel of the niche's own room and the opposite face of the same wall (a neighbour room's
@@ -584,6 +591,10 @@ return model;
             // the opposite face of the wall: a few cm of slack behind the back, so this panel never pokes into it
             bool own = Mathf.Abs(zf) <= 0.06f;
             if (!own) { if (dz < 0f) z0 -= 0.03f; else z1 += 0.03f; }
+            // never through the wall: at least MinNicheBack of this panel stays behind the niche's back (a niche drawn
+            // deeper than the wall is thick gets shallower instead of showing as a hole on the other side)
+            if (dz < 0f) z0 = Mathf.Max(z0, boxZ0 + MinNicheBack); else z1 = Mathf.Min(z1, boxZ1 - MinNicheBack);
+            if (z1 - z0 < 0.01f) continue;
             if (z1 <= boxZ0 || z0 >= boxZ1 || Mathf.Abs(zf) > Mathf.Abs(boxZ1 - boxZ0) + 0.35f) continue;
             list.Add(new NicheRect { x0 = x0, x1 = x1, y0 = y0, y1 = y1, z0 = z0, z1 = z1, own = own });
         }
@@ -724,14 +735,19 @@ return model;
     {
         var outline = floor.PlaneBoundary2D;
         if (outline == null || outline.Count < 3)
-            return CreateBoxPart("FLOOR", floor.transform.position, floor.transform.rotation, new Vector3(floor.PlaneRect.Value.width, floor.PlaneRect.Value.height, 0.05f), "FLOOR", center, globalRot, new Vector3(0, 0, -0.025f));
+        {
+            float tb = Buildup(floor.transform.position.y);
+            return CreateBoxPart("FLOOR", floor.transform.position, floor.transform.rotation, new Vector3(floor.PlaneRect.Value.width, floor.PlaneRect.Value.height, 0.05f + tb), "FLOOR", center, globalRot, new Vector3(0, 0, tb - (0.05f + tb) / 2f));
+        }
 
-        const float thickness = 0.05f;
+        // the finished floor: the slab's top is the build-up above the scanned (rough) floor, solid down to below it
+        float buildup = Buildup(floor.transform.position.y);
+        float thickness = 0.05f + buildup;
         Quaternion gRot = Quaternion.Euler(0, globalRot, 0);
         var part = new XRMeshPart { name = "FLOOR", materialName = "FLOOR", color = GetColorForMaterial("FLOOR") };
 
         var top = new List<Vector3>(outline.Count);
-        foreach (var p in outline) top.Add(gRot * (floor.transform.position + floor.transform.rotation * new Vector3(p.x, p.y, 0) - center));
+        foreach (var p in outline) top.Add(gRot * (floor.transform.position + floor.transform.rotation * new Vector3(p.x, p.y, 0) - center) + Vector3.up * buildup);
         int n = top.Count;
         foreach (var v in top) part.vertices.Add(v);
         foreach (var v in top) part.vertices.Add(v + Vector3.down * thickness);
@@ -1023,4 +1039,4 @@ return model;
         if (m.Contains("WINDOW")) return new Color(0.25f, 0.60f, 0.92f);
         return Color.white;
         }
-        }
+        }
