@@ -49,6 +49,8 @@ public partial class DesktopWalkApp : MonoBehaviour
             WallOverlays.ShowPhotos = ov.Contains("photos");
             WallOverlays.ShowFittings = WallOverlays.FittingsInWalk = ov.Contains("fittings");
             WallOverlays.ShowZones = ov.Contains("zones");
+            WallOverlays.ShowScan = ov.Contains("scan");
+            WallScan.LogOcclusion = ov.Contains("occl");
             WallOverlays.LogZones = WallOverlays.ShowZones;
         }
         Application.targetFrameRate = -1;

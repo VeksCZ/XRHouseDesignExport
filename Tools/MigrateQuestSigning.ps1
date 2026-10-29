@@ -43,5 +43,7 @@ foreach ($x in Get-ChildItem $backup -Recurse -File) {
     if ($LASTEXITCODE -ne 0) { $failed++ }
 }
 if ($failed) { throw "$failed file(s) not restored - they are in $backup" }
+# What adb pushed belongs to 'shell' (rwxrws---): the app could not even list those folders. Open them up to it.
+& $adb shell "find '$files' -user shell -type d -exec chmod 777 {} + ; find '$files' -user shell -type f -exec chmod 666 {} +"
 & $adb shell "ls $files"
 Write-Host "Done - start the app (it asks for its permissions again)."

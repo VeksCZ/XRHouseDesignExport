@@ -77,6 +77,13 @@ and exports 3D models, floor plans and reports from the scan.
   zones everywhere; fittings + scan outline real walls only, greyed when the loaded scan is of another place) / Tools
   (every edit tool directly - `OnTool` -> `EditModeController.UseTool`; again = leave) / Data. Hold Y still opens the
   edit toolbar (Undo/Redo).
+- **Wall scan** (`WallScan`, layer "Wall scan (3D)", on by default): every 3D-scan (dense) frame is projected onto the
+  scanned planes of its room (walls/floors/ceilings, one ARGBHalf accumulation RenderTexture per plane, shader
+  `Resources/Shaders/WallScanSplat` - weight = facing^2 x edge x sharpness / distance, ^4; `WallScanShow` divides and
+  alpha-tests, so unseen spots stay holes). Live while recording (`WallPhotoCapture.PaintLive`, `WallOverlays.ForceScan`),
+  otherwise built in the background from the frames on disk (`BuildMissing`). Cached per plane as PNG + `manifest.json`
+  (frames held) in `WallPhotos/WallScan` (headset) / `Exports/RoomData/WallScan` (PC). Desktop: `-overlays scan`,
+  `-test views -views rooms`. Single photos (cable photos) are the secondary mode of the same tool.
 - **Niches** (furniture spec item `"type": "niche"`): cut into the walls by `XRModelFactory` (`Niches`, installed with the
   spec's ceilings by `Furniture.InstallCeilings`); `furnish.py` only marks them on the wall face.
 - **Scan sources**: the selected scan never changes by itself (only the menu's < >; taps are debounced, loads

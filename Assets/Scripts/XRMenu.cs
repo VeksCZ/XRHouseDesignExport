@@ -87,6 +87,7 @@ public class XRMenu : MonoBehaviour
         // Wall photos over passthrough (cable chases before plastering), poses tied to the live scan's rooms.
         var photoTool = FindAnyObjectByType<WallPhotoCapture>() ?? gameObject.AddComponent<WallPhotoCapture>();
         photoTool.uiLog = this; photoTool.editMode = editMode; photoTool.exporter = exporter; photoTool.walk = walk;
+        this.photoTool = photoTool;
         // Installation routes (cables, water, waste, heating) traced on the real walls, house-wide (RouteStore).
         var routeTool = FindAnyObjectByType<RouteEditTool>() ?? gameObject.AddComponent<RouteEditTool>();
         routeTool.uiLog = this; routeTool.editMode = editMode; routeTool.walk = walk; routeTool.exporter = exporter;
@@ -108,6 +109,17 @@ public class XRMenu : MonoBehaviour
         SetStatus("Ready");
         await Task.Delay(300);
         AddLog("XR Ready.");
+        // The selected scan (the live one at start) is loaded right away - nothing has to be opened first for the
+        // menu's state line, the layers and the tools to have a scan to work with.
+        var saved = MRUKSceneCache.ListCachedScans();
+        if (MRUKSceneCache.LastListError != null) AddLog($"<color=red>Saved scans can't be read: {MRUKSceneCache.LastListError}</color>");
+        else AddLog($"{saved.Count} saved scan(s) - pick one with < >.");
+        if (exporter != null && !MRUKExporter.Loading)
+        {
+            await Busy("Loading...");
+            bool ok = await exporter.EnsureSelectedSourceLoaded(this);
+            SetStatus(ok ? "Ready" : "No scan");
+        }
     }
 
     void BuildMenu()
@@ -184,33 +196,41 @@ public class XRMenu : MonoBehaviour
         layersText = XRUi.CreateText(layers, "Where", "", 18, TextAlignmentOptions.TopLeft, left, y0 - 2, 552, 58, XRUi.MutedText);
         layersText.richText = true;
         float L(int r) => y0 + 60 + r * (h + gap);
-        showRoutesButton = XRUi.CreateButton(layers, "Routes", left, L(0), w, h, () => WallOverlays.ShowRoutes = !WallOverlays.ShowRoutes);
-        showPhotosButton = XRUi.CreateButton(layers, "Photos", right, L(0), w, h, () => WallOverlays.ShowPhotos = !WallOverlays.ShowPhotos);
-        zonesButton = XRUi.CreateButton(layers, "No-drill zones", left, L(1), w, h, () =>
+        wallScanButton = XRUi.CreateButton(layers, "Wall scan (3D)", left, L(0), w, h, () =>
+        {
+            WallOverlays.ShowScan = !WallOverlays.ShowScan;
+            AddLog(WallOverlays.ShowScan ? "Wall scan: the 3D scan of the bare walls painted on them (holes = not scanned yet)." : "Wall scan off.");
+        });
+        showRoutesButton = XRUi.CreateButton(layers, "Routes", right, L(0), w, h, () => WallOverlays.ShowRoutes = !WallOverlays.ShowRoutes);
+        zonesButton = XRUi.CreateButton(layers, "No-drill zones", right, L(1), w, h, () =>
         {
             WallOverlays.ShowZones = !WallOverlays.ShowZones;
             if (WallOverlays.ShowZones && !WallOverlays.ShowRoutes) WallOverlays.ShowRoutes = true;
             AddLog(WallOverlays.ShowZones ? $"No-drill zones: {WallOverlays.ZoneMargin * 100:0} cm either side of every route and box." : "No-drill zones off.");
         });
-        fittingsButton = XRUi.CreateButton(layers, "Fittings + niches\n<size=70%>real walls only</size>", right, L(1), w, h, OnToggleFittings, 24);
-        scanOverlayButton = XRUi.CreateButton(layers, "Scan outline\n<size=70%>real walls only</size>", left, L(2), w, h, OnToggleScanOverlay, 24);
-        siteText = XRUi.CreateText(layers, "Hint", "", 17, TextAlignmentOptions.MidlineLeft, right + 6, L(2), w - 6, h, XRUi.MutedText);
+        showPhotosButton = XRUi.CreateButton(layers, "Cable photos", left, L(1), w, h, () => WallOverlays.ShowPhotos = !WallOverlays.ShowPhotos);
+        fittingsButton = XRUi.CreateButton(layers, "Fittings + niches\n<size=70%>real walls only</size>", left, L(2), w, h, OnToggleFittings, 24);
+        scanOverlayButton = XRUi.CreateButton(layers, "Scan outline\n<size=70%>real walls only</size>", right, L(2), w, h, OnToggleScanOverlay, 24);
 
         // Tools: each one straight away (edit mode comes on with it; its bar has Undo/Redo). Again = leave the tool.
-        toolButtons.Clear();
-        void ToolButton(EditModeController.Tool t, string label, float x, float y)
+        toolButtons.Clear(); scanButton = null;
+        float w3 = (552f - 2 * gap) / 3f;
+        Button ToolButton(EditModeController.Tool t, string label, int col, int row, bool dense = false)
         {
-            var btn = XRUi.CreateButton(tools, label, x, y, w, h, () => OnTool(t), 24);
-            toolButtons[t] = btn;
+            var btn = XRUi.CreateButton(tools, label, left + col * (w3 + gap), Row(row), w3, h, () => OnTool(t, dense), 22);
+            if (dense) scanButton = btn; else toolButtons[t] = btn;
+            return btn;
         }
-        ToolButton(EditModeController.Tool.Routes, "Trace routes", left, Row(0));
-        ToolButton(EditModeController.Tool.Photos, "Wall photos", right, Row(0));
-        ToolButton(EditModeController.Tool.Doors, "Doors + windows", left, Row(1));
-        ToolButton(EditModeController.Tool.Stairs, "Stairs", right, Row(1));
-        ToolButton(EditModeController.Tool.Holes, "Floor opening", left, Row(2));
-        ToolButton(EditModeController.Tool.Furniture, "Move furniture", right, Row(2));
-        ToolButton(EditModeController.Tool.Measure, "Measure", left, Row(3));
-        ToolButton(EditModeController.Tool.Sun, "Sun", right, Row(3));
+        ToolButton(EditModeController.Tool.Photos, "3D scan\n<size=70%>of bare walls</size>", 0, 0, dense: true);
+        ToolButton(EditModeController.Tool.Routes, "Trace routes", 1, 0);
+        ToolButton(EditModeController.Tool.Measure, "Measure", 2, 0);
+        ToolButton(EditModeController.Tool.Doors, "Doors +\nwindows", 0, 1);
+        ToolButton(EditModeController.Tool.Stairs, "Stairs", 1, 1);
+        ToolButton(EditModeController.Tool.Holes, "Floor\nopening", 2, 1);
+        ToolButton(EditModeController.Tool.Furniture, "Move\nfurniture", 0, 2);
+        ToolButton(EditModeController.Tool.Sun, "Sun", 1, 2);
+        ToolButton(EditModeController.Tool.Photos, "Single\nphotos", 2, 2);
+        toolsHint = XRUi.CreateText(tools, "Hint", "Pressed again = leave the tool. Hold Y = edit bar with Undo / Redo.", 18, TextAlignmentOptions.Center, left, Row(3) + 10, 552, h - 20, XRUi.MutedText);
         routesButton = toolButtons[EditModeController.Tool.Routes];
         photosButton = toolButtons[EditModeController.Tool.Photos];
 
@@ -224,9 +244,10 @@ public class XRMenu : MonoBehaviour
         var deleteExportsButton = XRUi.CreateButton(data, "Delete exports", right, Row(3), w, h, OnDeleteExports);
         XRUi.SetTint(deleteExportsButton, XRUi.ButtonDangerColor);
 
-        foreach (var b in new[] { walkButton, dollhouseButton, plansButton, miniMapButton, showRoutesButton, showPhotosButton, fittingsButton, scanOverlayButton, zonesButton })
+        foreach (var b in new[] { walkButton, dollhouseButton, plansButton, miniMapButton, showRoutesButton, showPhotosButton, fittingsButton, scanOverlayButton, zonesButton, wallScanButton })
             XRUi.SetTint(b, XRUi.ButtonToggleColor);
         foreach (var b in toolButtons.Values) XRUi.SetTint(b, XRUi.ButtonToggleColor);
+        if (scanButton != null) XRUi.SetTint(scanButton, XRUi.ButtonToggleColor);
 
         float logTop = Row(4) + 2;
         logText = XRUi.CreateText(root, "Log", "", 22, TextAlignmentOptions.TopLeft, 24, logTop, 552, CanvasHeight - logTop - 10, XRUi.MutedText);
@@ -437,11 +458,17 @@ public class XRMenu : MonoBehaviour
         SyncPending();
         if (miniMapButton != null) XRUi.SetTint(miniMapButton, miniMap != null && miniMap.IsOn ? XRUi.ButtonOnColor : XRUi.ButtonToggleColor);
         if (walkButton != null) XRUi.SetTint(walkButton, walk != null && walk.IsOn ? XRUi.ButtonOnColor : XRUi.ButtonToggleColor);
+        bool scanning = PhotosOn && photoTool != null && photoTool.Dense;
         foreach (var kv in toolButtons)
-            XRUi.SetTint(kv.Value, editMode != null && editMode.IsOn && editMode.CurrentTool == kv.Key ? XRUi.ButtonOnColor : XRUi.ButtonToggleColor);
+        {
+            bool on = editMode != null && editMode.IsOn && editMode.CurrentTool == kv.Key && !(kv.Key == EditModeController.Tool.Photos && scanning);
+            XRUi.SetTint(kv.Value, on ? XRUi.ButtonOnColor : XRUi.ButtonToggleColor);
+        }
+        if (scanButton != null) XRUi.SetTint(scanButton, scanning ? XRUi.ButtonOnColor : XRUi.ButtonToggleColor);
         if (showRoutesButton != null) XRUi.SetTint(showRoutesButton, WallOverlays.ShowRoutes ? XRUi.ButtonOnColor : XRUi.ButtonToggleColor);
         if (showPhotosButton != null) XRUi.SetTint(showPhotosButton, WallOverlays.ShowPhotos ? XRUi.ButtonOnColor : XRUi.ButtonToggleColor);
         if (fittingsButton != null) XRUi.SetTint(fittingsButton, WallOverlays.ShowFittings ? XRUi.ButtonOnColor : here ? XRUi.ButtonToggleColor : XRUi.ButtonDisabled);
+        if (wallScanButton != null) XRUi.SetTint(wallScanButton, WallOverlays.ShowScan ? XRUi.ButtonOnColor : XRUi.ButtonToggleColor);
         if (zonesButton != null) XRUi.SetTint(zonesButton, WallOverlays.ShowZones ? XRUi.ButtonOnColor : XRUi.ButtonToggleColor);
         if (finishedButton != null)
         {
@@ -456,7 +483,10 @@ public class XRMenu : MonoBehaviour
     TMP_Text siteText, stateText, layersText;
     string layersShown;
     readonly Dictionary<EditModeController.Tool, Button> toolButtons = new Dictionary<EditModeController.Tool, Button>();
-    Button zonesButton, cleanupButton;
+    Button scanButton;
+    TMP_Text toolsHint;
+    WallPhotoCapture photoTool;
+    Button zonesButton, cleanupButton, wallScanButton;
 
     /// <summary>Labels that show state: the Dollhouse mode, and where the Layers tab draws (real walls or only the models).</summary>
     void SyncLabels()
@@ -466,24 +496,21 @@ public class XRMenu : MonoBehaviour
             string m = "Dollhouse: " + dollhouse.ModeLabel;
             if (m != modeShown) { modeShown = m; XRUi.SetLabel(modeButton, m); }
         }
-        if (siteText != null)
-        {
-            const string t = "Point at a route, box or photo to see what it is. Left X = routes / photos.";
-            if (t != siteShown) { siteShown = t; siteText.text = t; }
-        }
+
         if (layersText != null && exporter != null)
         {
             string t = MRUKExporter.Loading ? "Loading the scan..."
                 : exporter.WorldAligned
-                    ? "<color=#7fe07f>On the real walls here</color>, in Walk and in the Dollhouse."
+                    ? "<color=#7fe07f>On the real walls here</color>, in Walk and in the Dollhouse. Point at a route or box to see what it is."
                     : "<color=#ffa040>This scan is of another place</color> - layers show in Walk and the Dollhouse only. Real-wall layers need the scan of the place you stand in (pick it with < >).";
+            if (!string.IsNullOrEmpty(WallScan.Status)) t += $"  <color=#9ecbff>{WallScan.Status}</color>";
             if (t != layersShown) { layersShown = t; layersText.text = t; }
         }
         if (stateText != null && exporter != null)
         {
             bool live = exporter.SelectedSource == MRUKExporter.LiveSource;
             string place = MRUKExporter.Loading ? "loading..."
-                : exporter.ActiveSource != exporter.SelectedSource ? "<color=#ffa040>not loaded yet</color>"
+                : exporter.ActiveSource != exporter.SelectedSource ? "<color=#ffa040>not loaded - press its name to load</color>"
                 : exporter.WorldAligned ? "<color=#7fe07f>lined up here</color>"
                 : "<color=#ffa040>another place (not on these walls)</color>";
             string save = live && PendingChanges.LiveUnsaved ? "  |  <color=#ffa040>live scan not saved</color>" : "";
@@ -540,13 +567,13 @@ public class XRMenu : MonoBehaviour
         AddLog("Fittings + niches: " + WallOverlays.FittingsInfo);
     }
 
-    /// <summary>X: routes + photos on walls -> routes only -> nothing -> routes + photos... (works while walking too).</summary>
+    /// <summary>X: wall scan + routes -> routes only -> nothing -> wall scan + routes... (works while walking too).</summary>
     void CycleWallLayers()
     {
-        bool r = WallOverlays.ShowRoutes, p = WallOverlays.ShowPhotos;
-        if (r && p) { WallOverlays.ShowPhotos = false; AddLog("Walls: routes"); }
+        bool r = WallOverlays.ShowRoutes, sc = WallOverlays.ShowScan || WallOverlays.ShowPhotos;
+        if (r && sc) { WallOverlays.ShowScan = false; WallOverlays.ShowPhotos = false; AddLog("Walls: routes"); }
         else if (r) { WallOverlays.ShowRoutes = false; AddLog("Walls: nothing"); }
-        else { WallOverlays.ShowRoutes = true; WallOverlays.ShowPhotos = true; AddLog("Walls: routes + photos"); }
+        else { WallOverlays.ShowRoutes = true; WallOverlays.ShowScan = true; AddLog("Walls: wall scan + routes"); }
     }
 
     bool RoutesOn => editMode != null && editMode.IsOn && editMode.CurrentTool == EditModeController.Tool.Routes;
@@ -576,10 +603,16 @@ public class XRMenu : MonoBehaviour
 
     /// <summary>Tools tab: the tool on (edit mode comes on with it), pressed again off. Routes and wall photos hide the
     /// menu for a clear view (it comes back when the tool is left).</summary>
-    void OnTool(EditModeController.Tool t)
+    void OnTool(EditModeController.Tool t, bool dense = false)
     {
         if (editMode == null) return;
-        if (editMode.IsOn && editMode.CurrentTool == t) { editMode.LeaveTool(); return; }
+        if (editMode.IsOn && editMode.CurrentTool == t)
+        {
+            // 3D scan <-> cable photos: the same tool, just switch its mode
+            if (t == EditModeController.Tool.Photos && photoTool != null && photoTool.Dense != dense) { photoTool.SetDense(dense); return; }
+            editMode.LeaveTool(); return;
+        }
+        if (t == EditModeController.Tool.Photos) WallPhotoCapture.StartDense = dense;
         editMode.UseTool(t);
         if (t == EditModeController.Tool.Routes || t == EditModeController.Tool.Photos) HideMenuForTool();
     }
@@ -754,6 +787,8 @@ public class XRMenu : MonoBehaviour
         if (walk != null && walk.IsOn) OnToggleWalk();
         exporter.CycleSource(direction, this);
         RefreshScanLabel();
+        if (exporter.Sources.Count <= 1)
+            AddLog(MRUKSceneCache.LastListError != null ? $"<color=red>Saved scans can't be read: {MRUKSceneCache.LastListError}</color>" : "No saved scans - only the live scan.");
         int my = ++cycleVersion;
         await Task.Delay(700);
         if (my != cycleVersion) return;

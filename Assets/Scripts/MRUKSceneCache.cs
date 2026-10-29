@@ -65,6 +65,22 @@ public static class MRUKSceneCache
     /// <summary>Cached scan names, most recently saved first.</summary>
     public static List<string> ListCachedScans()
     {
+        // A folder the app can't read (files put there by adb as another user) must not break the whole scan list.
+        try { return ListCachedScansUnsafe(); }
+        catch (Exception e)
+        {
+            LastListError = e.Message;
+            Debug.LogError($"[ScanCache] can't list saved scans: {e.Message}");
+            return new List<string>();
+        }
+    }
+
+    /// <summary>Why the last listing failed (null = fine) - shown in the menu.</summary>
+    public static string LastListError;
+
+    static List<string> ListCachedScansUnsafe()
+    {
+        LastListError = null;
         string root = GetCacheRoot();
         if (!Directory.Exists(root)) return new List<string>();
         // Furnished scans (the finished house model: furniture, niches, real ceilings) come first, then by date.

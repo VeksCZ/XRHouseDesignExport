@@ -178,10 +178,12 @@ public class WallPhotoCapture : MonoBehaviour
     {
         if (!Active)
         {
-            if (wasActive) { wasActive = false; started = false; StopCamera(); ClosePanel(); CloseHud(); ClearOutlines(); if (covGo) covGo.SetActive(false); if (guideGo) guideGo.SetActive(false); guideRoom = "-"; }
+            if (wasActive) { wasActive = false; started = false; StopCamera(); ClosePanel(); CloseHud(); ClearOutlines(); if (covGo) covGo.SetActive(false); if (guideGo) guideGo.SetActive(false); guideRoom = "-"; WallOverlays.ForceScan = false; WallScan.SaveAll(); }
             return;
         }
         wasActive = true;
+        // while the 3D scan records, the walls show what it has painted so far
+        WallOverlays.ForceScan = dense;
         if (!started && !preparing && Time.time >= retryAt) Begin();
 #if META_XR_SDK_INSTALLED
         if (cam == null || !cam.IsPlaying) { UpdateHud(); return; }
@@ -220,9 +222,9 @@ public class WallPhotoCapture : MonoBehaviour
         head = rig ? rig.centerEyeAnchor : Camera.main ? Camera.main.transform : null;
         leftHand = rig ? rig.leftHandAnchor : null;
         BuildHud();
-        // Always start in cable-photo mode: a 3D scan left on from last time would record on its own while you
-        // walk to the next room.
-        dense = false; haveDense = false;
+        // The mode it was opened for (menu: "3D scan" or "Cable photos") - never a 3D scan left on from last time,
+        // which would record on its own while you walk to the next room.
+        dense = StartDense; StartDense = false; haveDense = false;
         if (walk != null && walk.IsOn)
         {
             // Photos are taken of the real house, over passthrough - step out of the model first.
@@ -494,6 +496,9 @@ public class WallPhotoCapture : MonoBehaviour
                 meta.seedPoints.Add(seedHit[i]);
                 meta.seedColors.Add(new Color32(pixels[o], pixels[o + 1], pixels[o + 2], 255));
             }
+#if META_XR_SDK_INSTALLED
+            if (isDense) PaintLive(pixels, w, h, meta);
+#endif
             string jpg = Path.Combine(sessionDir, meta.file), json = Path.ChangeExtension(jpg, ".json");
             string metaJson = JsonUtility.ToJson(meta, !isDense);
             pendingWrites++;
@@ -540,6 +545,30 @@ public class WallPhotoCapture : MonoBehaviour
             RefreshPanel();
         });
     }
+
+#if META_XR_SDK_INSTALLED
+    Texture2D liveTex;
+    /// <summary>A 3D-scan frame painted onto the walls right away (WallScan), so you see what is covered.</summary>
+    void PaintLive(byte[] pixels, int w, int h, WallPhotoMeta meta)
+    {
+        try
+        {
+            var mruk = MRUK.Instance;
+            if (mruk == null) return;
+            var rooms = MRUKDataProcessor.GetValidRooms(mruk);
+            WallScan.EnsurePlanes(rooms);
+            if (!liveTex || liveTex.width != w || liveTex.height != h)
+            {
+                if (liveTex) Destroy(liveTex);
+                liveTex = new Texture2D(w, h, TextureFormat.RGBA32, false) { name = "WallScanLive" };
+            }
+            liveTex.SetPixelData(pixels, 0);
+            liveTex.Apply(false);
+            WallScan.Splat(liveTex, meta, rooms, WallScan.Key(Path.GetFileName(sessionDir), meta.index.ToString("0000")));
+        }
+        catch (Exception e) { Debug.LogWarning($"[WallPhotos] live wall scan: {e.Message}"); }
+    }
+#endif
 
     /// <summary>Mean luminance gradient over a sparse grid (every 4th pixel, 2 px steps) - drops with motion blur and
     /// defocus. Absolute values depend on the surface (bare brick >> smooth plaster), so frames are compared with the
@@ -598,7 +627,30 @@ public class WallPhotoCapture : MonoBehaviour
         if (headDegPerSec > DenseMaxDegPerSec || headMetersPerSec > DenseMaxMetersPerSec) return false;
         if (!haveDense) return true;
         Pose p = CameraPose();
-        return Vector3.Distance(p.position, lastDensePos) >= DenseMove || Quaternion.Angle(p.rotation, lastDenseRot) >= DenseTurn;
+        if (Vector3.Distance(p.position, lastDensePos) < DenseMove && Quaternion.Angle(p.rotation, lastDenseRot) < DenseTurn) return false;
+        // only a frame that adds something: enough of the view on surface not yet seen twice (no pile of near-copies)
+        if (Time.time < noveltyCheckAt) return false;
+        noveltyCheckAt = Time.time + 0.2f;
+        return NewSurfaceShare(p) >= MinNewShare;
+    }
+
+    float noveltyCheckAt;
+    const float MinNewShare = 0.15f;
+
+    /// <summary>Share of the camera view (7 x 5 rays against the scan) landing on 10 cm cells seen by fewer than two
+    /// 3D-scan frames so far.</summary>
+    float NewSurfaceShare(Pose pose)
+    {
+        int hits = 0, fresh = 0;
+        for (int y = 0; y < 5; y++)
+            for (int x = 0; x < 7; x++)
+            {
+                var uv = new Vector2((x + 0.5f) / 7f, (y + 0.5f) / 5f);
+                if (!Hit(cam.ViewportPointToRay(uv, pose), out var hp, out _, out _)) continue;
+                hits++;
+                if (!coverage.TryGetValue(Vector3Int.FloorToInt(hp / CovCellSize), out var c) || c.count < 2) fresh++;
+            }
+        return hits == 0 ? 0f : fresh / (float)hits;
     }
 
     WallPhotoMeta BuildMeta(Pose pose, DateTime stamp, int w, int h, bool isDense)
@@ -830,7 +882,8 @@ public class WallPhotoCapture : MonoBehaviour
 
     void UpdateCoverage()
     {
-        bool show = dense && showCoverage && coverage.Count > 0;
+        // the wall scan's blue veil (WallOverlays) shows coverage now - these patches only where there is no wall scan
+        bool show = dense && showCoverage && coverage.Count > 0 && !WallScan.Planes.Any();
         if (covGo) covGo.SetActive(show);
         if (!show || !covDirty || Time.time - covBuiltAt < 0.3f) return;
         covDirty = false; covBuiltAt = Time.time;
@@ -1094,12 +1147,17 @@ public class WallPhotoCapture : MonoBehaviour
         RefreshPanel();
     }
 
-    void SetDense(bool on)
+    /// <summary>Set by the menu before opening the tool: start in 3D-scan mode instead of cable photos.</summary>
+    public static bool StartDense;
+    /// <summary>True while the 3D scan (dense frames) is on.</summary>
+    public bool Dense => dense;
+
+    public void SetDense(bool on)
     {
         if (dense == on) return;
         Debug.Log($"[WallPhotos] mode: {(on ? "3D scan" : "cable photos")} (3D frames so far {denseCount}, blurry dropped {blurryDropped})");
         dense = on; haveDense = false; stillFor = 0;
-        uiLog?.AddLog(on ? "Photos: 3D scan - walk slowly, look at every wall, floor and ceiling from several spots."
+        uiLog?.AddLog(on ? "3D scan: look at what is still blue - walls, floor, ceiling - from a couple of spots."
                          : "Photos: cable photos - look at a bare wall and hold still.");
         tipUntil = 0;
         RefreshPanel();
@@ -1132,7 +1190,7 @@ public class WallPhotoCapture : MonoBehaviour
         else roomText.text = "Outside the scanned rooms";
         if (!statusText.text.StartsWith("<color=red>"))
             statusText.text = dense
-                ? "Walk slowly round the room and look at every wall, floor and ceiling from several spots - it records by itself. Patches on the walls: orange = seen once, yellow = twice, green = enough. Trigger = a cable photo."
+                ? "Look around slowly - it records by itself, only views that add something. Blue = not scanned yet; it fades as you look at it. Done when the walls are clear. Trigger = a single photo."
                 : "Look at a bare wall, floor or ceiling and hold still - it clicks by itself. Trigger = photo now. Green outline = already covered, red patches = not photographed yet.";
         XRUi.SetTint(cableButton, !dense ? XRUi.ButtonOnColor : XRUi.ButtonToggleColor);
         XRUi.SetTint(denseButton, dense ? XRUi.ButtonOnColor : XRUi.ButtonToggleColor);

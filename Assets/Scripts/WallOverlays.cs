@@ -24,9 +24,19 @@ public class WallOverlays : MonoBehaviour
     public DollHouseVisualizer dollhouse;
     public MRUKExporter exporter;
 
-    const string RoutesPref = "Overlay.Routes", PhotosPref = "Overlay.Photos", FittingsPref = "Overlay.Fittings", ZonesPref = "Overlay.Zones";
+    const string RoutesPref = "Overlay.Routes", PhotosPref = "Overlay.Photos", FittingsPref = "Overlay.Fittings", ZonesPref = "Overlay.Zones", ScanPref = "Overlay.Scan";
 
-    static int showRoutes = -1, showPhotos = -1, showFittings = -1, showZones = -1; // cached: PlayerPrefs is a JNI call on Android, read every frame here
+    static int showRoutes = -1, showPhotos = -1, showFittings = -1, showZones = -1, showScan = -1;
+
+    /// <summary>The 3D scan of the bare walls (WallScan textures) on the walls - remembered between sessions, on by default.</summary>
+    public static bool ShowScan
+    {
+        get { if (showScan < 0) showScan = PlayerPrefs.GetInt(ScanPref, 1); return showScan == 1; }
+        set { showScan = value ? 1 : 0; PlayerPrefs.SetInt(ScanPref, showScan); PlayerPrefs.Save(); Bump(); }
+    }
+    /// <summary>The wall scan shown even when switched off (while the 3D scan is recording - you see where to look next).</summary>
+    public static bool ForceScan { get => forceScan; set { if (forceScan != value) { forceScan = value; Bump(); } } }
+    static bool forceScan; // cached: PlayerPrefs is a JNI call on Android, read every frame here
 
     /// <summary>Over passthrough: the planned fittings (bath, shower, basins... as see-through ghosts) and the niches
     /// (as recesses "behind" the real wall) from the furnished saved scan, on the live scan's matching rooms.</summary>
@@ -120,17 +130,28 @@ public class WallOverlays : MonoBehaviour
 
     void LateUpdate()
     {
-        bool routes = ShowRoutes || ForceRoutes, pics = ShowPhotos;
+        bool routes = ShowRoutes || ForceRoutes, pics = ShowPhotos, scan = ShowScan || ForceScan;
         if ((pics || routes) && photosDirty) RefreshPhotoList();
+#if META_XR_SDK_INSTALLED
+        if (scan && !MRUKExporter.Loading && MRUK.Instance != null && MRUK.Instance.Rooms.Count > 0)
+        {
+            WallScan.EnsurePlanes(MRUKDataProcessor.GetValidRooms(MRUK.Instance));
+            if (scanBuiltFor != MRUKExporter.SceneVersion && !WallScan.Building)
+            {
+                scanBuiltFor = MRUKExporter.SceneVersion;
+                StartCoroutine(WallScan.BuildMissing(() => MRUK.Instance != null ? MRUKDataProcessor.GetValidRooms(MRUK.Instance) : new List<MRUKRoom>()));
+            }
+        }
+#endif
         // rebuilt only for a finished load of the selected scan (never from what MRUK holds halfway through a load)
         if (!MRUKExporter.Loading && Time.frameCount - sigFrame >= 10) { sigFrame = Time.frameCount; sceneSig = SceneSignature(); }
 
         Transform r = null; float y = 0f; Vector3 c = default;
         bool walkOn = walk != null && walk.TryGetModelFrame(out r, out y, out c);
-        if (walkOn) Sync(walkCtx, r, y, c, routes, pics, ShowFittings && FittingsInWalk); else Clear(walkCtx);
-        if (dollhouse != null && dollhouse.TryGetModelFrame(out r, out y, out c)) Sync(dollCtx, r, y, c, routes, pics); else Clear(dollCtx);
+        if (walkOn) Sync(walkCtx, r, y, c, routes, pics, ShowFittings && FittingsInWalk, scan); else Clear(walkCtx);
+        if (dollhouse != null && dollhouse.TryGetModelFrame(out r, out y, out c)) Sync(dollCtx, r, y, c, routes, pics, false, scan); else Clear(dollCtx);
         // Over passthrough: only on a scan lined up with the real house (the live one), and not while inside the model.
-        if (exporter != null && exporter.WorldAligned && !walkOn) Sync(worldCtx, null, 0f, Vector3.zero, routes, pics, ShowFittings); else Clear(worldCtx);
+        if (exporter != null && exporter.WorldAligned && !walkOn) Sync(worldCtx, null, 0f, Vector3.zero, routes, pics, ShowFittings, scan); else Clear(worldCtx);
 
         foreach (var ctx in new[] { worldCtx, walkCtx, dollCtx })
             for (int i = ctx.waiting.Count - 1; i >= 0; i--)
@@ -156,10 +177,15 @@ public class WallOverlays : MonoBehaviour
 #endif
     }
 
-    void Sync(Ctx ctx, Transform root, float yaw, Vector3 center, bool routes, bool pics, bool fittings = false)
+    int scanBuiltFor = -1;
+
+    void OnApplicationPause(bool paused) { if (paused) WallScan.SaveAll(); }
+    void OnApplicationQuit() => WallScan.SaveAll();
+
+    void Sync(Ctx ctx, Transform root, float yaw, Vector3 center, bool routes, bool pics, bool fittings = false, bool scan = false)
     {
-        if (!routes && !pics && !fittings) { Clear(ctx); return; }
-        string stamp = $"{(root ? root.GetInstanceID() : 0)}|{yaw:F3}|{center}|{sceneSig}|{RouteStore.Version}|{photoVersion}|{routes}|{pics}|{fittings}|{ShowZones}|{toggleVersion}";
+        if (!routes && !pics && !fittings && !scan) { Clear(ctx); return; }
+        string stamp = $"{(root ? root.GetInstanceID() : 0)}|{yaw:F3}|{center}|{sceneSig}|{RouteStore.Version}|{photoVersion}|{routes}|{pics}|{fittings}|{ShowZones}|{scan}|{WallScan.Version}|{toggleVersion}";
         if (ctx.go != null && stamp == ctx.stamp) return;
         Clear(ctx);
         float t0 = Time.realtimeSinceStartup;
@@ -176,13 +202,14 @@ public class WallOverlays : MonoBehaviour
         float scale = root != null ? Mathf.Max(1e-4f, root.lossyScale.x) : 1f;
 #if META_XR_SDK_INSTALLED
         var rooms = MRUK.Instance != null ? MRUK.Instance.Rooms.Where(x => x != null).ToList() : new List<MRUKRoom>();
+        if (scan) BuildWallScan(ctx);
         if (routes) BuildRoutes(ctx, rooms, scale);
         if (routes && ShowZones && root == null || routes && ShowZones && ctx == walkCtx) BuildZones(ctx, rooms);
         if (routes && !pics) BuildPhotoIcons(ctx, rooms);
         if (pics) BuildPhotos(ctx, rooms);
         if (fittings) BuildFittings(ctx, rooms);
 #endif
-        Debug.Log($"[Overlays] {ctx.name} rebuilt in {(Time.realtimeSinceStartup - t0) * 1000f:0} ms: routes {(routes ? RouteStore.Routes.Count : 0)}, " +
+        Debug.Log($"[Overlays] {ctx.name} rebuilt{(scan ? " (+wall scan)" : "")} in {(Time.realtimeSinceStartup - t0) * 1000f:0} ms: routes {(routes ? RouteStore.Routes.Count : 0)}, " +
                   $"boxes {(routes ? RouteStore.Current.markers.Count : 0)}, photos {(pics ? photos.Count : 0)}{(fittings ? ", fittings " + FittingsInfo : "")}");
     }
 
@@ -252,6 +279,35 @@ public class WallOverlays : MonoBehaviour
         ctx.routesGo = new GameObject("Routes");
         ctx.routesGo.transform.SetParent(ctx.go.transform, false);
         AddRenderer(ctx.routesGo, mesh, routeMat);
+    }
+
+    // ---------- the 3D scan of the walls ----------
+
+    /// <summary>A quad per scanned plane showing its WallScan texture, a little in front of the surface (the walk model's
+    /// faces sit up to ~1 cm in front of the scanned planes; holes - nothing seen yet - stay see-through).</summary>
+    void BuildWallScan(Ctx ctx)
+    {
+        var go = new GameObject("WallScan");
+        go.transform.SetParent(ctx.go.transform, false);
+        int n = 0;
+        foreach (var p in WallScan.Planes)
+        {
+            // recording over passthrough: the blue "not scanned yet" veil; otherwise the photos themselves
+            var mat = ctx == worldCtx && ForceScan ? WallScan.CoverMaterial(p) : WallScan.ShowMaterial(p);
+            if (mat == null) break;
+            Vector3 lift = p.normal * (ctx == worldCtx ? 0.004f : 0.011f);
+            var m = new Mesh { name = "WallScan_" + p.id.Substring(0, 8) };
+            m.SetVertices(new List<Vector3> { p.origin + lift, p.origin + p.axisU + lift, p.origin + p.axisU + p.axisV + lift, p.origin + p.axisV + lift });
+            m.SetUVs(0, new List<Vector2> { new Vector2(0, 0), new Vector2(1, 0), new Vector2(1, 1), new Vector2(0, 1) });
+            m.SetTriangles(new[] { 0, 1, 2, 0, 2, 3 }, 0);
+            m.RecalculateBounds();
+            ctx.meshes.Add(m);
+            var q = new GameObject("Plane_" + p.id.Substring(0, 8));
+            q.transform.SetParent(go.transform, false);
+            AddRenderer(q, m, mat);
+            n++;
+        }
+        Debug.Log($"[Overlays] {ctx.name}: wall scan on {n} plane(s)");
     }
 
     // ---------- no-drill zones ----------

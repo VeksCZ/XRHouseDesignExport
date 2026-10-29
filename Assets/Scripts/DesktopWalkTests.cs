@@ -211,6 +211,26 @@ public partial class DesktopWalkApp
             }
             return i > 0;
         }
+        // -views rooms: from the middle of every room, four shots around (the wall scan, the walls)
+        if (Arg("-views") == "rooms")
+        {
+            // the wall scan builds in the background: wait for it to start, then to finish
+            for (int k = 0; k < 60 && !WallScan.Building; k++) await Frames(5);
+            for (int k = 0; k < 600 && WallScan.Building; k++) await Frames(10);
+            await Frames(20);
+            foreach (var room in Rooms())
+            {
+                Vector3 c = room.GetRoomBounds().center;
+                float floorY = room.FloorAnchors.Where(a => a != null).Min(a => a.transform.position.y);
+                for (int yaw = 0; yaw < 360; yaw += 90)
+                {
+                    await StandAt(new Vector3(c.x, floorY, c.z), yaw, 5f);
+                    Debug.Log($"TEST view {i}: room {DoorCatalog.RoomId(room).Substring(0, 8)} yaw {yaw}");
+                    await Shot(Path.Combine(outDir, $"view_{i++}.png"));
+                }
+            }
+            return i > 0;
+        }
         // -views routes: one shot per route - from the middle of its room, looking at the route's middle
         if (Arg("-views") == "routes")
         {
