@@ -95,8 +95,8 @@ public class DoorEdit
 /// <summary>
 /// Loads/saves the edits of whichever saved scan is active, with undo/redo (whole-document snapshots - the
 /// document is tiny). Every change goes through Apply(), which saves immediately and raises Changed so views
-/// (walk-through, Dollhouse, floor plans) can refresh. The live scan has no edits of its own: the first change
-/// made on it saves it as a scan first (see EditModeController.EnsureEditable).
+/// (walk-through, Dollhouse, floor plans) can refresh. The live scan has no saved copy to hold edits: its changes
+/// wait in a file of their own (LiveEditsPath) until "Save live scan" hands them to the new saved scan (CarryLiveInto).
 /// </summary>
 public static class HouseEditsStore
 {
@@ -108,27 +108,79 @@ public static class HouseEditsStore
     /// <summary>Saved scan the current edits belong to; null while the live scan (or nothing) is active.</summary>
     public static string CurrentScan { get; private set; }
     public static HouseEdits Current { get; private set; } = new HouseEdits();
-    public static bool CanEdit => CurrentScan != null;
+    /// <summary>The live scan is bound: Current holds its pending (not yet saved into a scan) edits.</summary>
+    public static bool LiveBound { get; private set; }
+    public static bool CanEdit => CurrentScan != null || LiveBound;
+    static bool bound;
+    static bool? liveFileHas;
+
+    /// <summary>The live scan has edits no saved scan holds yet (Save live scan keeps them).</summary>
+    public static bool LiveHasEdits
+    {
+        get
+        {
+            if (LiveBound) return HasAny;
+            if (liveFileHas == null)
+            {
+                string p = MRUKSceneCache.LiveEditsPath;
+                liveFileHas = File.Exists(p) && HasAnyIn(Load("", p));
+            }
+            return liveFileHas.Value;
+        }
+    }
+    static bool HasAnyIn(HouseEdits e) => e.doors.Count + e.stairs.Count + e.holes.Count > 0;
     public static int UndoCount => undo.Count;
     public static int RedoCount => redo.Count;
     public static event Action Changed;
 
     public static string PathFor(string scanName) => MRUKSceneCache.EditsPath(scanName);
 
-    /// <summary>File the current edits are read from / saved to (null while the live scan is active).</summary>
+    /// <summary>File the current edits are read from / saved to.</summary>
     static string currentPath;
 
-    /// <summary>Switches to the edits of the given saved scan (null = live scan, no edits). Clears undo history.
+    /// <summary>Switches to the edits of the given saved scan (null = live scan: its pending edits). Clears undo history.
     /// 'path' overrides where its edits file is (e.g. the batch export binding an arbitrary scan's 93_Data_Edits.json).</summary>
     public static void Bind(string scanName, string path = null)
     {
-        path = scanName == null ? null : path ?? PathFor(scanName);
-        if (scanName == CurrentScan && path == currentPath) return;
+        bool live = scanName == null;
+        path = live ? MRUKSceneCache.LiveEditsPath : path ?? PathFor(scanName);
+        if (bound && scanName == CurrentScan && path == currentPath) return;
+        if (LiveBound) liveFileHas = HasAny; // leaving the live scan: its edits stay in their file
+        bound = true;
         CurrentScan = scanName;
         currentPath = path;
+        LiveBound = live;
         undo.Clear(); redo.Clear();
-        Current = scanName == null ? new HouseEdits() : Load(scanName, path);
+        Current = Load(scanName ?? "", path);
         Changed?.Invoke();
+    }
+
+    /// <summary>The live scan was saved as scanName: its pending edits become that scan's edits (merged into the ones it
+    /// already has) and the live file is emptied. True if there was anything to carry.</summary>
+    public static bool CarryLiveInto(string scanName)
+    {
+        if (string.IsNullOrEmpty(scanName)) return false;
+        string livePath = MRUKSceneCache.LiveEditsPath;
+        var live = LiveBound ? Current : File.Exists(livePath) ? Load("", livePath) : null;
+        if (live == null || !HasAnyIn(live)) return false;
+        string target = PathFor(scanName);
+        var dst = File.Exists(target) ? Load(scanName, target) : new HouseEdits { scanName = scanName };
+        foreach (var d in live.doors) { if (!string.IsNullOrEmpty(d.anchorUuid)) dst.doors.RemoveAll(x => x.anchorUuid == d.anchorUuid); dst.doors.Add(d); }
+        foreach (var s in live.stairs) { dst.stairs.RemoveAll(x => x.id == s.id); dst.stairs.Add(s); }
+        foreach (var h in live.holes) { dst.holes.RemoveAll(x => x.id == h.id); dst.holes.Add(h); }
+        dst.scanName = scanName;
+        dst.modified = DateTime.Now.ToString("s");
+        try
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(target));
+            File.WriteAllText(target, JsonUtility.ToJson(dst, true));
+            if (File.Exists(livePath)) File.Delete(livePath);
+        }
+        catch (Exception ex) { Debug.LogException(ex); return false; }
+        if (LiveBound) { Current = new HouseEdits(); undo.Clear(); redo.Clear(); }
+        liveFileHas = false;
+        PendingChanges.Mark("edits");
+        return true;
     }
 
     /// <summary>True if the current edits hold anything worth writing out.</summary>
@@ -156,7 +208,7 @@ public static class HouseEditsStore
     /// <summary>Applies one change (undoable) and saves. False if no saved scan is active.</summary>
     public static bool Apply(Action<HouseEdits> change)
     {
-        if (CurrentScan == null || change == null) return false;
+        if (!CanEdit || change == null) return false;
         undo.Add(JsonUtility.ToJson(Current));
         if (undo.Count > MaxUndo) undo.RemoveAt(0);
         redo.Clear();
@@ -170,7 +222,7 @@ public static class HouseEditsStore
 
     static bool Step(List<string> from, List<string> to)
     {
-        if (CurrentScan == null || from.Count == 0) return false;
+        if (!CanEdit || from.Count == 0) return false;
         to.Add(JsonUtility.ToJson(Current));
         Current = JsonUtility.FromJson<HouseEdits>(from[from.Count - 1]);
         from.RemoveAt(from.Count - 1);
@@ -180,9 +232,14 @@ public static class HouseEditsStore
 
     static void SaveAndNotify()
     {
-        Current.scanName = CurrentScan;
+        Current.scanName = CurrentScan ?? "";
         Current.modified = DateTime.Now.ToString("s");
-        try { File.WriteAllText(currentPath ?? PathFor(CurrentScan), JsonUtility.ToJson(Current, true)); }
+        try
+        {
+            string path = currentPath ?? PathFor(CurrentScan);
+            Directory.CreateDirectory(Path.GetDirectoryName(path));
+            File.WriteAllText(path, JsonUtility.ToJson(Current, true));
+        }
         catch (Exception ex) { Debug.LogException(ex); }
         PendingChanges.Mark("edits");
         Changed?.Invoke();
@@ -198,6 +255,7 @@ public static class HouseEditsStore
         {
             CurrentScan = null;
             currentPath = null;
+            bound = false;
             undo.Clear(); redo.Clear();
             Current = new HouseEdits();
             Changed?.Invoke();

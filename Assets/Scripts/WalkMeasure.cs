@@ -73,7 +73,7 @@ public class WalkMeasure
         label.outlineWidth = 0.25f;
         label.outlineColor = new Color32(0, 0, 0, 255);
         label.rectTransform.sizeDelta = new Vector2(1.6f, 0.4f);
-        label.enableWordWrapping = false;
+        label.textWrappingMode = TextWrappingModes.NoWrap;
     }
 
     Transform Dot(string name)

@@ -50,6 +50,9 @@ public static class MRUKSceneCache
         ? Path.Combine(GetCacheRoot(), name, MRUKPathUtility.DATA_EDITS)
         : Path.Combine(GetCacheRoot(), name + HouseEditsStore.EXTENSION);
 
+    /// <summary>Edits made on the live scan, waiting for "Save live scan" to hand them to the new saved scan.</summary>
+    public static string LiveEditsPath => Path.Combine(GetCacheRoot(), "_live" + HouseEditsStore.EXTENSION);
+
     /// <summary>Furniture spec of a saved scan (95_Data_Furniture.json in its folder / Name.furniture.json).</summary>
     public const string FurnitureExtension = ".furniture.json";
     public static string FurniturePath(string name) => string.IsNullOrEmpty(name) ? null : FolderMode

@@ -446,9 +446,20 @@ public class WalkThroughMode : MonoBehaviour
     /// you were looking at it). Without it the scan's real-world alignment is used if you stand inside the
     /// scanned floor area, otherwise the middle of the largest room.
     /// </summary>
+    /// <summary>True while an Enter is still building the model; a second Enter meanwhile is dropped (returns false).</summary>
+    public bool Entering { get; private set; }
+
     public async System.Threading.Tasks.Task<bool> Enter(Vector3? modelFloorPoint, Quaternion? modelRotation)
     {
-        if (isOn) Exit();
+        if (Entering) return false;
+        Entering = true;
+        try { return await EnterCore(modelFloorPoint, modelRotation); }
+        finally { Entering = false; }
+    }
+
+    async System.Threading.Tasks.Task<bool> EnterCore(Vector3? modelFloorPoint, Quaternion? modelRotation)
+    {
+        if (isOn || root) Exit(); // also an Enter still building: its root is dropped, it finds out via buildGen
         if (!ResolveRig()) { uiLog?.AddLog("<color=red>Walk: no camera rig.</color>"); return false; }
         if (MRUK.Instance == null) { uiLog?.AddLog("<color=red>Walk: no MRUK instance.</color>"); return false; }
         var rooms = MRUKDataProcessor.GetValidRooms(MRUK.Instance);
@@ -465,8 +476,10 @@ public class WalkThroughMode : MonoBehaviour
         // rigidbody's children than for "static" colliders.
         var rb = root.AddComponent<Rigidbody>();
         rb.isKinematic = true; rb.useGravity = false;
+        var myRoot = root;
         if (!await BuildVisual())
         {
+            if (root != myRoot) return false; // superseded by a newer Enter / Exit - that one owns root now
             Destroy(root); root = null; walkRooms = null;
             uiLog?.AddLog("<color=red>Walk: model build failed.</color>");
             return false;
@@ -520,9 +533,11 @@ public class WalkThroughMode : MonoBehaviour
     }
 
     /// <summary>(Re)builds the model under root for the current WalkModel, replacing any previous one.</summary>
+    int buildGen; // bumped by every build and by Exit: a build that finds it changed while awaiting is stale and drops its result
     async System.Threading.Tasks.Task<bool> BuildVisual()
     {
         if (!root || walkRooms == null) return false;
+        int gen = ++buildGen;
         stairs.Dispose();
         walkDoors.ClearAll();
         furniture.Clear();
@@ -552,7 +567,7 @@ public class WalkThroughMode : MonoBehaviour
         }
         else if (walkModel == WalkModel.Mesh) model = await XRModelFactory.CreateMeshAnalytical(walkRooms, yaw, center, forDollhouse: false);
         else model = await XRModelFactory.CreateRawScan(walkRooms, yaw, center, forDollhouse: false);
-        if (!root) return false; // left while building
+        if (!root || gen != buildGen) return false; // left (or rebuilt by another call) while building
         long tModel = sw.ElapsedMilliseconds;
 
         var visual = UnityModelLoader.LoadToScene(model, shaded: true, classifyByNormal: walkModel != WalkModel.Anchor);
@@ -575,6 +590,7 @@ public class WalkThroughMode : MonoBehaviour
     public void Exit()
     {
         if (!isOn && !root) return;
+        buildGen++;
         isOn = false; aiming = false;
         sun.SetOn(false); measure.Clear();
         if (Active == this) Active = null;
