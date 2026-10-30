@@ -858,21 +858,29 @@ public class XRMenu : MonoBehaviour
 
     async void TryEnterWalkFromDollhouse()
     {
-        if (walk == null || walk.IsOn || dollhouse == null || !dollhouse.IsOn || dollhouse.IsDragging) return;
+        if (walk == null || walk.IsOn || walkStarting || dollhouse == null || !dollhouse.IsOn || dollhouse.IsDragging) return;
         if (!dollhouse.TryGetPointedFloor(out Vector3 point)) return;
-        await Busy("Building...");
-        if (await walk.Enter(point, dollhouse.FacingYaw))
+        walkStarting = true; // further presses while it builds are dropped
+        try
         {
-            dollhouse.SetHidden(true);
-            SetStatus("Walk");
+            await Busy("Building...");
+            if (await walk.Enter(point, dollhouse.FacingYaw))
+            {
+                dollhouse.SetHidden(true);
+                SetStatus("Walk");
+            }
+            else SetStatus("Ready");
         }
+        finally { walkStarting = false; }
     }
+
+    bool walkStarting; // Walk is loading / building: clicking Walk again meanwhile does nothing (instead of building twice)
 
     /// <summary>Walk on/off. Entered from here (not from a Dollhouse point) it uses the scan's own real-world
     /// alignment when you're standing inside the scanned area, else the middle of the largest room.</summary>
     public async void OnToggleWalk()
     {
-        if (walk == null) return;
+        if (walk == null || walkStarting) return;
         if (walk.IsOn)
         {
             walk.Exit();
@@ -881,21 +889,26 @@ public class XRMenu : MonoBehaviour
             return;
         }
         if (!RequireExporter()) return;
-        await Busy("Loading...");
-        if (!await exporter.EnsureSelectedSourceLoaded(this)) { SetStatus("ERROR"); return; }
-        if (!exporter.HasValidRooms())
+        walkStarting = true;
+        try
         {
-            AddLog("<color=red>No rooms in this scan.</color>");
-            SetStatus("No rooms");
-            return;
+            await Busy("Loading...");
+            if (!await exporter.EnsureSelectedSourceLoaded(this)) { SetStatus("ERROR"); return; }
+            if (!exporter.HasValidRooms())
+            {
+                AddLog("<color=red>No rooms in this scan.</color>");
+                SetStatus("No rooms");
+                return;
+            }
+            await Busy("Building...");
+            if (await walk.Enter(null, null))
+            {
+                dollhouse?.SetHidden(true);
+                SetStatus("Walk");
+            }
+            else SetStatus("ERROR");
         }
-        await Busy("Building...");
-        if (await walk.Enter(null, null))
-        {
-            dollhouse?.SetHidden(true);
-            SetStatus("Walk");
-        }
-        else SetStatus("ERROR");
+        finally { walkStarting = false; }
     }
 
     /// <summary>For other components that change the selected scan (e.g. edit mode saving the live scan).</summary>
@@ -942,6 +955,7 @@ public class XRMenu : MonoBehaviour
             do
             {
                 refreshAgain = false;
+                while (walkStarting || (walk != null && walk.Entering)) await Task.Yield(); // let a starting walk finish first
                 bool loaded = exporter != null && exporter.HasValidRooms();
                 if (walk != null && walk.IsOn)
                 {

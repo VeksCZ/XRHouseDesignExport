@@ -178,7 +178,21 @@ public class DollHouseVisualizer : MonoBehaviour
     /// dollhouse stays open and exactly where it was, per Refresh()'s placement-preserving behaviour.</summary>
     public void RebuildInPlace() { if (isOn) Refresh(); }
 
+    int refreshGen; // bumped by every Refresh call: a build that finds it changed after its await is stale and drops its result
+    bool refreshRunning, refreshQueued;
+    /// <summary>One build at a time. Calls arriving while one runs (double press, scan change + mode cycle) collapse into
+    /// a single follow-up build with the latest state; switching off is instant and cancels the running build.</summary>
     private async void Refresh() {
+        refreshGen++;
+        if (!isOn) { Cleanup(); return; }
+        if (refreshRunning) { refreshQueued = true; return; }
+        refreshRunning = true;
+        try {
+            do { refreshQueued = false; await RefreshCore(refreshGen); } while (refreshQueued && isOn);
+        } finally { refreshRunning = false; }
+    }
+
+    private async System.Threading.Tasks.Task RefreshCore(int gen) {
         // If the dollhouse is already showing something (switching mode, or rebuilding after a scan change),
         // keep it exactly where the user left it instead of re-spawning in front of the camera - only a fresh
         // activation (root was null/destroyed, i.e. it was off) computes a new spawn position.
@@ -233,6 +247,7 @@ public class DollHouseVisualizer : MonoBehaviour
             else if (mode == DollhouseMode.MeshAnalytical) m = await XRModelFactory.CreateMeshAnalytical(rooms, yaw, c, forDollhouse: true);
             else if (mode == DollhouseMode.RawMesh) m = await XRModelFactory.CreateRawScan(rooms, yaw, c, forDollhouse: true);
             XRModelFactory.ExtraFaces = null;
+            if (gen != refreshGen) return; // overtaken while the mesh was built - root now belongs to the newer Refresh
 
             if (m != null) {
                 var visual = UnityModelLoader.LoadToScene(m);
