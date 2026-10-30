@@ -240,6 +240,17 @@ public static class XRUi
         return button;
     }
 
+    /// <summary>A small key cap in the button's top-right corner ("K"): the keyboard shortcut of the same action.</summary>
+    public static void SetKeyHint(Button button, string key)
+    {
+        if (button == null || string.IsNullOrEmpty(key)) return;
+        var rt = (RectTransform)button.transform;
+        float w = rt.rect.width > 0 ? rt.rect.width : rt.sizeDelta.x;
+        const float capW = 30f, capH = 26f;
+        var cap = CreatePanel(button.transform, "KeyHint", new Color(0f, 0f, 0f, 0.38f), w - capW - 7f, 6f, capW, capH);
+        CreateText(cap.transform, "Key", key, 17, TextAlignmentOptions.Center, 0, 0, capW, capH, new Color(1f, 1f, 1f, 0.85f), FontStyles.Bold);
+    }
+
     public static void SetLabel(Button button, string label)
     {
         var tmp = button != null ? button.GetComponentInChildren<TMP_Text>() : null;

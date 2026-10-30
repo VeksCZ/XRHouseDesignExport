@@ -88,6 +88,9 @@ and exports 3D models, floor plans and reports from the scan.
   (every edit tool directly - `OnTool` -> `EditModeController.UseTool`; again = leave) / Data. Hold Y: leave the active
   tool, else open the menu on Tools. The Undo/Redo/Done bar shows only for tools without their own panel (not
   Routes/Photos). Desktop `-test menu` shoots every tab + the scan list (`XRMenu.Preview`).
+  On the Windows app a button shows its keyboard shortcut as a key cap (`XRUi.SetKeyHint`: K routes, P photos, F next floor,
+  U sun). The pointing ray is a thin fading line (`XRMenu.StyleRay`) with a cursor at its end (`RayCursor`: ring + dot on
+  clickable things, ring + four arrows over anything the grip can drag, filled while the grip is held).
 - **Wall scan** (`WallScan`, layer "Wall scan (3D)", on by default): every 3D-scan (dense) frame is projected onto the
   scanned planes of its room (walls/floors/ceilings, one ARGBHalf accumulation RenderTexture per plane, shader
   `Resources/Shaders/WallScanSplat` - weight = facing^2 x edge x sharpness / distance, ^4; `WallScanShow` divides and

@@ -233,6 +233,15 @@ public class XRMenu : MonoBehaviour
         foreach (var b in new[] { walkButton, dollhouseButton, plansButton, miniMapButton, showRoutesButton, showPhotosButton, fittingsButton, scanOverlayButton, zonesButton, wallScanButton, photoMarkersButton })
             XRUi.SetToggle(b, false);
 
+        // On the Windows desktop app every key that does the same as a button is shown on the button.
+        if (Application.platform == RuntimePlatform.WindowsPlayer)
+        {
+            XRUi.SetKeyHint(showRoutesButton, "K");
+            XRUi.SetKeyHint(showPhotosButton, "P");
+            XRUi.SetKeyHint(nextFloorButton, "F");
+            if (toolButtons.TryGetValue(EditModeController.Tool.Sun, out var sunButton)) XRUi.SetKeyHint(sunButton, "U");
+        }
+
         // ---- log ----
         const float logTop = 618;
         XRUi.CreateInset(root, Pad, logTop, ContentW, CanvasHeight - logTop - Pad);
@@ -503,26 +512,30 @@ public class XRMenu : MonoBehaviour
     /// with an XRSimpleInteractable (the menu/floor plan drag handles, the Dollhouse, the Minimap).</summary>
     static void StyleRay(XRRayInteractor ray)
     {
+        RayCursor.Attach(ray); // ring at the end of the ray; with arrows where the grip can drag
+
         var lr = ray.GetComponent<LineRenderer>();
-        if (lr != null) { lr.numCapVertices = 8; lr.numCornerVertices = 4; }
+        if (lr != null) { lr.numCapVertices = 12; lr.numCornerVertices = 6; }
 
         var visual = ray.GetComponent<XRInteractorLineVisual>();
         if (visual == null) return;
-        visual.lineWidth = 0.004f;
+        // a thin hairline, a touch finer towards the tip, fading in from the hand
+        visual.lineWidth = 0.0016f;
+        visual.widthCurve = new AnimationCurve(new Keyframe(0f, 1f), new Keyframe(1f, 0.55f));
         visual.setLineColorGradient = true;
         var blue = new Color(0.30f, 0.62f, 1f);
         var green = new Color(0.30f, 0.95f, 0.45f);
-        visual.invalidColorGradient = SolidGradient(blue);
-        visual.blockedColorGradient = SolidGradient(blue);
-        visual.validColorGradient = SolidGradient(green);
+        visual.invalidColorGradient = FadeGradient(blue);
+        visual.blockedColorGradient = FadeGradient(blue);
+        visual.validColorGradient = FadeGradient(green);
     }
 
-    static Gradient SolidGradient(Color c)
+    static Gradient FadeGradient(Color c)
     {
         var g = new Gradient();
         g.SetKeys(
             new[] { new GradientColorKey(c, 0f), new GradientColorKey(c, 1f) },
-            new[] { new GradientAlphaKey(c.a, 0f), new GradientAlphaKey(c.a, 1f) });
+            new[] { new GradientAlphaKey(0.1f, 0f), new GradientAlphaKey(0.85f, 0.25f), new GradientAlphaKey(0.85f, 1f) });
         return g;
     }
 
