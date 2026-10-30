@@ -573,14 +573,22 @@ public class XRMenu : MonoBehaviour
         await Task.Yield();
     }
 
+    float syncAt;
+
     void Update()
     {
         if (Preview) return;
         // The wrist menu used to hide itself entirely while floor plans were open - now the plan panel is its
         // own separate, draggable object (like the Dollhouse), so the menu stays up and usable alongside it.
+        // Switch tints and state labels only ~10x a second: they build strings (garbage on the Quest every frame at 72-120 Hz)
+        // and nothing they show changes faster than a click.
         bool plansOpen = plansPanel != null && plansPanel.IsOpen;
-        SyncToggleTints(plansOpen);
-        SyncLabels();
+        if (Time.unscaledTime >= syncAt)
+        {
+            syncAt = Time.unscaledTime + 0.1f;
+            SyncToggleTints(plansOpen);
+            SyncLabels();
+        }
         WatchScene();
         TrackUiUnderRay();
         ReturnMenuAfterTool();
