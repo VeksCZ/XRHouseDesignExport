@@ -244,7 +244,7 @@ public class DoorEditTool : MonoBehaviour
             // its file is in its own frame, so load it first and point again
             var exporter = FindFirstObjectByType<MRUKExporter>();
             bool wasLive = exporter != null && exporter.ActiveSource == MRUKExporter.LiveSource;
-            if (!await editMode.EnsureEditable()) return;
+            if (!await editMode.EnsureSavedScan()) return; // a new doorway is written into the saved scan's file
             if (wasLive)
             {
                 ClosePanel();

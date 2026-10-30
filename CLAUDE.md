@@ -7,6 +7,14 @@ and exports 3D models, floor plans and reports from the scan.
 
 - **Never `git commit` unless explicitly asked** in that session. Editing files and
   reporting progress is fine; committing is not, even after a successful fix.
+- **Shortcuts** (the user typing one is the explicit request to commit/push; don't nag about commits otherwise):
+  - `ci` = commit the current changes (clear message, no push).
+  - `cip` = commit and push to the session's designated branch.
+  - `rel` = release the app to the Meta Horizon Store channel: full (non-development) release-signed Quest build
+    (`BuildQuest.Build`), then `Tools\UploadQuest.ps1 [-Channel ALPHA] [-Notes "..."]`. Needs Unity, the signing key and
+    `%USERPROFILE%\.xrhouse\meta.json` on the user's PC - in a cloud session none of that exists: say so, give the two
+    commands, don't pretend it ran.
+  - `ship` = `cip` + `rel` (commit, push, then release).
 - **Always target the newest available Meta Quest / Meta XR SDK (and MRUK) APIs**, not
   older/deprecated patterns. When in doubt, check current Meta docs/SDK versions rather
   than relying on possibly-stale knowledge. `Packages/manifest.json` pins the SDK version
@@ -92,7 +100,9 @@ and exports 3D models, floor plans and reports from the scan.
 - **Scan sources**: the selected scan never changes by itself (only a tap in the scan list; taps are debounced, loads
   serialized). A saved scan's edits/routes/names save themselves - "Save live scan" (Data tab) only saves the Quest's
   live scene, orange when the live scan has a room no saved scan has (PendingChanges.CheckLive, by room ids). Edits on
-  the live scan go to the newest saved scan with the same rooms (else a new copy). On the headset a saved scan is
+  the live scan wait in `ScanCache/_live.edits.json` (`HouseEditsStore.LiveBound`; Data tab orange while `LiveHasEdits`) and
+  "Save live scan" hands them to the new scan (`CarryLiveInto`); only a new doorway (written into the scan file) still
+  saves the live scan first (`EditModeController.EnsureSavedScan`). On the headset a saved scan is
   lined up with the house via shared room UUIDs (AlignToLive -> TrackingSpaceOffset).
 - **Finished vs rough model** (menu View tab toggle, `Furniture.Finished`, desktop `-finished 1|0`): spec
   `"floor_buildup": [m per storey, bottom first]` raises floors/furniture/stairs to the finished floor and

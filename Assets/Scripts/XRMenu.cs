@@ -703,7 +703,7 @@ public class XRMenu : MonoBehaviour
                 : exporter.ActiveSource != exporter.SelectedSource ? "<color=#ffb050>not loaded</color>"
                 : exporter.WorldAligned ? "<color=#6fe08f>lined up here</color>"
                 : "<color=#ffb050>another place</color>";
-            string save = live && PendingChanges.LiveUnsaved ? "  ·  <color=#ffb050>not saved</color>" : "";
+            string save = live && (PendingChanges.LiveUnsaved || HouseEditsStore.LiveHasEdits) ? "  ·  <color=#ffb050>not saved</color>" : "";
             string exp = PendingChanges.ExportPending ? "  ·  <color=#ffb050>not exported</color>" : "";
             string t = $"<b>{(live ? "Live scan" : exporter.SelectedSource)}</b>\n<size=72%>{place}{save}{exp}</size>";
             if (t != stateShown) { stateShown = t; XRUi.SetLabel(scanLabelButton, t); }
@@ -731,16 +731,17 @@ public class XRMenu : MonoBehaviour
         if (saveButton == null || Time.unscaledTime < pendingAt) return;
         pendingAt = Time.unscaledTime + 0.5f;
         bool live = exporter == null || exporter.SelectedSource == MRUKExporter.LiveSource;
-        bool save = live && PendingChanges.LiveUnsaved, export = PendingChanges.ExportPending;
+        bool liveEdits = HouseEditsStore.LiveHasEdits;
+        bool save = live && (PendingChanges.LiveUnsaved || liveEdits), export = PendingChanges.ExportPending;
         string what = PendingChanges.ExportWhat;
-        string key = $"{live}|{save}|{export}|{what}";
+        string key = $"{live}|{save}|{liveEdits}|{export}|{what}";
         if (key == lastPendingKey) return;
         lastPendingKey = key;
         XRUi.SetTint(saveButton, save ? XRUi.ButtonWarnColor : live ? XRUi.ButtonColor : XRUi.ButtonDisabled);
         XRUi.SetLabel(saveButton, live ? "Save live scan" : "Saved automatically");
         XRUi.SetTint(exportButton, export ? XRUi.ButtonWarnColor : XRUi.ButtonColor);
         string s1 = live
-            ? (save ? "Quest has rooms no saved scan has - Save live scan keeps them. " : "The live scan is saved. ")
+            ? (save ? (liveEdits ? "Edits on the live scan are not saved yet - Save live scan keeps them with a new scan. " : "Quest has rooms no saved scan has - Save live scan keeps them. ") : "The live scan is saved. ")
             : "Edits, routes and names of this scan save by themselves. ";
         pendingText.text = s1 + (export ? $"Not exported yet: {what}." : "Exported.");
         if (tabButtons != null) XRUi.SetLabel(tabButtons[3], save || export ? "Data <color=#ffb050>•</color>" : "Data");
@@ -1106,6 +1107,11 @@ public class XRMenu : MonoBehaviour
         }
         await Busy("Saving...");
         string name = await exporter.SaveScanToCache(this);
+        if (name != null && HouseEditsStore.CarryLiveInto(name))
+        {
+            exporter.AdoptSavedLiveScan(name); // the edits belong to the saved copy now - show it
+            AddLog($"<color=green>Edits made on the live scan saved with it - now on '{name}'.</color>");
+        }
         SetStatus(name != null ? "Scan saved" : "Save failed");
         RefreshScanLabel();
     }

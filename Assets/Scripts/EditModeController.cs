@@ -57,13 +57,24 @@ public class EditModeController : MonoBehaviour
     }
 
     /// <summary>
-    /// Makes sure edits can be stored: a saved scan must be active. On the live scan it is saved first and the app
-    /// switches to the saved copy. False if that's not possible (nothing loaded, save failed).
+    /// Makes sure edits can be stored. On the live scan they wait as pending edits (kept by "Save live scan" into the
+    /// new scan); on a saved scan they save by themselves. False if nothing is loaded.
     /// </summary>
     public async Task<bool> EnsureEditable()
     {
         if (HouseEditsStore.CanEdit) return true;
+        return await EnsureSavedScan();
+    }
+
+    /// <summary>
+    /// For changes that go into the scan file itself (a new doorway): a saved scan must be active. On the live scan it
+    /// is saved first (pending edits go along) and the app switches to the saved copy. False if that's not possible
+    /// (nothing loaded, save failed).
+    /// </summary>
+    public async Task<bool> EnsureSavedScan()
+    {
         if (exporter == null || saving) return false;
+        if (HouseEditsStore.CurrentScan != null) return true;
         if (exporter.ActiveSource != MRUKExporter.LiveSource)
         {
             uiLog?.AddLog("<color=red>Edit: load a scan first.</color>");
@@ -80,6 +91,7 @@ public class EditModeController : MonoBehaviour
 #endif
             if (name != null)
             {
+                HouseEditsStore.CarryLiveInto(name);
                 exporter.AdoptSavedLiveScan(name);
                 uiLog?.RefreshSourceLabel();
                 uiLog?.AddLog($"<color=green>Edits go to saved scan '{name}' (same rooms as the live scan).</color>");
@@ -88,6 +100,7 @@ public class EditModeController : MonoBehaviour
             uiLog?.AddLog("Edit on the live scan - saving it first, your edits will belong to the saved copy...");
             name = await exporter.SaveScanToCache(uiLog);
             if (name == null) { uiLog?.AddLog("<color=red>Edit: could not save the live scan - edit not applied.</color>"); return false; }
+            HouseEditsStore.CarryLiveInto(name);
             exporter.AdoptSavedLiveScan(name);
             uiLog?.RefreshSourceLabel();
             uiLog?.AddLog($"<color=green>Edits now go to saved scan '{name}'.</color>");
