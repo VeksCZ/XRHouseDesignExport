@@ -241,8 +241,8 @@ public static class XRModelFactory
         foreach (var o in allOpenings) {
             if (!uniqueOpenings.Any(existing => SameOpening(o, existing)))
                 uniqueOpenings.Add(o);
-        FitOpenings(allOpenings, uniqueOpenings);
         }
+        FitOpenings(allOpenings, uniqueOpenings);
 
         var addedOpeningsAnywhere = new HashSet<Guid>();
 

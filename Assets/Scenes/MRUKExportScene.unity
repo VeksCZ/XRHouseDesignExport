@@ -3237,9 +3237,9 @@ MonoBehaviour:
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: ed24508d182abcf4ba02d983e302d34e, type: 3}
-  m_Name: 
+  m_Name:
   m_EditorClassIdentifier: Oculus.VR::OVRRuntimeController
-  m_controller: 0
+  m_controller: 2
   m_controllerModelShader: {fileID: 0}
   m_supportAnimation: 1
 --- !u!114 &1388630363
@@ -3252,9 +3252,9 @@ MonoBehaviour:
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: ed24508d182abcf4ba02d983e302d34e, type: 3}
-  m_Name: 
+  m_Name:
   m_EditorClassIdentifier: Oculus.VR::OVRRuntimeController
-  m_controller: -1
+  m_controller: 1
   m_controllerModelShader: {fileID: 0}
   m_supportAnimation: 1
 --- !u!114 &1455475006

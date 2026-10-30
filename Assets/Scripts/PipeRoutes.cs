@@ -155,8 +155,27 @@ public static class RouteStyle
         return l;
     }
 
-    /// <summary>Point items (RouteMarker.type).</summary>
+    /// <summary>Point items (RouteMarker.type) - the full list, across every kind.</summary>
     public static readonly string[] MarkerTypes = { "Box", "Socket", "Switch", "Light", "Outlet", "Valve", "Floor drain", "Panel", "Data" };
+
+    /// <summary>Point items that make sense for a kind (Box always fits - a generic junction/connection point).</summary>
+    public static string[] MarkerTypesFor(RouteKind k) => k switch
+    {
+        RouteKind.Electric => new[] { "Box", "Socket", "Switch", "Light", "Outlet", "Panel", "Data" },
+        RouteKind.ColdWater or RouteKind.HotWater or RouteKind.Heating => new[] { "Box", "Valve" },
+        RouteKind.Waste => new[] { "Box", "Floor drain", "Valve" },
+        _ => MarkerTypes,
+    };
+
+    /// <summary>EndLabels that make sense for a kind.</summary>
+    public static string[] EndLabelsFor(RouteKind k) => k switch
+    {
+        RouteKind.Electric => new[] { "", "Socket", "Switch", "Light", "Panel", "Data", "Outside" },
+        RouteKind.ColdWater or RouteKind.HotWater => new[] { "", "Sink", "WC", "Shower", "Bath", "Washer", "Dishwasher", "Kitchen sink", "Boiler", "Manifold", "Riser", "Outside" },
+        RouteKind.Waste => new[] { "", "Sink", "WC", "Shower", "Bath", "Floor drain", "Washer", "Dishwasher", "Kitchen sink", "Riser", "Outside" },
+        RouteKind.Heating => new[] { "", "Radiator", "Manifold", "Boiler", "Outside" },
+        _ => EndLabels,
+    };
 
     /// <summary>Plate size on the surface (w x h, m) of a marker type; outlets/valves are stubs instead.</summary>
     public static Vector2 MarkerSize(string t) => t switch

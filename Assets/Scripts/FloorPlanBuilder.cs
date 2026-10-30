@@ -61,17 +61,36 @@ public static class FloorPlanBuilder
         return (float)(-dominant * 180.0 / Math.PI);
     }
 
+    /// <summary>Axis-aligned bounding box (min, max) of a polygon's points.</summary>
+    static (Vector2 min, Vector2 max) Bounds(IList<Vector2> p)
+    {
+        Vector2 min = p[0], max = p[0];
+        for (int i = 1; i < p.Count; i++) { min = Vector2.Min(min, p[i]); max = Vector2.Max(max, p[i]); }
+        return (min, max);
+    }
+
     /// <summary>
     /// True if two outlines are the same physical room scanned twice (MRUK keeps every Space Setup
-    /// scan, so a re-scanned room shows up as two rooms lying on top of each other): same story,
-    /// nearly the same centre and a similar size.
+    /// scan, so a re-scanned room shows up as two rooms lying on top of each other): same story, and
+    /// either a near-identical centre/size, or - since two Space Setup passes of the same room can
+    /// otherwise disagree a fair bit on the exact outline - their footprints mostly overlap.
     /// </summary>
     public static bool IsSameRoom(RoomOutline a, RoomOutline b)
     {
         if (Mathf.Abs(a.floorY - b.floorY) > 0.5f) return false;
-        if (Vector2.Distance(Centroid(a.polygon), Centroid(b.polygon)) > 0.75f) return false;
         float areaA = a.Area, areaB = b.Area;
-        return Mathf.Min(areaA, areaB) / Mathf.Max(Mathf.Max(areaA, areaB), 0.0001f) > 0.6f;
+        if (areaA < 0.0001f || areaB < 0.0001f) return false;
+
+        var (aMin, aMax) = Bounds(a.polygon);
+        var (bMin, bMax) = Bounds(b.polygon);
+        Vector2 iMin = Vector2.Max(aMin, bMin), iMax = Vector2.Min(aMax, bMax);
+        float overlap = Mathf.Max(0, iMax.x - iMin.x) * Mathf.Max(0, iMax.y - iMin.y);
+        float boxA = (aMax.x - aMin.x) * (aMax.y - aMin.y), boxB = (bMax.x - bMin.x) * (bMax.y - bMin.y);
+        float union = boxA + boxB - overlap; // IoU: high only when the two boxes are close in size AND overlap -
+        if (union > 0.0001f && overlap / union > 0.5f) return true; // not when one merely contains a much smaller one
+
+        if (Vector2.Distance(Centroid(a.polygon), Centroid(b.polygon)) > 0.75f) return false;
+        return Mathf.Min(areaA, areaB) / Mathf.Max(areaA, areaB) > 0.6f;
     }
 
     /// <summary>Drops duplicate scans of the same room, keeping the most detailed (then the largest) one.</summary>

@@ -50,7 +50,7 @@ public class XRMenu : MonoBehaviour
     Button scanLabelButton;
     // Every button that shows a state is synced every frame (SyncToggleTints) from what is really on - a toggle can
     // also change from elsewhere (a panel's own Close, a shortcut, a scan change), and a per-frame sync never goes stale.
-    Button dollhouseButton, plansButton, scanOverlayButton, saveButton, exportButton, roughButton, finishedButton, modeButton, miniMapButton, walkButton, showRoutesButton, showPhotosButton, fittingsButton, photoMarkersButton;
+    Button dollhouseButton, plansButton, scanOverlayButton, saveButton, exportButton, finishedButton, modeButton, nextFloorButton, miniMapButton, walkButton, showRoutesButton, showPhotosButton, fittingsButton, photoMarkersButton;
     XRRayInteractor rightRay;
     float flickCooldown;
     bool menuPlaced;
@@ -173,9 +173,8 @@ public class XRMenu : MonoBehaviour
         float m0 = y0 + 2 * (h + gap) + cap + 8;
         XRUi.CreateCaption(view, "Model", Pad, m0 - cap, ContentW);
         modeButton = XRUi.CreateButton(view, "", X2(0), m0, w2, h, OnCycleDollhouseMode, 22);
-        XRUi.CreateButton(view, "Next floor", X2(1), m0, w2, h, OnNextFloor, 22);
-        roughButton = XRUi.CreateButton(view, "Rough shell", X2(0), m0 + h + gap, w2, h, () => SetFinished(false), 22);
-        finishedButton = XRUi.CreateButton(view, "Finished floors", X2(1), m0 + h + gap, w2, h, () => SetFinished(true), 22);
+        nextFloorButton = XRUi.CreateButton(view, "Next floor", X2(1), m0, w2, h, OnNextFloor, 22);
+        finishedButton = XRUi.CreateButton(view, "Finished floors", X2(0), m0 + h + gap, w2, h, () => SetFinished(!Furniture.Finished), 22);
 
         // ---- Layers: what is drawn on the walls (real walls, Walk and Dollhouse alike) ----
         layersText = XRUi.CreateText(layers, "Where", "", 18, TextAlignmentOptions.TopLeft, Pad + 4, y0 - cap, ContentW - 8, 56, XRUi.MutedText);
@@ -664,10 +663,27 @@ public class XRMenu : MonoBehaviour
             XRUi.SetTint(kv.Value, on ? XRUi.ButtonOnColor : XRUi.ButtonColor);
         }
         if (scanButton != null) XRUi.SetTint(scanButton, scanning ? XRUi.ButtonOnColor : XRUi.ButtonColor);
-        // rough shell | finished: one of the two is picked
-        bool f = Furniture.Finished;
-        XRUi.SetTint(roughButton, f ? XRUi.ButtonColor : XRUi.ButtonOnColor);
-        XRUi.SetTint(finishedButton, f ? XRUi.ButtonOnColor : XRUi.ButtonColor);
+        // rough shell (off) | finished floors (on) - one switch
+        XRUi.SetToggle(finishedButton, Furniture.Finished);
+        SyncNextFloorButton();
+    }
+
+    int nextFloorCount = -1, nextFloorCountVersion = int.MinValue;
+    /// <summary>Greyed out (nothing to move between) unless the loaded scan actually has more than one floor level.</summary>
+    void SyncNextFloorButton()
+    {
+        if (nextFloorButton == null) return;
+        int version = MRUKExporter.SceneVersion;
+        if (version != nextFloorCountVersion)
+        {
+            nextFloorCountVersion = version;
+            nextFloorCount = 0;
+#if META_XR_SDK_INSTALLED
+            if (Meta.XR.MRUtilityKit.MRUK.Instance != null) nextFloorCount = WalkThroughMode.CountFloorLevels(MRUKDataProcessor.GetValidRooms(Meta.XR.MRUtilityKit.MRUK.Instance));
+#endif
+        }
+        XRUi.SetLabel(nextFloorButton, nextFloorCount > 1 ? $"Next floor ({nextFloorCount})" : "Next floor");
+        XRUi.SetTint(nextFloorButton, nextFloorCount > 1 ? XRUi.ButtonColor : XRUi.ButtonDisabled);
     }
 
     string modeShown, stateShown;

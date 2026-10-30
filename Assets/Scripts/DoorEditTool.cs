@@ -82,6 +82,7 @@ public class DoorEditTool : MonoBehaviour
         }
         if (hovered != null && hovered != selected) DrawOutline(hovered, HoverColor);
         if (selected != null) DrawOutline(selected, SelectColor);
+        UpdateNewDoorDrag();
         FinishLines();
     }
 
@@ -150,7 +151,7 @@ public class DoorEditTool : MonoBehaviour
         if (selected == null)
         {
             // no door there: on a bare wall, offer a new doorway (one the Space Setup missed)
-            if (WallUnderRay(out var room, out var hit)) OpenAddPanel(room, hit);
+            if (WallUnderRay(out var room, out var hit, out var normal)) OpenAddPanel(room, hit, normal);
             else ClosePanel();
             return;
         }
@@ -180,27 +181,54 @@ public class DoorEditTool : MonoBehaviour
 
     static readonly float[] NewDoorWidths = { 0.6f, 0.7f, 0.8f, 0.9f, 1.0f, 1.2f, 1.6f };
     int newDoorWidthIdx = 2;
-    MRUKRoom newDoorRoom; Vector3 newDoorPoint; bool adding;
+    MRUKRoom newDoorRoom; Vector3 newDoorPoint, newDoorNormal; bool adding;
+    /// <summary>The add panel is open: a further trigger hold drags the point along the wall instead of
+    /// jumping to a brand new one, and a live preview box shows where the doorway will land.</summary>
+    bool addPanelOpen, draggingNewDoor;
     TMP_Text addTitle;
 
-    /// <summary>The wall (scan frame) under the ray: the nearest wall face of any room.</summary>
-    bool WallUnderRay(out MRUKRoom room, out Vector3 point)
+    /// <summary>The wall (scan frame) under the ray: the nearest wall face of any room, with its outward normal.</summary>
+    bool WallUnderRay(out MRUKRoom room, out Vector3 point, out Vector3 normal)
     {
-        room = null; point = default;
+        room = null; point = default; normal = Vector3.forward;
         Vector3 o = WorldToScan(rightHand.position);
         Vector3 dir = (WorldToScan(rightHand.position + rightHand.forward) - o).normalized;
         var ray = new Ray(o, dir);
         float best = 30f;
         var walls = new LabelFilter(MRUKAnchor.SceneLabels.WALL_FACE | MRUKAnchor.SceneLabels.INVISIBLE_WALL_FACE);
         foreach (var r in rooms)
-            if (r != null && r.Raycast(ray, best, walls, out RaycastHit h, out _) && h.distance < best) { best = h.distance; room = r; point = h.point; }
+            if (r != null && r.Raycast(ray, best, walls, out RaycastHit h, out _) && h.distance < best) { best = h.distance; room = r; point = h.point; normal = h.normal; }
         return room != null;
     }
 
-    void OpenAddPanel(MRUKRoom room, Vector3 point)
+    /// <summary>While the add panel is open: hold the trigger and move the hand to slide the doorway along
+    /// the same wall before confirming - lets you see it before it's final instead of only guessing once.</summary>
+    void UpdateNewDoorDrag()
+    {
+        if (!addPanelOpen) { draggingNewDoor = false; return; }
+        bool held = OVRInput.Get(OVRInput.Button.PrimaryIndexTrigger, OVRInput.Controller.RTouch);
+        if (held && WallUnderRay(out var r, out var p, out var n) && r == newDoorRoom)
+        {
+            draggingNewDoor = true;
+            newDoorPoint = p; newDoorNormal = n;
+        }
+        else if (!held) draggingNewDoor = false;
+        DrawNewDoorPreview();
+    }
+
+    void DrawNewDoorPreview()
+    {
+        float floorY = newDoorRoom.FloorAnchors.Count > 0 ? newDoorRoom.FloorAnchors[0].transform.position.y : newDoorPoint.y - SceneJsonEdit.DefaultDoorHeight;
+        Vector3 right = Vector3.Cross(Vector3.up, newDoorNormal).normalized;
+        Vector3 baseAtFloor = new Vector3(newDoorPoint.x, floorY, newDoorPoint.z);
+        float w = NewDoorWidths[newDoorWidthIdx];
+        Rect3(baseAtFloor - right * (w / 2f), baseAtFloor + right * (w / 2f), SceneJsonEdit.DefaultDoorHeight, draggingNewDoor ? SelectColor : HoverColor);
+    }
+
+    void OpenAddPanel(MRUKRoom room, Vector3 point, Vector3 normal)
     {
         ClosePanel();
-        newDoorRoom = room; newDoorPoint = point;
+        newDoorRoom = room; newDoorPoint = point; newDoorNormal = normal; addPanelOpen = true;
         const float ph = 300f;
         panel = XRUi.CreateWorldCanvas("NewDoorPanel", new Vector2(PW, ph), PScale);
         var t = panel.transform;
@@ -220,7 +248,7 @@ public class DoorEditTool : MonoBehaviour
         XRUi.CreateButton(t, "-", 130, y, bw, rowH, () => { newDoorWidthIdx = Mathf.Max(0, newDoorWidthIdx - 1); RefreshAddPanel(); }, 30);
         XRUi.CreateButton(t, "+", 130 + bw + gap, y, bw, rowH, () => { newDoorWidthIdx = Mathf.Min(NewDoorWidths.Length - 1, newDoorWidthIdx + 1); RefreshAddPanel(); }, 30);
         y += rowH + gap;
-        XRUi.CreateText(t, "Hint", "A doorway the scan missed, centred where you pointed, standing on the floor (height 197 cm). It becomes part of this saved scan; then set its type like any door. Undo: the scan file is backed up (*.bak_doors).",
+        XRUi.CreateText(t, "Hint", "A doorway the scan missed, standing on the floor (height 197 cm). Hold the trigger and move your hand to slide it along the wall - the box shows where it'll land. It becomes part of this saved scan; then set its type like any door. Undo: the scan file is backed up (*.bak_doors).",
             16, TextAlignmentOptions.TopLeft, x0, y, PW - 40, 80, XRUi.MutedText);
         y += 86;
         var add = XRUi.CreateButton(t, "Add doorway", x0, y, (PW - 40 - gap) / 2f, rowH, AddDoorway, 22);
@@ -641,6 +669,7 @@ public class DoorEditTool : MonoBehaviour
         if (panel && panelDrag && panelDrag.Moved) { userPlaced = true; userPos = panel.transform.position; userRot = panel.transform.rotation; }
         if (panel) Destroy(panel.gameObject);
         panel = null;
+        addPanelOpen = false; draggingNewDoor = false; newDoorRoom = null;
     }
 
     static string RoomLabel(MRUKRoom r) => r != null ? MRUKDataProcessor.GetRoomLabel(r) : "Outside";

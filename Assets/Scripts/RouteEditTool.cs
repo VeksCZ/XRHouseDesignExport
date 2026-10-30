@@ -34,8 +34,15 @@ public class RouteEditTool : MonoBehaviour
     /// <summary>The route or box picked with "Pick..." - Spec / Circuit / Leads to change it.</summary>
     string selRouteId, selMarkerId;
     string joinFirstId; bool joinFirstAtStart;
-    int markerIdx;
+    /// <summary>Last box type picked per kind (so switching kind keeps its own last choice).</summary>
+    readonly Dictionary<RouteKind, int> markerIdxByKind = new Dictionary<RouteKind, int>();
     float retryAt;
+
+    int MarkerIdx
+    {
+        get { var types = RouteStyle.MarkerTypesFor(kind); return Mathf.Clamp(markerIdxByKind.TryGetValue(kind, out var i) ? i : 0, 0, types.Length - 1); }
+    }
+    string MarkerType => RouteStyle.MarkerTypesFor(kind)[MarkerIdx];
 
     Transform head, rightHand;
     bool frameIsWalk; Transform frameRoot; float frameYaw; Vector3 frameCenter;
@@ -72,7 +79,7 @@ public class RouteEditTool : MonoBehaviour
     void Start()
     {
         kind = (RouteKind)Mathf.Clamp(PlayerPrefs.GetInt(KindPref, (int)RouteKind.ColdWater), 0, RouteStyle.Kinds.Length - 1);
-        markerIdx = Mathf.Clamp(PlayerPrefs.GetInt(MarkerPref, 0), 0, RouteStyle.MarkerTypes.Length - 1);
+        foreach (var k in RouteStyle.Kinds) markerIdxByKind[k] = PlayerPrefs.GetInt(MarkerPref + "_" + k, 0);
         if (editMode != null) editMode.TriggerPressed += OnTrigger;
         RouteStore.Changed += OnRoutesChanged;
     }
@@ -377,7 +384,7 @@ public class RouteEditTool : MonoBehaviour
         if (room == null) { uiLog?.AddLog("Routes: no scanned room here."); return; }
         var m = new RouteMarker
         {
-            id = Guid.NewGuid().ToString("N"), kind = kind, type = RouteStyle.MarkerTypes[markerIdx],
+            id = Guid.NewGuid().ToString("N"), kind = kind, type = MarkerType,
             roomUuid = DoorCatalog.RoomId(room), created = DateTime.Now.ToString("s"),
             localPos = new Vector3Data(room.transform.InverseTransformPoint(p)),
             localNormal = new Vector3Data(room.transform.InverseTransformDirection(hoverNormal)),
@@ -665,8 +672,9 @@ public class RouteEditTool : MonoBehaviour
     {
         var r = Target;
         if (r == null) { uiLog?.AddLog("Routes: draw or pick a route first."); return; }
-        labelIdx = (Array.IndexOf(RouteStyle.EndLabels, r.endLabel ?? "") + 1) % RouteStyle.EndLabels.Length;
-        string id = r.id, label = RouteStyle.EndLabels[labelIdx];
+        var labels = RouteStyle.EndLabelsFor(r.kind);
+        labelIdx = (Array.IndexOf(labels, r.endLabel ?? "") + 1 + labels.Length) % labels.Length;
+        string id = r.id, label = labels[labelIdx];
         RouteStore.Apply(f => f.routes.First(q => q.id == id).endLabel = label);
         RefreshPanel();
     }
@@ -801,8 +809,10 @@ public class RouteEditTool : MonoBehaviour
         modeButton = XRUi.CreateButton(t, "", x0, y, w3, RowH, () => { markerMode = !markerMode; deleteMode = false; if (markerMode) Finish(); RefreshPanel(); }, 18);
         markerButton = XRUi.CreateButton(t, "", x0 + w3 + Gap, y, w3, RowH, () =>
         {
-            markerIdx = (markerIdx + 1) % RouteStyle.MarkerTypes.Length;
-            PlayerPrefs.SetInt(MarkerPref, markerIdx); PlayerPrefs.Save();
+            var types = RouteStyle.MarkerTypesFor(kind);
+            int next = (MarkerIdx + 1) % types.Length;
+            markerIdxByKind[kind] = next;
+            PlayerPrefs.SetInt(MarkerPref + "_" + kind, next); PlayerPrefs.Save();
             markerMode = true; RefreshPanel();
         }, 18);
         acceptButton = XRUi.CreateButton(t, "", x0 + (w3 + Gap) * 2, y, w3, RowH, AcceptProposals, 16);
@@ -852,7 +862,7 @@ public class RouteEditTool : MonoBehaviour
             : pickMode ? "Pick: trigger on a route or a box to change it"
             : deleteMode ? "Delete: trigger on a route or a box"
             : joinMode ? (joinFirstId == null ? "Join: trigger on the end of the first route" : "Join: now the end of the second route")
-            : markerMode ? $"Boxes: {RouteStore.Current.markers.Count}   -   next: {RouteStyle.Name(kind)} {RouteStyle.MarkerTypes[markerIdx]}"
+            : markerMode ? $"Boxes: {RouteStore.Current.markers.Count}   -   next: {RouteStyle.Name(kind)} {MarkerType}"
             : $"Routes: {count}   -   next: {RouteStyle.Name(kind)}";
         foreach (var kv in kindButtons)
             XRUi.SetTint(kv.Value, kv.Key == kind ? Darken(RouteStyle.Color(kv.Key)) : XRUi.ButtonColor);
@@ -868,7 +878,7 @@ public class RouteEditTool : MonoBehaviour
         XRUi.SetTint(joinButton, joinMode ? XRUi.ButtonOnColor : XRUi.ButtonToggleColor);
         XRUi.SetLabel(modeButton, markerMode ? "Placing: boxes" : "Placing: routes");
         XRUi.SetTint(modeButton, markerMode ? XRUi.ButtonOnColor : XRUi.ButtonToggleColor);
-        XRUi.SetLabel(markerButton, $"Box type: {RouteStyle.MarkerTypes[markerIdx]}");
+        XRUi.SetLabel(markerButton, $"Box type: {MarkerType}");
         int prop = RouteStore.Routes.Count(x => x.proposed);
         XRUi.SetLabel(acceptButton, prop > 0 ? $"Keep {prop} from photos" : "No photo proposals");
         XRUi.SetTint(acceptButton, prop > 0 ? XRUi.ButtonOnColor : XRUi.ButtonDisabled);
