@@ -83,6 +83,7 @@ public class DoorEditTool : MonoBehaviour
         if (hovered != null && hovered != selected) DrawOutline(hovered, HoverColor);
         if (selected != null) DrawOutline(selected, SelectColor);
         UpdateNewDoorDrag();
+        if (wallPanelOpen) Rect3(gapP, gapQ, gapH, SelectColor);
         FinishLines();
     }
 
@@ -151,7 +152,12 @@ public class DoorEditTool : MonoBehaviour
         if (selected == null)
         {
             // no door there: on a bare wall, offer a new doorway (one the Space Setup missed)
-            if (WallUnderRay(out var room, out var hit, out var normal)) OpenAddPanel(room, hit, normal);
+            if (WallUnderRay(out var room, out var hit, out var normal))
+            {
+                Vector3 o = WorldToScan(rightHand.position);
+                aim = new Ray(o, (WorldToScan(rightHand.position + rightHand.forward) - o).normalized); // for "Missing wall"
+                OpenAddPanel(room, hit, normal);
+            }
             else ClosePanel();
             return;
         }
@@ -185,6 +191,9 @@ public class DoorEditTool : MonoBehaviour
     /// <summary>The add panel is open: a further trigger hold drags the point along the wall instead of
     /// jumping to a brand new one, and a live preview box shows where the doorway will land.</summary>
     bool addPanelOpen, draggingNewDoor;
+    Ray aim;                                  // where the ray pointed when the add panel opened (scan frame)
+    bool wallPanelOpen;                       // the "missing wall" panel: a preview of the gap, Add wall / Cancel
+    MRUKRoom gapRoom; Vector3 gapP, gapQ; float gapH;
     TMP_Text addTitle;
 
     /// <summary>The wall (scan frame) under the ray: the nearest wall face of any room, with its outward normal.</summary>
@@ -229,7 +238,7 @@ public class DoorEditTool : MonoBehaviour
     {
         ClosePanel();
         newDoorRoom = room; newDoorPoint = point; newDoorNormal = normal; addPanelOpen = true;
-        const float ph = 300f;
+        const float ph = 372f;
         panel = XRUi.CreateWorldCanvas("NewDoorPanel", new Vector2(PW, ph), PScale);
         var t = panel.transform;
         if (userPlaced) t.SetPositionAndRotation(userPos, userRot);
@@ -254,7 +263,71 @@ public class DoorEditTool : MonoBehaviour
         var add = XRUi.CreateButton(t, "Add doorway", x0, y, (PW - 40 - gap) / 2f, rowH, AddDoorway, 22);
         XRUi.SetTint(add, XRUi.ButtonOnColor);
         XRUi.CreateButton(t, "Cancel", x0 + (PW - 40 - gap) / 2f + gap, y, (PW - 40 - gap) / 2f, rowH, ClosePanel, 22);
+        y += rowH + gap;
+        XRUi.CreateButton(t, "Missing wall instead", x0, y, PW - 40, rowH, ShowMissingWall, 22);
         RefreshAddPanel();
+    }
+
+    // ---------- a wall the scan missed ----------
+
+    /// <summary>Finds the gap in the room's walls nearest to where you pointed (a mirror the Quest couldn't scan) and
+    /// shows it; Add wall then draws it in, between the loose wall ends, as high as the walls beside it.</summary>
+    void ShowMissingWall()
+    {
+#if META_XR_SDK_INSTALLED
+        if (!MissingWall.Find(rooms, aim, out var room, out var p, out var q, out float h))
+        {
+            uiLog?.AddLog("<color=orange>Missing wall: no gap in the walls where you pointed - close the panel, point at the place where the wall should be and pull the trigger again.</color>");
+            return;
+        }
+        OpenWallPanel(room, p, q, h);
+#endif
+    }
+
+    void OpenWallPanel(MRUKRoom room, Vector3 p, Vector3 q, float h)
+    {
+        ClosePanel();
+        gapRoom = room; gapP = p; gapQ = q; gapH = h; wallPanelOpen = true;
+        const float ph = 232f;
+        panel = XRUi.CreateWorldCanvas("NewWallPanel", new Vector2(PW, ph), PScale);
+        var t = panel.transform;
+        if (userPlaced) t.SetPositionAndRotation(userPos, userRot);
+        else
+        {
+            Vector3 fwd = Vector3.ProjectOnPlane(head.forward, Vector3.up).normalized;
+            Vector3 pos = head.position + fwd * 0.6f - Vector3.up * 0.18f;
+            t.SetPositionAndRotation(pos, Quaternion.LookRotation(pos - head.position, Vector3.up));
+        }
+        panelDrag = PanelDrag.Attach(panel, PW, ph);
+        XRUi.CreatePanel(t, "Background", XRUi.PanelColor, 0, 0, PW, ph);
+        float len = Vector3.Distance(new Vector3(p.x, 0, p.z), new Vector3(q.x, 0, q.z));
+        XRUi.CreateText(t, "Title", $"Missing wall in {RoomLabel(room)}:  {len * 100:0} x {h * 100:0} cm", 24, TextAlignmentOptions.MidlineLeft, 20, 8, PW - 40, 44, XRUi.TextColor, FontStyles.Bold);
+        XRUi.CreateText(t, "Hint", "The two loose wall ends in the outline are joined by a new wall, as high as the walls beside it. It becomes part of this saved scan (backed up as *.bak_doors).",
+            16, TextAlignmentOptions.TopLeft, 20, 60, PW - 40, 80, XRUi.MutedText);
+        float rowH = 64, gap = 8, y = 150;
+        var add = XRUi.CreateButton(t, "Add wall", 20, y, (PW - 40 - gap) / 2f, rowH, AddMissingWall, 22);
+        XRUi.SetTint(add, XRUi.ButtonOnColor);
+        XRUi.CreateButton(t, "Cancel", 20 + (PW - 40 - gap) / 2f + gap, y, (PW - 40 - gap) / 2f, rowH, ClosePanel, 22);
+    }
+
+    async void AddMissingWall()
+    {
+        if (adding || gapRoom == null) return;
+        adding = true;
+        try
+        {
+            if (!await editMode.EnsureSavedScan()) return; // into a saved scan's file, never from the live scan
+            var room = gapRoom; Vector3 p = gapP, q = gapQ; float h = gapH;
+            string scan = HouseEditsStore.CurrentScan;
+            string err = SceneJsonEdit.AddWall(scan, room, p, q, h);
+            if (err != null) { uiLog?.AddLog($"<color=red>New wall: {err}.</color>"); return; }
+            ClosePanel();
+            uiLog?.AddLog($"<color=green>Wall added to '{scan}' - reloading the scan...</color>");
+            PendingChanges.Mark("edits");
+            if (uiLog != null) await uiLog.ReloadAfterScanEdit();
+            frameRoot = null;
+        }
+        finally { adding = false; }
     }
 
     void RefreshAddPanel()
@@ -268,22 +341,12 @@ public class DoorEditTool : MonoBehaviour
         adding = true;
         try
         {
-            // the doorway goes into the saved scan's own file - on the live scan that is the saved copy edits use;
-            // its file is in its own frame, so load it first and point again
-            var exporter = FindFirstObjectByType<MRUKExporter>();
-            bool wasLive = exporter != null && exporter.ActiveSource == MRUKExporter.LiveSource;
-            if (!await editMode.EnsureSavedScan()) return; // a new doorway is written into the saved scan's file
-            if (wasLive)
-            {
-                ClosePanel();
-                if (uiLog != null) await uiLog.ReloadAfterScanEdit();
-                frameRoot = null;
-                uiLog?.AddLog($"New doorway: now on saved scan '{HouseEditsStore.CurrentScan}' - point at the wall and pull the trigger again.");
-                return;
-            }
-            string scan = HouseEditsStore.CurrentScan;
+            // the doorway goes into the saved scan's own file; never from the live scan (it is not a file yet)
+            if (!await editMode.EnsureSavedScan()) return;
+            var room = newDoorRoom; Vector3 point = newDoorPoint;
             float w = NewDoorWidths[newDoorWidthIdx];
-            string err = SceneJsonEdit.AddDoor(scan, newDoorRoom, newDoorPoint, w, SceneJsonEdit.DefaultDoorHeight);
+            string scan = HouseEditsStore.CurrentScan;
+            string err = SceneJsonEdit.AddDoor(scan, room, point, w, SceneJsonEdit.DefaultDoorHeight);
             if (err != null) { uiLog?.AddLog($"<color=red>New doorway: {err}.</color>"); return; }
             ClosePanel();
             uiLog?.AddLog($"<color=green>Doorway {w * 100:0} cm added to '{scan}' - reloading the scan...</color>");
@@ -669,7 +732,7 @@ public class DoorEditTool : MonoBehaviour
         if (panel && panelDrag && panelDrag.Moved) { userPlaced = true; userPos = panel.transform.position; userRot = panel.transform.rotation; }
         if (panel) Destroy(panel.gameObject);
         panel = null;
-        addPanelOpen = false; draggingNewDoor = false; newDoorRoom = null;
+        addPanelOpen = false; draggingNewDoor = false; newDoorRoom = null; wallPanelOpen = false; gapRoom = null;
     }
 
     static string RoomLabel(MRUKRoom r) => r != null ? MRUKDataProcessor.GetRoomLabel(r) : "Outside";

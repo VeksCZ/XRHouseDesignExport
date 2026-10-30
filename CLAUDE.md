@@ -104,8 +104,9 @@ and exports 3D models, floor plans and reports from the scan.
   serialized). A saved scan's edits/routes/names save themselves - "Save live scan" (Data tab) only saves the Quest's
   live scene, orange when the live scan has a room no saved scan has (PendingChanges.CheckLive, by room ids). Edits on
   the live scan wait in `ScanCache/_live.edits.json` (`HouseEditsStore.LiveBound`; Data tab orange while `LiveHasEdits`) and
-  "Save live scan" hands them to the new scan (`CarryLiveInto`); only a new doorway (written into the scan file) still
-  saves the live scan first (`EditModeController.EnsureSavedScan`). On the headset a saved scan is
+  "Save live scan" (the user's own press, never automatic) hands them to the NEW scan (`CarryLiveInto`). The live scan
+  never touches an existing saved scan and nothing saves it by itself - the Data tab only turns orange. A new doorway /
+  missing wall is written into a saved scan's file, so it is refused on the live scan (`EditModeController.EnsureSavedScan`). On the headset a saved scan is
   lined up with the house via shared room UUIDs (AlignToLive -> TrackingSpaceOffset).
 - **Finished vs rough model** (menu View tab toggle, `Furniture.Finished`, desktop `-finished 1|0`): spec
   `"floor_buildup": [m per storey, bottom first]` raises floors/furniture/stairs to the finished floor and
@@ -114,6 +115,9 @@ and exports 3D models, floor plans and reports from the scan.
 - **New doorway** (Doors tool: trigger on a bare wall): `SceneJsonEdit.AddDoor` writes a DOOR_FRAME into the saved
   scan's own JSON (V1 entity or V2 room-mesh face; JSON/Unity axis flip calibrated from the walls; backup
   `*.bak_doors`). Desktop test `-test adddoor` (run it on a copy of a scan).
+  Not on the live scan (save it first, then pick the saved scan). **Missing wall** (button in the add panel): `MissingWall.Find` takes the
+  loose wall ends of a room's outline nearest to where you pointed, `SceneJsonEdit.AddWall` joins them with a WALL_FACE
+  (V2 face / V1 entity inserted in `wallUuids`); the walk-through keeps your spot over a reload (`TryGetFeetInRoom`, room + room-local point).
 - **Sliding furniture parts** (shower doors, spec glass `{"side":"front","sliding":true}`): parts named `@slide...`
   move in the walk-through (WalkDoors.SetFurnitureSliders) - open when you come close or on the trigger.
 - **Logs**: headset session logs are in `persistentDataPath/Logs` (menu "Pull logs from Quest" -> `Logs/Quest`),

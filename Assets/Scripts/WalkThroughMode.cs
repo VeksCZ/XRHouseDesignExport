@@ -660,6 +660,37 @@ public class WalkThroughMode : MonoBehaviour
         return true;
     }
 
+    /// <summary>Where you stand as the room you are in + your feet in that room's own frame + which way you face. Unlike a
+    /// scan-frame point this survives the scan being reloaded in another frame (a saved copy of the live scan).</summary>
+    public bool TryGetFeetInRoom(out string roomUuid, out Vector3 localFeet, out float facingYaw)
+    {
+        roomUuid = null; localFeet = default;
+        if (!TryGetFeetScan(out var feet, out facingYaw) || walkRooms == null) return false;
+        var room = DoorCatalog.FindRoomAt(walkRooms, feet + Vector3.up * 0.05f);
+        if (room == null) return false;
+        roomUuid = room.Anchor.Uuid.ToString();
+        localFeet = room.transform.InverseTransformPoint(feet);
+        return true;
+    }
+
+    /// <summary>Back to a spot saved by TryGetFeetInRoom in the (rebuilt) model, facing the same way. Null when that
+    /// room isn't in this scan.</summary>
+    public string TeleportToFeetInRoom(string roomUuid, Vector3 localFeet, float facingYaw)
+    {
+        var room = walkRooms?.FirstOrDefault(r => r != null && r.Anchor.Uuid.ToString() == roomUuid);
+        if (room == null || !isOn) return null;
+        Vector3 w = room.transform.TransformPoint(localFeet);
+        string s = TeleportToScanPoint(w, w.y);
+        if (TryGetScanWorldPose(out _, out var fwd))
+        {
+            float now = Mathf.Atan2(fwd.x, fwd.z) * Mathf.Rad2Deg;
+            // turning the model by +a about your head turns your facing, as seen in the scan, by -a
+            root.transform.RotateAround(head.position, Vector3.up, -Mathf.DeltaAngle(now, facingYaw));
+            Physics.SyncTransforms();
+        }
+        return s;
+    }
+
     /// <summary>Your virtual head in the scan's own world frame (where MRUK's anchors are) - for the minimap.</summary>
     public bool TryGetScanWorldPose(out Vector3 pos, out Vector3 forward)
     {

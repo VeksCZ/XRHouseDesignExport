@@ -998,12 +998,13 @@ public class XRMenu : MonoBehaviour
                 if (walk != null && walk.IsOn)
                 {
                     // back where you stood, in the rebuilt model
-                    bool here = walk.TryGetFeetScan(out var feet, out _);
+                    // as room + room-local spot: a reloaded scan can sit in another frame (the saved copy of the live scan)
+                    bool here = walk.TryGetFeetInRoom(out var feetRoom, out var feetLocal, out var feetYaw);
                     walk.Exit();
                     if (loaded && await walk.Enter(null, null))
                     {
                         dollhouse?.SetHidden(true);
-                        if (here) walk.TeleportToScanPoint(feet, feet.y);
+                        if (here) walk.TeleportToFeetInRoom(feetRoom, feetLocal, feetYaw);
                     }
                     else dollhouse?.SetHidden(false);
                 }

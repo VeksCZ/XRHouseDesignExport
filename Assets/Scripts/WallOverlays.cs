@@ -20,6 +20,10 @@ using Meta.XR.MRUtilityKit;
 /// </summary>
 public class WallOverlays : MonoBehaviour
 {
+    /// <summary>Transparent overlays (routes, photos, fittings) draw before the UI (queue 3000): a big mesh whose centre is
+    /// nearer than the menu would otherwise be sorted after it and cover it.</summary>
+    const int OverlayQueue = 2990;
+
     public WalkThroughMode walk;
     public DollHouseVisualizer dollhouse;
     public MRUKExporter exporter;
@@ -283,7 +287,7 @@ public class WallOverlays : MonoBehaviour
             }
         }
         if (v.Count == 0) return;
-        if (!routeMat) routeMat = new Material(Shader.Find("Sprites/Default")) { name = "Routes" };
+        if (!routeMat) routeMat = new Material(Shader.Find("Sprites/Default")) { name = "Routes", renderQueue = OverlayQueue };
         var mesh = RouteMesh.ToMesh("Routes", v, col, tri);
         ctx.meshes.Add(mesh);
         ctx.routesGo = new GameObject("Routes");
@@ -384,7 +388,7 @@ public class WallOverlays : MonoBehaviour
             Quad(c - ax - ay, c + ax - ay, c + ax + ay, c - ax + ay, k);
         }
         if (v.Count == 0) return;
-        if (!routeMat) routeMat = new Material(Shader.Find("Sprites/Default")) { name = "Routes" };
+        if (!routeMat) routeMat = new Material(Shader.Find("Sprites/Default")) { name = "Routes", renderQueue = OverlayQueue };
         Debug.Log($"[Overlays] {ctx.name}: {v.Count / 4} no-drill zone band(s)");
         var mesh = RouteMesh.ToMesh("NoDrillZones", v, col, tri);
         ctx.meshes.Add(mesh);
@@ -452,7 +456,7 @@ public class WallOverlays : MonoBehaviour
             icons.Add(new Icon { photo = ph, p = p, n = n });
         }
         if (v.Count == 0) return;
-        if (!routeMat) routeMat = new Material(Shader.Find("Sprites/Default")) { name = "Routes" };
+        if (!routeMat) routeMat = new Material(Shader.Find("Sprites/Default")) { name = "Routes", renderQueue = OverlayQueue };
         var mesh = RouteMesh.ToMesh("PhotoIcons", v, col, tri);
         ctx.meshes.Add(mesh);
         var go = new GameObject("PhotoIcons");
@@ -644,7 +648,7 @@ public class WallOverlays : MonoBehaviour
                 : null;
         var spec = scan != null ? Furniture.Load(scan) : null;
         if (spec == null) { FittingsInfo = string.IsNullOrEmpty(HouseEditsStore.CurrentScan) ? "no saved scan with fittings" : $"'{HouseEditsStore.CurrentScan}' has no fittings"; return; }
-        if (!ghostMat) ghostMat = new Material(Shader.Find("Sprites/Default")) { name = "FittingsGhost" };
+        if (!ghostMat) ghostMat = new Material(Shader.Find("Sprites/Default")) { name = "FittingsGhost", renderQueue = OverlayQueue };
         var valid = MRUK.Instance != null ? MRUKDataProcessor.GetValidRooms(MRUK.Instance) : rooms;
         int parts = 0;
         var ghost = Furniture.GhostMesh(spec, valid, 0.5f);
@@ -771,7 +775,7 @@ public class WallOverlays : MonoBehaviour
     {
         if (!p.mat)
         {
-            p.mat = new Material(Shader.Find("Sprites/Default")) { name = "WallPhoto_" + p.meta.index };
+            p.mat = new Material(Shader.Find("Sprites/Default")) { name = "WallPhoto_" + p.meta.index, renderQueue = OverlayQueue };
             p.mat.color = new Color(1f, 1f, 1f, 0.92f);
             p.mat.mainTexture = p.tex ? p.tex : Texture2D.grayTexture;
         }

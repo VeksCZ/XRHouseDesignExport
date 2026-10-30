@@ -67,6 +67,160 @@ public static class SceneJsonEdit
 
     static bool Eq(string a, string b) => string.Equals(a, b, StringComparison.OrdinalIgnoreCase);
 
+    /// <summary>Adds a wall the scan missed between two points (scan frame, bottom of the wall, same height) and
+    /// 'height' high, into the saved scan's JSON. Returns null when done, else why not.</summary>
+    public static string AddWall(string scanName, MRUKRoom room, Vector3 p, Vector3 q, float height)
+    {
+        string path = MRUKSceneCache.ScanPath(scanName);
+        if (string.IsNullOrEmpty(scanName) || !File.Exists(path)) return "the saved scan's file is missing";
+        if (room == null) return "no room there";
+        JObject json;
+        try { json = JObject.Parse(File.ReadAllText(path)); }
+        catch (Exception e) { return "can't read the scan: " + e.Message; }
+        var entities = json["spatialEntities"] as JArray;
+        if (entities == null) return "unknown scan format";
+
+        var (ida, idb) = PendingChanges.IdForms(room.Anchor.Uuid);
+        var roomEnt = entities.OfType<JObject>().FirstOrDefault(e => Eq((string)e["uuid"], ida) || Eq((string)e["uuid"], idb));
+        if (roomEnt == null) return "the room isn't in the scan file";
+        var unityWalls = room.WallAnchors.Where(w => w != null).Select(w => w.transform.position).ToList();
+        if (unityWalls.Count == 0) return "the room has no walls";
+        if (Vector3.Distance(p, q) < 0.2f || height < 0.5f) return "the gap is too small";
+
+        string err = roomEnt["roomMeshMETA"] is JObject mesh
+            ? AddWallV2(roomEnt, mesh, unityWalls, p, q, height)
+            : AddWallV1(entities, roomEnt, unityWalls, p, q, height);
+        if (err != null) return err;
+
+        try
+        {
+            string bak = path + ".bak_doors";
+            if (!File.Exists(bak)) File.Copy(path, bak);
+            File.WriteAllText(path, json.ToString(Formatting.Indented));
+        }
+        catch (Exception e) { return "can't write the scan: " + e.Message; }
+        Debug.Log($"[SceneJsonEdit] {scanName}: wall {Vector3.Distance(p, q):0.00} x {height:0.00} m added in room {ida.Substring(0, 8)}");
+        return null;
+    }
+
+    static float Sign(float v) => v >= 0f ? 1f : -1f;
+
+    static string AddWallV2(JObject roomEnt, JObject mesh, List<Vector3> unityWalls, Vector3 p, Vector3 q, float height)
+    {
+        var (rp, rq) = Pose(roomEnt["locatableMETA"]);
+        var verts = Floats3((string)mesh["vertices"]);
+        var faces = mesh["faces"] as JArray;
+        if (faces == null || verts.Count == 0) return "the room mesh is empty";
+        var walls = new List<(JObject face, List<int> idx, Vector3 local)>();
+        foreach (var f in faces.OfType<JObject>())
+        {
+            if ((string)f["semanticLabel"] != "WALL_FACE") continue;
+            var idx = UInts((string)f["indices"]);
+            if (idx.Count < 3 || idx.Any(i => i >= verts.Count)) continue;
+            var d = idx.Distinct().ToList();
+            walls.Add((f, idx, d.Aggregate(Vector3.zero, (s, i) => s + verts[i]) / d.Count));
+        }
+        if (walls.Count == 0) return "the room mesh has no walls";
+
+        Vector3 flip = BestFlip(walls.Select(w => rp + rq * w.local).ToList(), unityWalls, out float err);
+        if (err > 0.25f) return $"can't line the scan file up with the loaded scan ({err:0.00} m)";
+        Vector3 ToLocal(Vector3 w) => Quaternion.Inverse(rq) * (Vector3.Scale(w, flip) - rp);
+        Vector3 up = Quaternion.Inverse(rq) * Vector3.up;
+
+        Vector3 b0 = ToLocal(p), b1 = ToLocal(q), t0 = b0 + up * height, t1 = b1 + up * height;
+        Vector3 roomC = walls.Aggregate(Vector3.zero, (s, w) => s + w.local) / walls.Count;
+        // which way the file's own walls wind (their face normal points into the room - or out of it, for all alike)
+        float side = 0f;
+        foreach (var w in walls)
+            side += Sign(Vector3.Dot(Vector3.Cross(verts[w.idx[1]] - verts[w.idx[0]], verts[w.idx[2]] - verts[w.idx[0]]), roomC - w.local));
+        float want = Sign(side);
+
+        int i0 = verts.Count;
+        verts.AddRange(new[] { b0, b1, t1, t0 });
+        var tri = new List<int> { i0, i0 + 1, i0 + 2, i0, i0 + 2, i0 + 3 };
+        Vector3 dn = Vector3.Cross(b1 - b0, t1 - b0), mid = (b0 + b1 + t0 + t1) / 4f;
+        if (Sign(Vector3.Dot(dn, roomC - mid)) != want) tri = new List<int> { i0, i0 + 2, i0 + 1, i0, i0 + 3, i0 + 2 };
+
+        mesh["vertices"] = ToB64(verts);
+        var nf = (JObject)walls[0].face.DeepClone();   // same properties as the file's own wall faces
+        nf["uuid"] = Guid.NewGuid().ToString();
+        nf["indices"] = ToB64(tri);
+        faces.Add(nf);
+        return null;
+    }
+
+    static string AddWallV1(JArray entities, JObject roomEnt, List<Vector3> unityWalls, Vector3 p, Vector3 q, float height)
+    {
+        var container = roomEnt["spaceContainerMETA"]?["uuids"] as JArray;
+        var layout = roomEnt["roomLayoutMETA"] as JObject;
+        var wallArray = layout?["wallUuids"] as JArray;
+        if (container == null || wallArray == null) return "unknown room format";
+        var wallIds = new HashSet<string>(wallArray.Select(x => ((string)x).ToLowerInvariant()));
+        var walls = entities.OfType<JObject>().Where(e => wallIds.Contains(((string)e["uuid"] ?? "").ToLowerInvariant()) && e["locatableMETA"] != null && e["bounded2DMETA"] != null).ToList();
+        if (walls.Count == 0) return "the room has no walls in the file";
+
+        Vector3 flip = BestFlip(walls.Select(w => Pose(w["locatableMETA"]).p).ToList(), unityWalls, out float err);
+        if (err > 0.25f) return $"can't line the scan file up with the loaded scan ({err:0.00} m)";
+        Vector3 P = Vector3.Scale(p, flip), Q = Vector3.Scale(q, flip);
+
+        // the file's walls: their pose, and the bottom ends along their own x axis
+        var info = walls.Select(w =>
+        {
+            var (wp, wq) = Pose(w["locatableMETA"]);
+            var b = w["bounded2DMETA"];
+            float ox = (float)b["offset"]["x"], oy = (float)b["offset"]["y"], ew = (float)b["extent"]["width"];
+            return (ent: w, wp, wq, e0: wp + wq * new Vector3(ox, oy, 0f), e1: wp + wq * new Vector3(ox + ew, oy, 0f));
+        }).ToList();
+        float H(Vector3 a, Vector3 b) { a.y = b.y = 0f; return Vector3.Distance(a, b); }
+        var nearP = info.OrderBy(w => Mathf.Min(H(w.e0, P), H(w.e1, P))).First();
+        var nearQ = info.OrderBy(w => Mathf.Min(H(w.e0, Q), H(w.e1, Q))).First();
+
+        Vector3 roomC = info.Aggregate(Vector3.zero, (s, w) => s + w.wp) / info.Count; roomC.y = 0f;
+        Vector3 Flat(Vector3 v) { v.y = 0f; return v; }
+        float side = 0f;   // on which side of its wall the room lies, in the walls' own z axis (alike for all of them)
+        foreach (var w in info) side += Sign(Vector3.Dot(Flat(w.wq * Vector3.forward), roomC - Flat(w.wp)));
+        float want = Sign(side);
+
+        Vector3 center = (P + Q) / 2f + Vector3.up * (height / 2f);
+        float width = H(P, Q);
+        Vector3 along = Flat(Q - P).normalized;
+        Vector3 ax = Flat(nearP.wq * Vector3.right).normalized;
+        var rot = Quaternion.AngleAxis(Vector3.SignedAngle(ax, along, Vector3.up), Vector3.up) * nearP.wq;
+        if (Sign(Vector3.Dot(Flat(rot * Vector3.forward), roomC - Flat(center))) != want) rot = rot * Quaternion.AngleAxis(180f, Vector3.up);
+
+        string id = Guid.NewGuid().ToString();
+        entities.Add(new JObject
+        {
+            ["uuid"] = id,
+            ["semanticLabelMETA"] = "WALL_FACE",
+            ["locatableMETA"] = new JObject
+            {
+                ["orientation"] = new JObject { ["x"] = rot.x, ["y"] = rot.y, ["z"] = rot.z, ["w"] = rot.w },
+                ["position"] = new JObject { ["x"] = center.x, ["y"] = center.y, ["z"] = center.z },
+            },
+            ["boundary2DMETA"] = new JObject
+            {
+                ["vertices"] = ToB64Floats(new[] { -width / 2f, -height / 2f, width / 2f, -height / 2f, width / 2f, height / 2f, -width / 2f, height / 2f }),
+            },
+            ["bounded2DMETA"] = new JObject
+            {
+                ["offset"] = new JObject { ["x"] = -width / 2f, ["y"] = -height / 2f },
+                ["extent"] = new JObject { ["width"] = width, ["height"] = height },
+            },
+        });
+        container.Add(id);
+
+        // in the wall list the new wall goes between the two walls it joins (the room outline follows that order)
+        int ia = wallArray.ToList().FindIndex(x => Eq((string)x, (string)nearP.ent["uuid"]));
+        int ib = wallArray.ToList().FindIndex(x => Eq((string)x, (string)nearQ.ent["uuid"]));
+        int n = wallArray.Count;
+        int at = n;
+        if (ia >= 0 && ib >= 0 && Mathf.Abs(ia - ib) == 1) at = Mathf.Max(ia, ib);
+        wallArray.Insert(at, id);
+        return null;
+    }
+
+
     // ---------- V2: a face of the room mesh ----------
 
     static string AddDoorV2(JObject roomEnt, JObject mesh, List<Vector3> unityWalls, Vector3 worldPoint, float width, float height)

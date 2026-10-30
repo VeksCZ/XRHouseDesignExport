@@ -53,22 +53,6 @@ public class MRUKExporter : MonoBehaviour
         return ok && WorldAligned;
     }
 
-#if META_XR_SDK_INSTALLED
-    /// <summary>The newest saved scan that already holds every room of the live scan MRUK has loaded (null if none) -
-    /// edits on the live scan go there instead of into yet another copy.</summary>
-    public async Task<string> SavedScanOfLive()
-    {
-        if (MRUK.Instance == null || ActiveSource != LiveSource) return null;
-        var ids = PendingChanges.RoomIds(MRUKDataProcessor.GetValidRooms(MRUK.Instance));
-        var scans = MRUKSceneCache.ListCachedScans()
-            .Select(n => (n, MRUKSceneCache.ScanPath(n)))
-            .Where(x => File.Exists(x.Item2))
-            .OrderByDescending(x => File.GetLastWriteTime(x.Item2))
-            .ToList();
-        return await Task.Run(() => PendingChanges.ScanWithRooms(ids, scans));
-    }
-#endif
-
     public void AdoptSavedLiveScan(string savedName)
     {
         SceneVersion++;

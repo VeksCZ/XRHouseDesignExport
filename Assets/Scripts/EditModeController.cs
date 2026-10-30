@@ -8,8 +8,8 @@ using UnityEngine.UI;
 /// Edit mode: switched on/off by holding Y (left controller) for a second, so it never gets in the way of plain
 /// walking/viewing. While on, a small toolbar rides above the left controller (tool picker, Undo/Redo, Done) and
 /// the right trigger acts for the selected tool instead of entering the walk-through.
-/// Edits always belong to a saved scan: the first change made on the live scan saves it first and switches the
-/// app over to that saved copy (EnsureEditable), so nothing done here is lost when the live scan changes.
+/// Edits of a saved scan save by themselves; edits on the live scan wait in the live edits file until the user saves the
+/// live scan (nothing is saved or switched automatically, a saved scan is never touched from the live one).
 /// The tools themselves (doors, stairs) plug in through CurrentTool / TriggerPressed.
 /// </summary>
 public class EditModeController : MonoBehaviour
@@ -24,7 +24,6 @@ public class EditModeController : MonoBehaviour
     Canvas toolbar;
     TMP_Text titleText, infoText;
     Button undoButton, redoButton;
-    bool saving;
 
     public bool IsOn { get; private set; }
     /// <summary>Edit mode is on (e.g. doors in the walk-through then open by themselves).</summary>
@@ -57,56 +56,26 @@ public class EditModeController : MonoBehaviour
     }
 
     /// <summary>
-    /// Makes sure edits can be stored. On the live scan they wait as pending edits (kept by "Save live scan" into the
-    /// new scan); on a saved scan they save by themselves. False if nothing is loaded.
+    /// Makes sure edits can be stored. On the live scan they wait as pending edits (nothing is saved by itself - the Data
+    /// tab turns orange and "Save live scan" keeps them in the new scan); on a saved scan they save by themselves.
+    /// False if nothing is loaded.
     /// </summary>
-    public async Task<bool> EnsureEditable()
+    public Task<bool> EnsureEditable()
     {
-        if (HouseEditsStore.CanEdit) return true;
-        return await EnsureSavedScan();
+        if (HouseEditsStore.CanEdit) return Task.FromResult(true);
+        uiLog?.AddLog("<color=red>Edit: load a scan first.</color>");
+        return Task.FromResult(false);
     }
 
     /// <summary>
-    /// For changes that go into the scan file itself (a new doorway): a saved scan must be active. On the live scan it
-    /// is saved first (pending edits go along) and the app switches to the saved copy. False if that's not possible
-    /// (nothing loaded, save failed).
+    /// For changes that go into a saved scan's own file (a new doorway, a missing wall): a SAVED scan must be selected.
+    /// The live scan is never changed into one behind your back and never touches a saved scan - save it first (Data tab).
     /// </summary>
-    public async Task<bool> EnsureSavedScan()
+    public Task<bool> EnsureSavedScan()
     {
-        if (exporter == null || saving) return false;
-        if (HouseEditsStore.CurrentScan != null) return true;
-        if (exporter.ActiveSource != MRUKExporter.LiveSource)
-        {
-            uiLog?.AddLog("<color=red>Edit: load a scan first.</color>");
-            return false;
-        }
-        saving = true;
-        try
-        {
-            // A saved scan with these very rooms already exists (saved earlier here): edits go there - no new copy
-            // every time something is edited on the live scan.
-            string name = null;
-#if META_XR_SDK_INSTALLED
-            name = await exporter.SavedScanOfLive();
-#endif
-            if (name != null)
-            {
-                HouseEditsStore.CarryLiveInto(name);
-                exporter.AdoptSavedLiveScan(name);
-                uiLog?.RefreshSourceLabel();
-                uiLog?.AddLog($"<color=green>Edits go to saved scan '{name}' (same rooms as the live scan).</color>");
-                return true;
-            }
-            uiLog?.AddLog("Edit on the live scan - saving it first, your edits will belong to the saved copy...");
-            name = await exporter.SaveScanToCache(uiLog);
-            if (name == null) { uiLog?.AddLog("<color=red>Edit: could not save the live scan - edit not applied.</color>"); return false; }
-            HouseEditsStore.CarryLiveInto(name);
-            exporter.AdoptSavedLiveScan(name);
-            uiLog?.RefreshSourceLabel();
-            uiLog?.AddLog($"<color=green>Edits now go to saved scan '{name}'.</color>");
-            return true;
-        }
-        finally { saving = false; }
+        if (HouseEditsStore.CurrentScan != null) return Task.FromResult(true);
+        uiLog?.AddLog("<color=orange>The live scan is not saved - it can't take a new doorway or wall. Save it first (menu Data > Save live scan), then pick the saved scan and add it there.</color>");
+        return Task.FromResult(false);
     }
 
     /// <summary>The one way tools change anything: ensures a saved scan, applies the change (undoable), saves.</summary>
