@@ -50,7 +50,7 @@ public class XRMenu : MonoBehaviour
     Button scanLabelButton;
     // Every button that shows a state is synced every frame (SyncToggleTints) from what is really on - a toggle can
     // also change from elsewhere (a panel's own Close, a shortcut, a scan change), and a per-frame sync never goes stale.
-    Button dollhouseButton, plansButton, scanOverlayButton, saveButton, exportButton, finishedButton, modeButton, nextFloorButton, miniMapButton, walkButton, showRoutesButton, showPhotosButton, fittingsButton, photoMarkersButton;
+    Button dollhouseButton, plansButton, scanOverlayButton, saveButton, exportButton, alignButton, finishedButton, modeButton, nextFloorButton, miniMapButton, walkButton, showRoutesButton, showPhotosButton, fittingsButton, photoMarkersButton;
     XRRayInteractor rightRay;
     float flickCooldown;
     bool menuPlaced;
@@ -223,8 +223,9 @@ public class XRMenu : MonoBehaviour
         XRUi.CreateCaption(data, "This scan", Pad, y0 - cap, ContentW);
         saveButton = XRUi.CreateButton(data, "Save live scan", X2(0), y0, w2, h, OnSaveScan, 24);
         exportButton = XRUi.CreateButton(data, "Export", X2(1), y0, w2, h, OnExportAll, 24);
-        pendingText = XRUi.CreateText(data, "PendingHint", "", 18, TextAlignmentOptions.TopLeft, Pad + 4, y0 + h + 8, ContentW - 8, 52, XRUi.MutedText);
-        float d1 = y0 + h + 60 + cap + 8;
+        alignButton = XRUi.CreateButton(data, "Align to real walls", X2(0), y0 + h + gap, ContentW, h, OnToggleAlign, 20);
+        pendingText = XRUi.CreateText(data, "PendingHint", "", 18, TextAlignmentOptions.TopLeft, Pad + 4, y0 + 2 * (h + gap), ContentW - 8, 52, XRUi.MutedText);
+        float d1 = y0 + 2 * (h + gap) + 52 + cap + 8;
         XRUi.CreateCaption(data, "Clean up", Pad, d1 - cap, ContentW);
         var deleteExportsButton = XRUi.CreateButton(data, "Delete exports", X2(0), d1, w2, h, OnDeleteExports, 22);
         XRUi.SetTint(deleteExportsButton, XRUi.ButtonDangerColor);
@@ -687,6 +688,26 @@ public class XRMenu : MonoBehaviour
         // rough shell (off) | finished floors (on) - one switch
         XRUi.SetToggle(finishedButton, Furniture.Finished);
         SyncNextFloorButton();
+        SyncAlignButton();
+    }
+
+    void SyncAlignButton()
+    {
+        if (alignButton == null || exporter == null) return;
+        bool onLive = exporter.SelectedSource == MRUKExporter.LiveSource;
+        XRUi.SetLabel(alignButton, onLive ? "Align to real walls (live scan is always here)" : "Align to real walls");
+        if (onLive) XRUi.SetTint(alignButton, XRUi.ButtonDisabled);
+        else XRUi.SetToggle(alignButton, exporter.AlignEnabled);
+    }
+
+    async void OnToggleAlign()
+    {
+        if (exporter == null || exporter.SelectedSource == MRUKExporter.LiveSource) return;
+        bool on = !exporter.AlignEnabled;
+        await Busy(on ? "Aligning..." : "Turning off...");
+        await exporter.SetAlignEnabled(on, this);
+        AddLog(exporter.AlignInfo);
+        SetStatus(exporter.WorldAligned ? "Aligned" : on ? "Not aligned" : "Alignment off");
     }
 
     int nextFloorCount = -1, nextFloorCountVersion = int.MinValue;

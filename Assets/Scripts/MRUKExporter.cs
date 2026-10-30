@@ -29,6 +29,12 @@ public class MRUKExporter : MonoBehaviour
     /// i.e. its rooms line up with the real house. A saved scan loaded from JSON comes back in some other frame.</summary>
     public bool WorldAligned { get; private set; }
 
+    /// <summary>User choice, per scan pick: try to line this saved scan up with wherever you physically are (so
+    /// overlays - routes, wall scan, photos - show in the right spot while walking the real place it's of).
+    /// Off by default every time a different scan is selected - picking a scan of somewhere else must never try
+    /// to pair it with whatever room you happen to be standing in.</summary>
+    public bool AlignEnabled { get; private set; }
+
     /// <summary>Live scan first, then cached scans, most recently saved first.</summary>
     public List<string> Sources => new[] { LiveSource }.Concat(MRUKSceneCache.ListCachedScans()).ToList();
 
@@ -154,6 +160,20 @@ public class MRUKExporter : MonoBehaviour
         Debug.Log($"[Align] {AlignInfo}; yaw {Yaw(Rf):0.0} deg, offset {tf}; disagreeing: {string.Join(", ", pairs.Except(agree).Select(p => p.id.Substring(0, 8)))}");
     }
 
+    /// <summary>Re-does the live-snapshot + AlignToLive pair for the scan already loaded (AlignEnabled flipped on
+    /// without picking a different scan) - same steps as loading it fresh, minus picking it again.</summary>
+    async Task TryAlignNow(XRMenu ui)
+    {
+        if (Application.isEditor || MRUKPathUtility.IsDesktop) return; // live scene only exists on the headset
+        SetTrackingOffset(Matrix4x4.identity);
+        await Task.Yield(); await Task.Yield();
+        if (!await EnsureLiveSceneLoaded(null)) return;
+        var live = SnapshotRooms();
+        PendingChanges.CheckLive(MRUK.Instance.Rooms);
+        if (!await MRUKSceneCache.LoadCachedScene(MRUK.Instance, SelectedSource)) { ui?.AddLog("<color=red>Could not reload the scan to align it.</color>"); return; }
+        AlignToLive(live, ui);
+    }
+
     /// <summary>Shifts the camera rig's tracking space (identity = the device's own frame). With MRUK world locking on,
     /// that is MRUK's TrackingSpaceOffset (it rewrites the tracking space every frame); otherwise the transform itself.</summary>
     static void SetTrackingOffset(Matrix4x4 m)
@@ -165,10 +185,34 @@ public class MRUKExporter : MonoBehaviour
         if (rig && rig.trackingSpace) rig.trackingSpace.SetLocalPositionAndRotation(m.GetPosition(), m.rotation);
     }
 
-    /// <summary>Selects a saved scan by name (an explicit choice, e.g. the scan that replaces a deleted one).</summary>
+    /// <summary>Selects a saved scan by name (an explicit choice, e.g. the scan that replaces a deleted one).
+    /// Alignment is never carried over to a different scan - it must be turned on again on purpose.</summary>
     public void Select(string name)
     {
-        if (!string.IsNullOrEmpty(name) && Sources.Contains(name)) SelectedSource = name;
+        if (string.IsNullOrEmpty(name) || !Sources.Contains(name)) return;
+        if (name != SelectedSource) AlignEnabled = false;
+        SelectedSource = name;
+    }
+
+    /// <summary>Turns lining-up-with-the-real-place on/off for the currently selected (saved) scan. Off resets the
+    /// tracking space at once; on tries right away if that scan is already loaded (otherwise it applies on the
+    /// next load/reload). No effect on the live source, which is always in its own real frame already.</summary>
+    public async Task SetAlignEnabled(bool on, XRMenu ui = null)
+    {
+        if (AlignEnabled == on || SelectedSource == LiveSource) { AlignEnabled = on && SelectedSource != LiveSource; return; }
+        AlignEnabled = on;
+        if (!on)
+        {
+            SetTrackingOffset(Matrix4x4.identity);
+            WorldAligned = false;
+            AlignInfo = "alignment off - model only here";
+            return;
+        }
+    #if META_XR_SDK_INSTALLED
+        if (ActiveSource == SelectedSource && MRUK.Instance != null) await TryAlignNow(ui);
+    #else
+        await Task.CompletedTask;
+    #endif
     }
 
     /// <summary>Exports whichever source is selected.</summary>
@@ -239,12 +283,13 @@ public class MRUKExporter : MonoBehaviour
             PendingChanges.CheckLive(MRUK.Instance.Rooms);
         } else {
             WorldAligned = false;
-            AlignInfo = "";
+            AlignInfo = AlignEnabled ? "" : "alignment off - model only here";
             // Where the house's rooms really are right now (the live scene, no offset applied) - to line the saved
             // scan up with them below. In the house this works even when the live scene lost rooms or walls: any
-            // room the two share is enough.
+            // room the two share is enough. Only bothered with when the user asked for it (AlignEnabled) - picking
+            // a scan of somewhere else must never try to pair it with wherever you happen to be standing.
             Dictionary<string, LiveRoom> live = null;
-            if (!Application.isEditor && !MRUKPathUtility.IsDesktop) {
+            if (AlignEnabled && !Application.isEditor && !MRUKPathUtility.IsDesktop) {
                 SetTrackingOffset(Matrix4x4.identity);
                 await Task.Yield(); await Task.Yield();
                 if (await EnsureLiveSceneLoaded(null)) { live = SnapshotRooms(); PendingChanges.CheckLive(MRUK.Instance.Rooms); }

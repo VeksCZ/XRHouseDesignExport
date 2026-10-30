@@ -33,6 +33,12 @@ public class HoleEdit
     public string id;
     public string roomUuid;
     public Vector3Data localA, localB;
+    /// <summary>The room's own transform (position + yaw) when localA/localB were last computed. A re-scan of
+    /// that room can redefine its transform (same UUID, different pose) - when that happens, StairGeometry
+    /// re-expresses the points so they still point at the same physical spot instead of drifting with the
+    /// room's new pose. Empty (roomPos null) for edits made before this existed - taken as-is once, then tracked.</summary>
+    public Vector3Data roomPos;
+    public float roomYaw;
 }
 
 /// <summary>
@@ -54,6 +60,9 @@ public class StairEdit
     /// <summary>Risers per flight (points.Count - 1 flights). The rise per step is the floor-to-floor height
     /// divided by their sum, so the landings' heights follow from these counts.</summary>
     public List<int> risers = new List<int>();
+    /// <summary>The room's own transform (position + yaw) when localPoints were last computed - see HoleEdit.roomPos.</summary>
+    public Vector3Data roomPos;
+    public float roomYaw;
 }
 
 /// <summary>
@@ -219,6 +228,15 @@ public static class HouseEditsStore
 
     public static bool Undo() => Step(undo, redo);
     public static bool Redo() => Step(redo, undo);
+
+    /// <summary>Saves Current as it stands right now, without an undo step - for an invisible, automatic
+    /// correction (StairGeometry re-anchoring a stair/hole to its room's moved pose) rather than a user action.
+    /// No-op if nothing is bound (e.g. 'rooms' came from a scan that isn't the one currently active).</summary>
+    public static void SaveSilently()
+    {
+        if (!CanEdit) return;
+        SaveAndNotify();
+    }
 
     static bool Step(List<string> from, List<string> to)
     {

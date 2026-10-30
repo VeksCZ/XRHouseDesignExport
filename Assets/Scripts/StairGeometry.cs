@@ -32,9 +32,48 @@ public static class StairGeometry
         public readonly List<Vector3[]> footprint = new List<Vector3[]>();
     }
 
+    /// <summary>A room moved/rotated enough since a point was captured that it's worth re-anchoring (a few cm or
+    /// a degree of scan noise is not - that would just thrash the file every frame for no real gain).</summary>
+    const float ReanchorPos = 0.03f, ReanchorYawDeg = 1f;
+
+    /// <summary>
+    /// If the room has a different pose now than when 'roomPos'/'roomYaw' were last stamped, the room was
+    /// re-scanned (same UUID, new transform) since these room-local points were captured - re-expresses them
+    /// relative to the room's CURRENT transform so they still land on the same physical spot, instead of the
+    /// points silently drifting with the room's new pose (stairs/holes ending up "somewhere else" after a
+    /// re-scan). Edits made before this tracking existed (roomPos null) are stamped as-is on first touch - they
+    /// can't be retroactively corrected (the pose they were really drawn against was never recorded), so an
+    /// already-drifted stair/hole still needs moving back into place once; it then stays anchored.
+    /// Mutates 's'/'h' in place and saves immediately (silently, no undo entry) when a correction was made.
+    /// </summary>
+    static void Reanchor(string id, Transform room, ref Vector3Data roomPos, ref float roomYaw, List<Vector3Data> points)
+    {
+        Vector3 curPos = room.position; float curYaw = room.eulerAngles.y;
+        if (roomPos == null)
+        {
+            roomPos = new Vector3Data(curPos); roomYaw = curYaw;
+            HouseEditsStore.SaveSilently();
+            return;
+        }
+        Vector3 savedPos = new Vector3(roomPos.x, roomPos.y, roomPos.z);
+        if (Vector3.Distance(savedPos, curPos) < ReanchorPos && Mathf.Abs(Mathf.DeltaAngle(roomYaw, curYaw)) < ReanchorYawDeg) return;
+
+        var savedRot = Quaternion.Euler(0, roomYaw, 0);
+        for (int i = 0; i < points.Count; i++)
+        {
+            var lp = points[i];
+            Vector3 world = savedPos + savedRot * new Vector3(lp.x, lp.y, lp.z);
+            points[i] = new Vector3Data(room.InverseTransformPoint(world));
+        }
+        roomPos = new Vector3Data(curPos); roomYaw = curYaw;
+        Debug.Log($"[StairGeometry] Re-anchored '{id}' to its room's current pose (it moved since this was drawn).");
+        HouseEditsStore.SaveSilently();
+    }
+
     public static List<Vector3> WorldPoints(StairEdit s, List<MRUKRoom> rooms)
     {
         var room = rooms.FirstOrDefault(r => DoorCatalog.RoomId(r) == s.roomUuid);
+        if (room != null) Reanchor(s.id, room.transform, ref s.roomPos, ref s.roomYaw, s.localPoints);
         return s.localPoints.Select(p =>
         {
             var v = new Vector3(p.x, p.y, p.z);
@@ -48,6 +87,12 @@ public static class StairGeometry
         a = b = default;
         if (h == null || h.localA == null || h.localB == null) return false;
         var room = rooms.FirstOrDefault(r => DoorCatalog.RoomId(r) == h.roomUuid);
+        if (room != null)
+        {
+            var pts = new List<Vector3Data> { h.localA, h.localB };
+            Reanchor(h.id, room.transform, ref h.roomPos, ref h.roomYaw, pts);
+            h.localA = pts[0]; h.localB = pts[1];
+        }
         Vector3 la = new Vector3(h.localA.x, h.localA.y, h.localA.z), lb = new Vector3(h.localB.x, h.localB.y, h.localB.z);
         a = room != null ? room.transform.TransformPoint(la) : la;
         b = room != null ? room.transform.TransformPoint(lb) : lb;
