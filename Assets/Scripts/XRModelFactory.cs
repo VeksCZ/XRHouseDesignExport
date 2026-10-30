@@ -7,7 +7,6 @@ using UnityEngine;
 using Unity.Collections;
 #if META_XR_SDK_INSTALLED
 using Meta.XR.MRUtilityKit;
-using Meta.XR;
 #endif
 
 [assembly: InternalsVisibleTo("XRHouse.Tests.EditMode")]
@@ -618,10 +617,23 @@ return model;
         foreach (var n in niches) {
             if (midX <= n.x0 || midX >= n.x1 || midY <= n.y0 || midY >= n.y1) continue;
             float a1 = Mathf.Min(boxZ1, n.z0), b0 = Mathf.Max(boxZ0, n.z1);
-            // in the niche's own room what is left is its back: a shade darker, so the recess reads from the front
-            string mat = n.own ? NicheMaterial : "WALL";
-            if (a1 - boxZ0 > 0.005f) rm.parts.Add(Tint(CreateBoxPart("WallSeg", at, rot, new Vector3(sx, sy, a1 - boxZ0), mat, center, rotation, new Vector3(0, 0, (boxZ0 + a1) / 2f))));
-            if (boxZ1 - b0 > 0.005f) rm.parts.Add(Tint(CreateBoxPart("WallSeg", at, rot, new Vector3(sx, sy, boxZ1 - b0), mat, center, rotation, new Vector3(0, 0, (b0 + boxZ1) / 2f))));
+            // in the niche's own room its back is a shade darker, so the recess reads from the front - only a thin skin
+            // on the back: the rest of the wall behind it stays WALL (its far face is the other room's wall surface)
+            void Slab(float z0, float z1, string mat)
+            {
+                if (z1 - z0 > 0.001f) rm.parts.Add(Tint(CreateBoxPart("WallSeg", at, rot, new Vector3(sx, sy, z1 - z0), mat, center, rotation, new Vector3(0, 0, (z0 + z1) / 2f))));
+            }
+            const float skin = 0.005f;
+            if (a1 - boxZ0 > 0.005f)
+            {
+                if (n.own) { Slab(boxZ0, a1 - skin, "WALL"); Slab(a1 - skin, a1, NicheMaterial); }
+                else Slab(boxZ0, a1, "WALL");
+            }
+            if (boxZ1 - b0 > 0.005f)
+            {
+                if (n.own) { Slab(b0, b0 + skin, NicheMaterial); Slab(b0 + skin, boxZ1, "WALL"); }
+                else Slab(b0, boxZ1, "WALL");
+            }
             return;
         }
         rm.parts.Add(CreateBoxPart("WallSeg", at, rot, new Vector3(sx, sy, boxZ1 - boxZ0), "WALL", center, rotation, new Vector3(0, 0, (boxZ0 + boxZ1) / 2f)));

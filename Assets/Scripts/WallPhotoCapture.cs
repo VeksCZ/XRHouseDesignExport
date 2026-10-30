@@ -119,9 +119,8 @@ public class WallPhotoCapture : MonoBehaviour
     Canvas panel;
     PanelDrag panelDrag;
     TMP_Text countText, roomText, statusText;
-    UnityEngine.UI.Button cableButton, denseButton, coverageButton;
-    Transform leftHand;
-    const float PW = 560f, PH = 324f, PScale = 0.00045f, RowH = 62f, Gap = 8f;
+    UnityEngine.UI.Button coverageButton;
+    const float PW = 560f, PH = 270f, PScale = 0.00045f, RowH = 62f, Gap = 10f;
 
     // HUD: one line of live guidance just below the centre of view (why it is or isn't shooting right now).
     Canvas hud;
@@ -220,7 +219,6 @@ public class WallPhotoCapture : MonoBehaviour
     {
         var rig = FindFirstObjectByType<OVRCameraRig>();
         head = rig ? rig.centerEyeAnchor : Camera.main ? Camera.main.transform : null;
-        leftHand = rig ? rig.leftHandAnchor : null;
         BuildHud();
         // The mode it was opened for (menu: "3D scan" or "Cable photos") - never a 3D scan left on from last time,
         // which would record on its own while you walk to the next room.
@@ -555,7 +553,7 @@ public class WallPhotoCapture : MonoBehaviour
         {
             var mruk = MRUK.Instance;
             if (mruk == null) return;
-            var rooms = MRUKDataProcessor.GetValidRooms(mruk);
+            var rooms = WallScan.Rooms();
             WallScan.EnsurePlanes(rooms);
             if (!liveTex || liveTex.width != w || liveTex.height != h)
             {
@@ -1120,16 +1118,12 @@ public class WallPhotoCapture : MonoBehaviour
         FollowHand();
         XRUi.CreatePanel(t, "Background", XRUi.PanelColor, 0, 0, PW, PH);
 
-        float x0 = 16, fullW = PW - 32, y = 8;
-        countText = XRUi.CreateText(t, "Title", "", 24, TextAlignmentOptions.MidlineLeft, x0, y, fullW, 38, XRUi.TextColor, FontStyles.Bold);
+        // which of the two (3D scan / photos) is picked in the menu's Tools tab - the title says which
+        float x0 = 22, fullW = PW - 44, y = 14;
+        countText = XRUi.CreateText(t, "Title", "", 24, TextAlignmentOptions.MidlineLeft, x0, y, fullW, 36, XRUi.TextColor, FontStyles.Bold);
         y += 38;
-        roomText = XRUi.CreateText(t, "Room", "", 19, TextAlignmentOptions.TopLeft, x0, y, fullW, 54, XRUi.AccentText);
-        y += 58;
-        // The two ways of shooting, as one either/or choice.
-        float w2 = (fullW - Gap) / 2f;
-        cableButton = XRUi.CreateButton(t, "Cable photos", x0, y, w2, RowH, () => SetDense(false), 22);
-        denseButton = XRUi.CreateButton(t, "3D scan", x0 + w2 + Gap, y, w2, RowH, () => SetDense(true), 22);
-        y += RowH + Gap;
+        roomText = XRUi.CreateText(t, "Room", "", 18, TextAlignmentOptions.TopLeft, x0, y, fullW, 50, XRUi.AccentText);
+        y += 54;
         float w3 = (fullW - Gap * 2) / 3f;
         coverageButton = XRUi.CreateButton(t, "Outlines", x0, y, w3, RowH, () =>
         {
@@ -1177,7 +1171,7 @@ public class WallPhotoCapture : MonoBehaviour
     void RefreshPanel()
     {
         if (!panel) return;
-        countText.text = $"Wall photos: {shots.Count}    3D frames: {denseCount}";
+        countText.text = dense ? $"3D scan  <color=#9aa6b8><size=80%>{denseCount} frames today</size></color>" : $"Photos  <color=#9aa6b8><size=80%>{shots.Count} today</size></color>";
         if (currentRoomUuid != null)
         {
             int c = cableByRoom.TryGetValue(currentRoomUuid, out int a) ? a : 0, d = denseByRoom.TryGetValue(currentRoomUuid, out int b) ? b : 0;
@@ -1192,9 +1186,8 @@ public class WallPhotoCapture : MonoBehaviour
             statusText.text = dense
                 ? "Look around slowly - it records by itself, only views that add something. Blue = not scanned yet; it fades as you look at it. Done when the walls are clear. Trigger = a single photo."
                 : "Look at a bare wall, floor or ceiling and hold still - it clicks by itself. Trigger = photo now. Green outline = already covered, red patches = not photographed yet.";
-        XRUi.SetTint(cableButton, !dense ? XRUi.ButtonOnColor : XRUi.ButtonToggleColor);
-        XRUi.SetTint(denseButton, dense ? XRUi.ButtonOnColor : XRUi.ButtonToggleColor);
-        XRUi.SetTint(coverageButton, showCoverage ? XRUi.ButtonOnColor : XRUi.ButtonToggleColor);
+
+        XRUi.SetToggle(coverageButton, showCoverage);
     }
 
     void SetStatus(string s) { if (statusText) statusText.text = s; uiLog?.AddLog("Photos: " + s); }

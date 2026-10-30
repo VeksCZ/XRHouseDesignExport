@@ -6,7 +6,6 @@ using System.Text;
 using UnityEngine;
 #if META_XR_SDK_INSTALLED
 using Meta.XR.MRUtilityKit;
-using Meta.XR;
 #endif
 
 public static class MRUKDataProcessor

@@ -407,12 +407,10 @@ public static class WallDrawings
         {
             string cls = Cls(rl.route), col = RouteStyle.Hex(rl.route.kind);
             float sw = Mathf.Max(2f, RouteStyle.Diameter(rl.route) * 100f);
-            bool any = false;
             for (int i = 0; i + 1 < rl.pts.Count; i++)
             {
                 Vector3 a = rl.pts[i], b = rl.pts[i + 1];
                 if (!Seg(a, b)) continue;
-                any = true;
                 sb.Append($"<line class=\"{cls}\" x1=\"{N(X(U(a)))}\" y1=\"{N(Y(V(a)))}\" x2=\"{N(X(U(b)))}\" y2=\"{N(Y(V(b)))}\" stroke=\"{col}\" stroke-width=\"{N(sw)}\" stroke-linecap=\"round\"{Dash(rl.route)}/>");
             }
             // dots + dimensions on the ends/bends of what runs on this wall; a point merely touching it (a pipe coming

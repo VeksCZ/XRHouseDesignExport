@@ -315,8 +315,6 @@ public class WalkThroughMode : MonoBehaviour
         return sun.Status;
     }
 
-    public string SunStatus => sun.Status;
-
     /// <summary>Sun on at a given local date/time (scripted tests).</summary>
     public string SunAt(System.DateTime local)
     {
@@ -437,7 +435,6 @@ public class WalkThroughMode : MonoBehaviour
     /// <summary>The running walk-through, if any - lets the minimap show where you are in the model.</summary>
     public static WalkThroughMode Active { get; private set; }
     public bool IsOn => isOn;
-    public bool IsSeated => seated;
 
     /// <summary>World Y the model's floor under you should sit at: the real floor (FloorLevel tracking origin),
     /// or lower by seatedLift in seated mode so your eyes end up at seatedEyeHeight above the model's floor.</summary>

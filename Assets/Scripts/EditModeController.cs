@@ -19,12 +19,11 @@ public class EditModeController : MonoBehaviour
     public XRMenu uiLog;
     public MRUKExporter exporter;
 
-    const float CanvasW = 760f, CanvasH = 200f, CanvasScale = 0.0004f; // ~31 x 8 cm, in front of you, a bit low
+    const float CanvasW = 640f, CanvasH = 132f, CanvasScale = 0.0004f; // ~26 x 5 cm, in front of you, a bit low
 
     Canvas toolbar;
-    TMP_Text infoText;
-    Button doorsButton, stairsButton, holesButton, furnitureButton, measureButton, sunButton, photosButton, routesButton, undoButton, redoButton;
-    Transform leftHand;
+    TMP_Text titleText, infoText;
+    Button undoButton, redoButton;
     bool saving;
 
     public bool IsOn { get; private set; }
@@ -46,14 +45,14 @@ public class EditModeController : MonoBehaviour
         else { CurrentTool = Tool.None; if (toolbar) toolbar.gameObject.SetActive(false); }
         RefreshInfo();
         Haptic(IsOn ? 0.6f : 0.3f);
-        uiLog?.AddLog(IsOn ? "<color=orange>EDIT mode ON</color> - hold Y again to leave" : "Edit mode OFF");
+        if (!IsOn) uiLog?.AddLog("Tool closed.");
     }
 
     /// <summary>Called by XRMenu for a trigger press not used by any UI.</summary>
     public void OnTrigger()
     {
         if (!IsOn) return;
-        if (CurrentTool == Tool.None) { uiLog?.AddLog("Edit: pick a tool on the left-hand toolbar first."); return; }
+        if (CurrentTool == Tool.None) { uiLog?.AddLog("Pick a tool in the menu's Tools tab first."); return; }
         TriggerPressed?.Invoke();
     }
 
@@ -123,6 +122,13 @@ public class EditModeController : MonoBehaviour
         if (openedForTool) { Toggle(); return; }
         CurrentTool = Tool.None;
         RefreshInfo();
+        ShowToolbarForTool();
+    }
+
+    /// <summary>Routes and photos have their own panel (with their own Undo and Done) - no second bar for them.</summary>
+    void ShowToolbarForTool()
+    {
+        if (toolbar) toolbar.gameObject.SetActive(IsOn && CurrentTool != Tool.Routes && CurrentTool != Tool.Photos);
     }
 
     void SelectTool(Tool t)
@@ -137,46 +143,36 @@ public class EditModeController : MonoBehaviour
         if (CurrentTool == Tool.Photos) uiLog?.AddLog("Photos (over passthrough, live scan): look at a bare wall/floor/ceiling and hold still, or trigger - documents cable chases before plastering.");
         if (CurrentTool == Tool.Furniture) uiLog?.AddLog("Furniture (while walking): trigger on a piece picks it up, it follows the ray over the floor; trigger again puts it down. Right stick click turns it 90 degrees.");
         RefreshInfo();
+        ShowToolbarForTool();
     }
 
     void OnUndo() { if (HouseEditsStore.Undo()) uiLog?.AddLog("Undo"); else uiLog?.AddLog("Nothing to undo."); }
     void OnRedo() { if (HouseEditsStore.Redo()) uiLog?.AddLog("Redo"); else uiLog?.AddLog("Nothing to redo."); }
 
+    /// <summary>The bar of the active tool: its name and what the scan holds, Undo / Redo, Done. Tools are picked in the
+    /// menu's Tools tab (one place for them, not two).</summary>
     void BuildToolbar()
     {
         if (toolbar) return;
         var rig = FindFirstObjectByType<OVRCameraRig>();
-        leftHand = rig ? rig.leftHandAnchor : null;
 
         toolbar = XRUi.CreateWorldCanvas("EditToolbar", new Vector2(CanvasW, CanvasH), CanvasScale);
         head = rig ? rig.centerEyeAnchor : null;
         var t = toolbar.transform;
         FollowHand();
-        // Grip-drag it somewhere and it stays there (stops following the hand).
+        // Grip-drag it somewhere and it stays there.
         toolbarDrag = PanelDrag.Attach(toolbar, CanvasW, CanvasH);
 
-        XRUi.CreatePanel(t, "Background", new Color(0.30f, 0.17f, 0.03f, 0.94f), 0, 0, CanvasW, CanvasH);
-        XRUi.CreateText(t, "Title", "EDIT", 26, TextAlignmentOptions.MidlineLeft, 14, 6, 90, 36, new Color(1f, 0.7f, 0.25f), FontStyles.Bold);
-        infoText = XRUi.CreateText(t, "Info", "", 20, TextAlignmentOptions.MidlineRight, 100, 6, CanvasW - 114, 36, XRUi.MutedText);
-
-        // Row 1: the tools, in the order of the work (house model first, then the on-site ones); row 2: undo/redo/done.
-        const float y = 50, h = 64, g = 8;
-        float w = (CanvasW - 14 * 2 - g * 7) / 8f;
-        float x = 14;
-        doorsButton = XRUi.CreateButton(t, "Doors", x, y, w, h, () => SelectTool(Tool.Doors), 21); x += w + g;
-        stairsButton = XRUi.CreateButton(t, "Stairs", x, y, w, h, () => SelectTool(Tool.Stairs), 21); x += w + g;
-        holesButton = XRUi.CreateButton(t, "Opening", x, y, w, h, () => SelectTool(Tool.Holes), 19); x += w + g;
-        furnitureButton = XRUi.CreateButton(t, "Furniture", x, y, w, h, () => SelectTool(Tool.Furniture), 17); x += w + g;
-        measureButton = XRUi.CreateButton(t, "Measure", x, y, w, h, () => SelectTool(Tool.Measure), 18); x += w + g;
-        sunButton = XRUi.CreateButton(t, "Sun", x, y, w, h, () => SelectTool(Tool.Sun), 21); x += w + g;
-        photosButton = XRUi.CreateButton(t, "Photos", x, y, w, h, () => SelectTool(Tool.Photos), 20); x += w + g;
-        routesButton = XRUi.CreateButton(t, "Routes", x, y, w, h, () => SelectTool(Tool.Routes), 20);
-        float y2 = y + h + g, w3 = 150;
-        undoButton = XRUi.CreateButton(t, "Undo", 14, y2, w3, h, OnUndo, 22);
-        redoButton = XRUi.CreateButton(t, "Redo", 14 + w3 + g, y2, w3, h, OnRedo, 22);
-        var done = XRUi.CreateButton(t, "Done", CanvasW - 14 - w3, y2, w3, h, Toggle, 24);
+        XRUi.CreatePanel(t, "Background", XRUi.PanelColor, 0, 0, CanvasW, CanvasH);
+        const float pad = 18, h = 56, w = 112, g = 10;
+        titleText = XRUi.CreateText(t, "Title", "", 24, TextAlignmentOptions.MidlineLeft, pad + 4, 12, CanvasW - 2 * pad, 32, XRUi.TextColor, FontStyles.Bold);
+        infoText = XRUi.CreateText(t, "Info", "", 16, TextAlignmentOptions.MidlineLeft, pad + 4, 44, CanvasW - 2 * pad - 3 * (w + g), 64, XRUi.MutedText);
+        infoText.enableWordWrapping = true;
+        float y = CanvasH - pad - h;
+        undoButton = XRUi.CreateButton(t, "Undo", CanvasW - pad - 3 * w - 2 * g, y, w, h, OnUndo, 22);
+        redoButton = XRUi.CreateButton(t, "Redo", CanvasW - pad - 2 * w - g, y, w, h, OnRedo, 22);
+        var done = XRUi.CreateButton(t, "Done", CanvasW - pad - w, y, w, h, LeaveTool, 22);
         XRUi.SetTint(done, XRUi.ButtonOnColor);
-        XRUi.CreateText(t, "Hint", "Trigger = use tool\ngrip = move this bar  •  hold Y = leave", 17, TextAlignmentOptions.Center, 14 + 2 * (w3 + g), y2, CanvasW - 28 - 3 * w3 - 2 * g - 8, h, XRUi.MutedText);
     }
 
     Transform head;
@@ -204,18 +200,18 @@ public class EditModeController : MonoBehaviour
     void RefreshInfo()
     {
         if (!toolbar) return;
-        XRUi.SetTint(doorsButton, CurrentTool == Tool.Doors ? XRUi.ButtonOnColor : XRUi.ButtonToggleColor);
-        XRUi.SetTint(stairsButton, CurrentTool == Tool.Stairs ? XRUi.ButtonOnColor : XRUi.ButtonToggleColor);
-        XRUi.SetTint(holesButton, CurrentTool == Tool.Holes ? XRUi.ButtonOnColor : XRUi.ButtonToggleColor);
-        XRUi.SetTint(furnitureButton, CurrentTool == Tool.Furniture ? XRUi.ButtonOnColor : XRUi.ButtonToggleColor);
-        XRUi.SetTint(measureButton, CurrentTool == Tool.Measure ? XRUi.ButtonOnColor : XRUi.ButtonToggleColor);
-        XRUi.SetTint(sunButton, CurrentTool == Tool.Sun ? XRUi.ButtonOnColor : XRUi.ButtonToggleColor);
-        XRUi.SetTint(photosButton, CurrentTool == Tool.Photos ? XRUi.ButtonOnColor : XRUi.ButtonToggleColor);
-        XRUi.SetTint(routesButton, CurrentTool == Tool.Routes ? XRUi.ButtonOnColor : XRUi.ButtonToggleColor);
+        titleText.text = CurrentTool switch
+        {
+            Tool.Doors => "Doors & windows", Tool.Stairs => "Stairs", Tool.Holes => "Openings", Tool.Furniture => "Furniture",
+            Tool.Measure => "Measure", Tool.Sun => "Sun", Tool.Photos => "Photos / 3D scan", Tool.Routes => "Routes",
+            _ => "Pick a tool in the menu (Tools)",
+        };
+        XRUi.SetTint(undoButton, HouseEditsStore.UndoCount > 0 ? XRUi.ButtonColor : XRUi.ButtonDisabled);
+        XRUi.SetTint(redoButton, HouseEditsStore.RedoCount > 0 ? XRUi.ButtonColor : XRUi.ButtonDisabled);
         undoButton.interactable = HouseEditsStore.UndoCount > 0;
         redoButton.interactable = HouseEditsStore.RedoCount > 0;
-        string scan = HouseEditsStore.CurrentScan ?? "live scan (saved on first edit)";
-        infoText.text = $"{scan}  •  {HouseEditsStore.Current.doors.Count} door(s), {HouseEditsStore.Current.stairs.Count} stair(s), {HouseEditsStore.Current.holes.Count} opening(s)";
+        string scan = HouseEditsStore.CurrentScan ?? "live scan (saved on the first edit)";
+        infoText.text = $"{scan}\n{HouseEditsStore.Current.doors.Count} door(s), {HouseEditsStore.Current.stairs.Count} stair(s), {HouseEditsStore.Current.holes.Count} opening(s)  ·  trigger = use the tool";
     }
 
     void Haptic(float strength)

@@ -119,45 +119,72 @@ public static class MRUKSceneCache
     /// <summary>An old saved scan that a newer one fully covers.</summary>
     public class Redundant { public string name, keptIn; }
 
-    /// <summary>Saved scans that can go: every room they have is in a newer saved scan (keptIn), and they hold nothing
-    /// of their own - no furniture spec, no edits (doors, stairs, holes), no doorway written into their JSON. On the PC
-    /// only pulled headset scans (Scan_ folders) count, never export folders. Collects paths here (main thread), reads
-    /// the files in the background.</summary>
-    public static Task<List<Redundant>> FindRedundantAsync()
+    /// <summary>What the scan list shows about a saved scan.</summary>
+    public class ScanInfo
     {
-        var scans = ListCachedScans()
-            .Where(n => !FolderMode || n.StartsWith(ScanFolderPrefix))
-            .Select(n => (name: n, scene: ScanPath(n), edits: EditsPath(n), furniture: FurniturePath(n)))
-            .ToList();
-        return Task.Run(() => FindRedundant(scans));
+        public string name;
+        public int rooms;
+        public bool edits, furniture, doorway;
+        /// <summary>Set when every room of this scan is in a newer one that stays (it holds nothing of its own).</summary>
+        public string keptIn;
+        public DateTime time;
     }
 
-    static List<Redundant> FindRedundant(List<(string name, string scene, string edits, string furniture)> scans)
+    /// <summary>Every saved scan with its room count, what it holds of its own, and - for an old copy that a newer scan
+    /// fully covers (all its rooms) and that holds nothing of its own (no furniture spec, no edits, no doorway written into
+    /// its JSON) - the scan that covers it. On the PC only pulled headset scans (Scan_ folders) can be old copies, never
+    /// export folders. Collects paths here (main thread), reads the files in the background.</summary>
+    public static Task<List<ScanInfo>> DescribeAsync()
     {
-        var info = new List<(string name, DateTime time, HashSet<string> rooms, bool own)>();
+        var scans = ListCachedScans()
+            .Select(n => (name: n, scene: ScanPath(n), edits: EditsPath(n), furniture: FurniturePath(n), removable: !FolderMode || n.StartsWith(ScanFolderPrefix)))
+            .ToList();
+        return Task.Run(() => Describe(scans));
+    }
+
+    /// <summary>The old copies (DescribeAsync's keptIn) - what "Remove old copies" deletes.</summary>
+    public static async Task<List<Redundant>> FindRedundantAsync() =>
+        (await DescribeAsync()).Where(i => i.keptIn != null).Select(i => new Redundant { name = i.name, keptIn = i.keptIn }).ToList();
+
+    static List<ScanInfo> Describe(List<(string name, string scene, string edits, string furniture, bool removable)> scans)
+    {
+        var info = new List<(ScanInfo i, HashSet<string> rooms, bool removable)>();
         foreach (var s in scans)
         {
+            var si = new ScanInfo { name = s.name };
+            HashSet<string> rooms = new HashSet<string>();
             try
             {
-                var rooms = RoomIdsOf(s.scene);
-                if (rooms.Count == 0) continue;
-                bool own = File.Exists(s.furniture) || HasEdits(s.edits)
-                           || Directory.GetFiles(Path.GetDirectoryName(s.scene), Path.GetFileName(s.scene) + ".bak_doors*").Length > 0;
-                info.Add((s.name, File.GetLastWriteTimeUtc(s.scene), rooms, own));
+                rooms = RoomIdsOf(s.scene);
+                si.rooms = rooms.Count;
+                si.furniture = File.Exists(s.furniture);
+                si.edits = HasEdits(s.edits);
+                si.doorway = Directory.GetFiles(Path.GetDirectoryName(s.scene), Path.GetFileName(s.scene) + ".bak_doors*").Length > 0;
+                si.time = DateFromName(s.name) ?? File.GetLastWriteTime(s.scene);
             }
-            catch (Exception e) { Debug.LogWarning($"[Cleanup] {s.name}: {e.Message}"); }
+            catch (Exception e) { Debug.LogWarning($"[Scans] {s.name}: {e.Message}"); }
+            info.Add((si, rooms, s.removable));
         }
-        bool Newer((string name, DateTime time, HashSet<string> rooms, bool own) a, (string name, DateTime time, HashSet<string> rooms, bool own) b)
-            => a.time > b.time || (a.time == b.time && string.CompareOrdinal(a.name, b.name) > 0);
-        var gone = new HashSet<string>(info.Where(s => !s.own && info.Any(t => t.name != s.name && Newer(t, s) && s.rooms.IsSubsetOf(t.rooms))).Select(s => s.name));
-        var res = new List<Redundant>();
-        foreach (var s in info.Where(x => gone.Contains(x.name)))
+        bool Own(ScanInfo i) => i.edits || i.furniture || i.doorway;
+        bool Newer(ScanInfo a, ScanInfo b) => a.time > b.time || (a.time == b.time && string.CompareOrdinal(a.name, b.name) > 0);
+        var gone = new HashSet<string>(info.Where(s => s.removable && s.rooms.Count > 0 && !Own(s.i)
+            && info.Any(t => t.i.name != s.i.name && Newer(t.i, s.i) && s.rooms.IsSubsetOf(t.rooms))).Select(s => s.i.name));
+        foreach (var s in info.Where(x => gone.Contains(x.i.name)))
         {
             // kept in: the newest scan that stays and has all its rooms
-            var t = info.Where(x => !gone.Contains(x.name) && s.rooms.IsSubsetOf(x.rooms)).OrderByDescending(x => x.time).FirstOrDefault();
-            if (t.name != null) res.Add(new Redundant { name = s.name, keptIn = t.name });
+            var t = info.Where(x => !gone.Contains(x.i.name) && s.rooms.IsSubsetOf(x.rooms)).OrderByDescending(x => x.i.time).FirstOrDefault();
+            s.i.keptIn = t.i?.name;
         }
-        return res;
+        return info.Select(x => x.i).ToList();
+    }
+
+    /// <summary>"20261028_1804_7rooms" -> 28. 10. 2026 18:04 (saved scans are named by when they were saved; file times
+    /// are not reliable - copying the scans back onto the headset gave them all the same one).</summary>
+    static DateTime? DateFromName(string name)
+    {
+        var m = System.Text.RegularExpressions.Regex.Match(name, @"(20\d{6})_(\d{4})");
+        if (m.Success && DateTime.TryParseExact(m.Groups[1].Value + m.Groups[2].Value, "yyyyMMddHHmm", System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.None, out var d)) return d;
+        return null;
     }
 
     /// <summary>The room ids in a scene JSON (V1 rooms with roomLayoutMETA, V2 with roomMeshMETA), streamed - the file

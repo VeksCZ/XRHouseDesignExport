@@ -70,13 +70,16 @@ and exports 3D models, floor plans and reports from the scan.
   `98_Elektro.html` / `98_Voda_Odpad_Topeni.html` (material totals, route/box lists, only walls with that work, A4
   landscape print). Desktop: `-overlays routes,zones`, `-test views -views routes` (one shot per route; give `-out`
   as an absolute path).
-- **Old scans clean-up** (Data tab): `MRUKSceneCache.FindRedundantAsync` - a saved scan whose rooms are all in a newer
-  one and that has no furniture, edits or added doorway (`*.bak_doors`); press twice to delete. PC: only `Scan_` folders.
-  The menu's state line (under the scan row) shows lined-up / not saved / not exported.
-- **Main menu** (`XRMenu`): tabs View (walk, Dollhouse, plans, minimap, finished/rough) / Layers (routes, photos,
-  zones everywhere; fittings + scan outline real walls only, greyed when the loaded scan is of another place) / Tools
-  (every edit tool directly - `OnTool` -> `EditModeController.UseTool`; again = leave) / Data. Hold Y still opens the
-  edit toolbar (Undo/Redo).
+- **Scan list** (menu top row: name + state lined-up / not saved / not exported; tap opens the list): rows from
+  `MRUKSceneCache.DescribeAsync` (rooms, date, furniture/edits/doorway), tap = select + load, bin = delete (press twice).
+  "Old copy" = a saved scan whose rooms are all in a newer one and that has no furniture, edits or added doorway
+  (`*.bak_doors`); "Remove N old copies" deletes them (press twice). PC: only `Scan_` folders are removable.
+- **Main menu** (`XRMenu`, look in `XRUi`: rounded sprites, `XRUiButton` hover/flash, `SetToggle` = switch): tabs
+  View (walk, Dollhouse, plans, minimap, detail, finished/rough) / Layers (wall scan, routes, zones, photo markers, photos
+  on walls everywhere; fittings + scan outline real walls only, greyed when the loaded scan is of another place) / Tools
+  (every edit tool directly - `OnTool` -> `EditModeController.UseTool`; again = leave) / Data. Hold Y: leave the active
+  tool, else open the menu on Tools. The Undo/Redo/Done bar shows only for tools without their own panel (not
+  Routes/Photos). Desktop `-test menu` shoots every tab + the scan list (`XRMenu.Preview`).
 - **Wall scan** (`WallScan`, layer "Wall scan (3D)", on by default): every 3D-scan (dense) frame is projected onto the
   scanned planes of its room (walls/floors/ceilings, one ARGBHalf accumulation RenderTexture per plane, shader
   `Resources/Shaders/WallScanSplat` - weight = facing^2 x edge x sharpness / distance, ^4; `WallScanShow` divides and
@@ -86,7 +89,7 @@ and exports 3D models, floor plans and reports from the scan.
   `-test views -views rooms`. Single photos (cable photos) are the secondary mode of the same tool.
 - **Niches** (furniture spec item `"type": "niche"`): cut into the walls by `XRModelFactory` (`Niches`, installed with the
   spec's ceilings by `Furniture.InstallCeilings`); `furnish.py` only marks them on the wall face.
-- **Scan sources**: the selected scan never changes by itself (only the menu's < >; taps are debounced, loads
+- **Scan sources**: the selected scan never changes by itself (only a tap in the scan list; taps are debounced, loads
   serialized). A saved scan's edits/routes/names save themselves - "Save live scan" (Data tab) only saves the Quest's
   live scene, orange when the live scan has a room no saved scan has (PendingChanges.CheckLive, by room ids). Edits on
   the live scan go to the newest saved scan with the same rooms (else a new copy). On the headset a saved scan is
@@ -126,6 +129,17 @@ and exports 3D models, floor plans and reports from the scan.
   every room that captured it (DoorCatalog.IsWalledUp).
 - **Offline compile check**: compile `Assets/Scripts/**/*.cs` with dotnet against `Library/ScriptAssemblies/*.dll`
   (defines `UNITY_EDITOR;UNITY_ANDROID;META_XR_SDK_INSTALLED`) for a fast error check without a Unity reload.
+- **Built-in modules**: unused ones (cloth, terrain, tilemap, wind, video...) are out of `manifest.json`;
+  Meta's SDK needs `assetbundle`, `physics2d`, `particlesystem` and (Android) `director` without declaring them - keep
+  those. `com.unity.xr.meta-openxr` (+ AR Foundation, XR Simulation assets) was removed - nothing used it; Meta XR Core
+  + MRUK do passthrough/scene on their own (backup of the old setup: `Logs/ci/bak_metaopenxr` on the PC). Keep
+  `com.unity.xr.management` 4.7.0 declared (4.5.3 can't read our XR settings -> no OpenXR in the APK, app hangs on the
+  loading dots) and `Assets/Editor/OpenXRRuntimeLibFix.cs` (forces libUnityOpenXR.so into the build). Check a new APK
+  has `lib/arm64-v8a/libUnityOpenXR.so`.
+  Desktop tests on a PC whose display is off crawl at ~3 fps with vsync (stairs then "fail") - add `-novsync`.
+- **Branding**: store art in `Store/` on the PC (icon 512, covers, hero, mini); the Quest system splash is
+  `Assets/Branding/XRHouseSplash.png` (stereo side-by-side, 2x 1600x1000, set in `OculusProjectConfig`, passthrough
+  background) - the OS shows it instantly instead of the loading dots. Unity's own splash is off.
 - **Do not add packages that spawn helper processes** (`com.unity.ai.assistant`'s `relay_win.exe` inherited the MCP
   bridge's listening socket on Windows and made the bridge unable to rebind after a domain reload).
 - Tests: `Assets/Tests/EditMode` (plan geometry, room names) and `Assets/Tests/PlayMode` (whole export pipeline on

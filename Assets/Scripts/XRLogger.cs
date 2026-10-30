@@ -61,8 +61,6 @@ public static class XRLogger
         {
             var files = new DirectoryInfo(root).GetFiles("Session_*.txt").OrderByDescending(f => f.LastWriteTimeUtc).ToList();
             foreach (var f in files.Skip(KeepSessions - 1)) f.Delete(); // leave room for the session about to start
-            string legacy = Path.Combine(root, "session_debug_log.txt");
-            if (File.Exists(legacy)) File.Delete(legacy);
         }
         catch { /* cleanup is best effort */ }
     }
@@ -114,7 +112,4 @@ public static class XRLogger
         wake.Set();
         worker?.Join(500);
     }
-
-    /// <summary>Kept for callers that used to force a flush; the background thread writes continuously.</summary>
-    public static void Flush() => wake.Set();
 }

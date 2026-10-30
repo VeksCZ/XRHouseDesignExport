@@ -6,7 +6,6 @@ using System.Threading.Tasks;
 using UnityEngine;
 #if META_XR_SDK_INSTALLED
 using Meta.XR.MRUtilityKit;
-using Meta.XR;
 #endif
 
 /// <summary>
@@ -32,8 +31,6 @@ public class MRUKExporter : MonoBehaviour
 
     /// <summary>Live scan first, then cached scans, most recently saved first.</summary>
     public List<string> Sources => new[] { LiveSource }.Concat(MRUKSceneCache.ListCachedScans()).ToList();
-
-    public async void OnExportButton() { await ExportAllRooms(uiLog); }
 
     /// <summary>
     /// Makes a just-saved copy of the live scan the selected AND active source without reloading it - MRUK already
@@ -182,16 +179,6 @@ public class MRUKExporter : MonoBehaviour
         if (mruk.EnableWorldLock) { mruk.TrackingSpaceOffset = m; return; }
         var rig = FindFirstObjectByType<OVRCameraRig>();
         if (rig && rig.trackingSpace) rig.trackingSpace.SetLocalPositionAndRotation(m.GetPosition(), m.rotation);
-    }
-
-    /// <summary>Moves the selection by +1/-1 through the available sources and returns the new one.</summary>
-    public string CycleSource(int direction, XRMenu ui = null)
-    {
-        var sources = Sources;
-        int i = Mathf.Max(0, sources.IndexOf(SelectedSource));
-        SelectedSource = sources[((i + direction) % sources.Count + sources.Count) % sources.Count];
-        ui?.AddLog($"Scan source: <b>{SelectedSource}</b> ({sources.IndexOf(SelectedSource) + 1}/{sources.Count})");
-        return SelectedSource;
     }
 
     /// <summary>Selects a saved scan by name (an explicit choice, e.g. the scan that replaces a deleted one).</summary>

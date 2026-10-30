@@ -49,7 +49,7 @@ public class RouteEditTool : MonoBehaviour
     PanelDrag panelDrag;
     TMP_Text titleText, hintText;
     readonly Dictionary<RouteKind, Button> kindButtons = new Dictionary<RouteKind, Button>();
-    Button diaButton, labelButton, finishButton, deleteButton, joinButton, modeButton, markerButton, acceptButton, specButton, circuitDown, circuitUp, pickButton;
+    Button diaButton, labelButton, finishButton, deleteButton, joinButton, modeButton, markerButton, acceptButton, specButton, circuitUp, pickButton;
     bool panelPlaced;
     const float PW = 640f, PH = 496f, PScale = 0.00055f, RowH = 58f, Gap = 8f;
 
@@ -795,7 +795,7 @@ public class RouteEditTool : MonoBehaviour
         y += RowH + Gap;
         float w4a = (fullW - Gap * 3) / 4f;
         specButton = XRUi.CreateButton(t, "", x0, y, w4a * 2 + Gap, RowH, CycleSpec, 17);
-        circuitDown = XRUi.CreateButton(t, "Circuit -", x0 + (w4a + Gap) * 2, y, w4a, RowH, () => StepCircuit(-1), 17);
+        XRUi.CreateButton(t, "Circuit -", x0 + (w4a + Gap) * 2, y, w4a, RowH, () => StepCircuit(-1), 17);
         circuitUp = XRUi.CreateButton(t, "", x0 + (w4a + Gap) * 3, y, w4a, RowH, () => StepCircuit(1), 17);
         y += RowH + Gap;
         modeButton = XRUi.CreateButton(t, "", x0, y, w3, RowH, () => { markerMode = !markerMode; deleteMode = false; if (markerMode) Finish(); RefreshPanel(); }, 18);

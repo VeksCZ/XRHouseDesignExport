@@ -99,6 +99,18 @@ public static class WallScan
 #if META_XR_SDK_INSTALLED
     const MRUKAnchor.SceneLabels Surfaces = MRUKAnchor.SceneLabels.WALL_FACE | MRUKAnchor.SceneLabels.FLOOR | MRUKAnchor.SceneLabels.CEILING;
 
+    static List<MRUKRoom> validRooms = new List<MRUKRoom>();
+    static int validFor = -1;
+    /// <summary>MRUKDataProcessor.GetValidRooms of the loaded scan, worked out once per load - it re-extracts every
+    /// room's plan and costs a few hundred ms, far too much for every frame.</summary>
+    public static List<MRUKRoom> Rooms()
+    {
+        var m = MRUK.Instance;
+        int key = MRUKExporter.SceneVersion * 1000 + (m != null ? m.Rooms.Count : 0);
+        if (key != validFor) { validRooms = m != null ? MRUKDataProcessor.GetValidRooms(m) : new List<MRUKRoom>(); validFor = key; }
+        return validRooms;
+    }
+
     /// <summary>The planes of the loaded scan (rebuilt when another scan is loaded), with their cached textures.</summary>
     public static void EnsurePlanes(List<MRUKRoom> rooms)
     {

@@ -9,6 +9,8 @@ using UnityEngine.XR.Interaction.Toolkit.Interactables;
 public class PanelDrag : MonoBehaviour
 {
     public bool Moved { get; private set; }
+    /// <summary>The owner put the panel back in front of you (e.g. reopened): follow the auto placement again.</summary>
+    public void ResetMoved() => Moved = false;
 
     Transform hand;
     bool grabbed;

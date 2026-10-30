@@ -14,7 +14,6 @@ public static class FloorPlanBuilder
     const float StoryGap = 1.5f;          // minimum vertical gap between rooms to count as different stories
     const float OpeningSnapDist = 0.5f;   // how far an opening may sit from a wall edge and still belong to it
     const float InnerChainOffset = 0.45f; // room sheets: distance of the segment chain from the wall (inside)
-    const float InnerTotalOffset = 0.85f; // room sheets: distance of the overall-length dimension (inside)
     const float OuterOffset = 0.6f;       // overview sheets: exterior wall dimensions (outside)
     const float BoundsOffset = 1.3f;      // overview sheets: overall building dimensions (outside)
     const float DimTextSize = 0.077f; // ~30% smaller than before - dimension numbers were overlapping each other

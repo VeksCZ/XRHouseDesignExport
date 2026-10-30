@@ -28,6 +28,15 @@ public class WallOverlays : MonoBehaviour
 
     static int showRoutes = -1, showPhotos = -1, showFittings = -1, showZones = -1, showScan = -1;
 
+    const string IconsPref = "Overlay.PhotoIcons";
+    static int showIcons = -1;
+    /// <summary>A small camera on the wall where each photo was aimed (point at one to see it) - off by default.</summary>
+    public static bool ShowPhotoIcons
+    {
+        get { if (showIcons < 0) showIcons = PlayerPrefs.GetInt(IconsPref, 0); return showIcons == 1; }
+        set { showIcons = value ? 1 : 0; PlayerPrefs.SetInt(IconsPref, showIcons); PlayerPrefs.Save(); Bump(); }
+    }
+
     /// <summary>The 3D scan of the bare walls (WallScan textures) on the walls - remembered between sessions, on by default.</summary>
     public static bool ShowScan
     {
@@ -135,11 +144,11 @@ public class WallOverlays : MonoBehaviour
 #if META_XR_SDK_INSTALLED
         if (scan && !MRUKExporter.Loading && MRUK.Instance != null && MRUK.Instance.Rooms.Count > 0)
         {
-            WallScan.EnsurePlanes(MRUKDataProcessor.GetValidRooms(MRUK.Instance));
+            WallScan.EnsurePlanes(WallScan.Rooms());
             if (scanBuiltFor != MRUKExporter.SceneVersion && !WallScan.Building)
             {
                 scanBuiltFor = MRUKExporter.SceneVersion;
-                StartCoroutine(WallScan.BuildMissing(() => MRUK.Instance != null ? MRUKDataProcessor.GetValidRooms(MRUK.Instance) : new List<MRUKRoom>()));
+                StartCoroutine(WallScan.BuildMissing(WallScan.Rooms));
             }
         }
 #endif
@@ -184,8 +193,8 @@ public class WallOverlays : MonoBehaviour
 
     void Sync(Ctx ctx, Transform root, float yaw, Vector3 center, bool routes, bool pics, bool fittings = false, bool scan = false)
     {
-        if (!routes && !pics && !fittings && !scan) { Clear(ctx); return; }
-        string stamp = $"{(root ? root.GetInstanceID() : 0)}|{yaw:F3}|{center}|{sceneSig}|{RouteStore.Version}|{photoVersion}|{routes}|{pics}|{fittings}|{ShowZones}|{scan}|{WallScan.Version}|{toggleVersion}";
+        if (!routes && !pics && !fittings && !scan && !ShowPhotoIcons) { Clear(ctx); return; }
+        string stamp = $"{(root ? root.GetInstanceID() : 0)}|{yaw:F3}|{center}|{sceneSig}|{RouteStore.Version}|{photoVersion}|{routes}|{pics}|{fittings}|{ShowZones}|{ShowPhotoIcons}|{scan}|{WallScan.Version}|{toggleVersion}";
         if (ctx.go != null && stamp == ctx.stamp) return;
         Clear(ctx);
         float t0 = Time.realtimeSinceStartup;
@@ -205,7 +214,8 @@ public class WallOverlays : MonoBehaviour
         if (scan) BuildWallScan(ctx);
         if (routes) BuildRoutes(ctx, rooms, scale);
         if (routes && ShowZones && root == null || routes && ShowZones && ctx == walkCtx) BuildZones(ctx, rooms);
-        if (routes && !pics) BuildPhotoIcons(ctx, rooms);
+        if (ShowPhotoIcons && !pics) BuildPhotoIcons(ctx, rooms);
+        else if (ctx != dollCtx) icons.Clear();
         if (pics) BuildPhotos(ctx, rooms);
         if (fittings) BuildFittings(ctx, rooms);
 #endif
@@ -466,7 +476,7 @@ public class WallOverlays : MonoBehaviour
             if (rig) { aimHand = rig.rightHandAnchor; aimHead = rig.centerEyeAnchor; }
         }
         string text = null; Vector3 at = default; Icon icon = null;
-        if (aimHand && aimHead && ctx.go != null && (ShowRoutes || ForceRoutes) && !MRUKExporter.Loading && !XRMenu.PointingAtAnyUI && MRUK.Instance != null)
+        if (aimHand && aimHead && ctx.go != null && (ShowRoutes || ForceRoutes || ShowPhotoIcons) && !MRUKExporter.Loading && !XRMenu.PointingAtAnyUI && MRUK.Instance != null)
             text = Aimed(ctx, walkOn, out at, out icon);
         ShowAimLabel(text, at);
         // a photo icon pointed at for a moment: the photo next to it, until you point away for a while
@@ -492,13 +502,14 @@ public class WallOverlays : MonoBehaviour
         Vector3 e = o + d * len;
 
         float best = float.MaxValue; string label = null; Vector3 hitP = default;
-        if (!ShowPhotos) foreach (var ic in icons)
+        if (!ShowPhotos && ShowPhotoIcons) foreach (var ic in icons)
         {
             float dd = SegPoint(o, e, ic.p, out _);
             if (dd < 0.06f && dd < best) { best = dd; icon = ic; hitP = ic.p; label = null; }
         }
         var pts = new List<Vector3>();
-        foreach (var r in RouteStore.Routes)
+        bool routesShown = ShowRoutes || ForceRoutes;
+        foreach (var r in routesShown ? RouteStore.Routes : new List<PipeRoute>())
         {
             if (!RouteStore.WorldPoints(r, rooms, pts)) continue;
             float tol = 0.05f + RouteStyle.Diameter(r) / 2f;
@@ -513,7 +524,7 @@ public class WallOverlays : MonoBehaviour
                 }
             }
         }
-        foreach (var m in RouteStore.Current.markers)
+        foreach (var m in routesShown ? RouteStore.Current.markers : new List<RouteMarker>())
         {
             if (!RouteStore.WorldMarker(m, rooms, out var mp, out _)) continue;
             float dd = SegPoint(o, e, mp, out _);
@@ -852,6 +863,4 @@ public class WallOverlays : MonoBehaviour
         loader = null;
     }
 
-    /// <summary>How many routes/photos the views have to show (for menus).</summary>
-    public int PhotoCount => photos.Count;
 }

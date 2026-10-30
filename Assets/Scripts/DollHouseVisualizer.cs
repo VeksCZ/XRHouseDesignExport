@@ -1,12 +1,10 @@
 using System.Collections.Generic;
 using System.Linq;
-using System.Threading.Tasks;
 using System;
 using TMPro;
 using UnityEngine;
 #if META_XR_SDK_INSTALLED
 using Meta.XR.MRUtilityKit;
-using Meta.XR;
 #endif
 
 public class DollHouseVisualizer : MonoBehaviour
@@ -411,4 +409,4 @@ public class DollHouseVisualizer : MonoBehaviour
         }
     }
     private void StopVib() => OVRInput.SetControllerVibration(0, 0, OVRInput.Controller.RTouch);
-}
+}

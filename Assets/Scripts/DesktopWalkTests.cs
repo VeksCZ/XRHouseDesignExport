@@ -57,6 +57,8 @@ public partial class DesktopWalkApp
                     "walls" => !ExportWallDrawings(false, outDir).Contains("failed"),
                     "detect" => !DetectRoutes().Contains("failed") && ExportWallDrawings(false, outDir) != null,
                     "adddoor" => await TestAddDoor(),
+                    "menu" => await TestMenu(outDir),
+                    "niches" => await TestNiches(outDir),
                     _ => false,
                 };
             }
@@ -65,6 +67,75 @@ public partial class DesktopWalkApp
         Debug.Log($"TEST {test}: {(ok ? "PASSED" : "FAILED")}");
         await Frames(3);
         Application.Quit(ok ? 0 : 3);
+        return true;
+    }
+
+    /// <summary>menu: the headset menu (built alone, XRMenu.Preview) in front of the camera - one shot per tab, with a few
+    /// toggles on and one button hovered, so the look can be checked without the headset. Plus the tool bar.</summary>
+    async Task<bool> TestMenu(string outDir)
+    {
+        XRMenu.Preview = true;
+        var go = new GameObject("MenuPreview");
+        var menu = go.AddComponent<XRMenu>();
+        await Frames(3);
+        var canvas = GameObject.Find("WristMenu")?.GetComponent<Canvas>();
+        if (canvas == null) { Debug.Log("TEST menu: no menu canvas"); return false; }
+        var cam = Camera.main;
+        canvas.worldCamera = cam;
+        void Put(Transform t, float dist, float down, float side = 0)
+        {
+            Vector3 p = cam.transform.position + cam.transform.forward * dist - cam.transform.up * down + cam.transform.right * side;
+            t.SetPositionAndRotation(p, Quaternion.LookRotation(p - cam.transform.position, cam.transform.up));
+        }
+        Put(canvas.transform, 0.52f, 0f);
+        foreach (var l in new[] { "Build 30.10. 10:12:00", "XR Ready.", "13 saved scan(s) - pick one in the list (top).", "Wall scan: 383 frame(s) painted.", "Routes: 4, boxes: 6." }) menu.AddLog(l);
+        UnityEngine.UI.Button B(string label) => canvas.GetComponentsInChildren<UnityEngine.UI.Button>(true).FirstOrDefault(b => b.name == "Btn_" + label);
+        // a few states to look at: toggles on, one picked tool, one hovered button
+        XRUi.SetToggle(B("Walk"), true);
+        XRUi.SetToggle(B("Wall scan"), true);
+        XRUi.SetToggle(B("Routes"), true);
+        XRUi.SetTint(B("Rough shell"), XRUi.ButtonOnColor);
+        var tools = canvas.GetComponentsInChildren<UnityEngine.UI.Button>(true).Where(b => b.name == "Btn_Routes").ToList();
+        if (tools.Count > 1) XRUi.SetTint(tools[1], XRUi.ButtonOnColor); // the Routes tool, picked
+        // what the live menu writes itself (SyncLabels does not run in the preview)
+        XRUi.SetLabel(B(""), "Detail: Anchor");
+        XRUi.SetLabel(B(MRUKExporter.LiveSource), "<b>20261028_1804_7rooms</b>\n<size=72%><color=#6fe08f>lined up here</color>  ·  <color=#ffb050>not exported</color></size>");
+        var where = canvas.GetComponentsInChildren<TMPro.TMP_Text>(true).FirstOrDefault(t => t.name == "Where");
+        if (where) where.text = "<color=#7fe07f>On the real walls here</color>, in Walk and in the Dollhouse. Point at a route or box to see what it is.";
+        var pending = canvas.GetComponentsInChildren<TMPro.TMP_Text>(true).FirstOrDefault(t => t.name == "PendingHint");
+        if (pending) pending.text = "Edits, routes and names of this scan save by themselves. Not exported yet: routes, photos.";
+        var status = canvas.GetComponentsInChildren<TMPro.TMP_Text>(true).FirstOrDefault(t => t.name == "Status");
+        if (status) status.text = "Ready";
+        string[] hover = { "Dollhouse", "No-drill zones", "Measure", "Export" };
+        for (int i = 0; i < 4; i++)
+        {
+            menu.ShowTab(i);
+            var h = B(hover[i]);
+            h?.GetComponent<XRUiButton>()?.OnPointerEnter(null);
+            await Frames(5);
+            await Shot(Path.Combine(outDir, $"menu_{i}.png"));
+            h?.GetComponent<XRUiButton>()?.OnPointerExit(null);
+        }
+        // the scan list, opened (the headset's scans, as they are now)
+        menu.ShowTab(0);
+        var names = new List<string> { MRUKExporter.LiveSource, "Novostavba Osove", "20261028_1804_7rooms", "20261019_2205_7rooms", "20261019_2025_7rooms", "20261004_1626_7rooms", "20261002_1756_7rooms", "20261002_0848_15rooms", "20261002_0847_15rooms" };
+        MRUKSceneCache.ScanInfo I(string n, int r, bool e, bool f, string kept, string when) =>
+            new MRUKSceneCache.ScanInfo { name = n, rooms = r, edits = e, furniture = f, keptIn = kept, time = DateTime.ParseExact(when, "yyyyMMddHHmm", CultureInfo.InvariantCulture) };
+        menu.PreviewScanList(names, new List<MRUKSceneCache.ScanInfo>
+        {
+            I("Novostavba Osove", 15, true, true, null, "202610031949"), I("20261028_1804_7rooms", 7, true, false, null, "202610281804"),
+            I("20261019_2205_7rooms", 7, false, false, "20261028_1804_7rooms", "202610192205"), I("20261019_2025_7rooms", 7, false, false, "20261028_1804_7rooms", "202610192025"),
+            I("20261004_1626_7rooms", 7, false, false, "20261028_1804_7rooms", "202610041626"), I("20261002_1756_7rooms", 7, false, false, "20261028_1804_7rooms", "202610021756"),
+            I("20261002_0848_15rooms", 15, true, false, null, "202610020848"), I("20261002_0847_15rooms", 15, false, false, "20261002_0848_15rooms", "202610020847"),
+        }, "20261028_1804_7rooms");
+        await Shot(Path.Combine(outDir, "menu_scans.png"));
+        canvas.gameObject.SetActive(false);
+        // the tool bar
+        var em = go.AddComponent<EditModeController>();
+        em.UseTool(EditModeController.Tool.Doors);
+        await Frames(3);
+        var bar = GameObject.Find("EditToolbar");
+        if (bar != null) { Put(bar.transform, 0.45f, 0f); await Shot(Path.Combine(outDir, "toolbar.png")); }
         return true;
     }
 
@@ -281,6 +352,32 @@ public partial class DesktopWalkApp
             if (i >= 12) break;
         }
         return i > 0;
+    }
+
+    /// <summary>niches: every niche of the spec, from its room (front) and from the other side of the wall (back) -
+    /// the back must show a plain wall.</summary>
+    async Task<bool> TestNiches(string outDir)
+    {
+        var list = XRModelFactory.Niches;
+        Debug.Log($"TEST niches: {list?.Count ?? 0}");
+        if (list == null || list.Count == 0) return false;
+        for (int i = 0; i < list.Count; i++)
+        {
+            var n = list[i];
+            Vector3 c = (n.a + n.b) / 2f; float cy = (n.y0 + n.y1) / 2f;
+            Vector3 inward = new Vector3(n.inward.x, 0f, n.inward.z).normalized;
+            foreach (var (side, dir, dist) in new[] { ("front", inward, 1.2f), ("back", -inward, 0.9f) })
+            {
+                Vector3 at = c + dir * dist;
+                await StandAt(new Vector3(at.x, n.y0 - 0.6f, at.z), Yaw(-dir), 0f);
+                float eye = FeetY() + EyeHeight;
+                float pitch = Mathf.Atan2(eye - cy, dist) * Mathf.Rad2Deg;
+                rig.SetView(Yaw(-dir), pitch);
+                Debug.Log($"TEST niche {i} {side}: centre ({c.x:0.00},{cy:0.00},{c.z:0.00}) w {(n.b - n.a).magnitude:0.00} depth {n.depth:0.00} eye {eye:0.00}");
+                await Shot(Path.Combine(outDir, $"niche{i}_{side}.png"));
+            }
+        }
+        return true;
     }
 
     float FeetY() => walk.TryGetScanWorldPose(out var p, out _) ? p.y - EyeHeight : float.NaN;
