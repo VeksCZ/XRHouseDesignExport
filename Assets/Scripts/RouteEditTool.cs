@@ -191,7 +191,7 @@ public class RouteEditTool : MonoBehaviour
         // the room you stand in first: its walls, floor and ceiling face you, nothing behind them counts
         // (walking the model: only its shell is a backstop - furniture is whatever the model shows)
         var here = CurrentRoom(headScan);
-        var filter = frameIsWalk ? LabelFilter.Included(Shell) : new LabelFilter();
+        var filter = frameIsWalk ? new LabelFilter(Shell) : new LabelFilter();
         bool hitHere = false;
         if (here != null && here.Raycast(scanRay, 15f, filter, out RaycastHit hh, out _) && hh.distance < best)
         { best = hh.distance; p = hh.point; normal = hh.normal; hitHere = true; }
@@ -216,7 +216,7 @@ public class RouteEditTool : MonoBehaviour
         {
             if (r == null || !r.IsPositionInRoom(headScan, true)) continue;
             // stacked/overlapping rooms: the one whose floor is right below the head
-            var f = r.FloorAnchor;
+            var f = r.FloorAnchors.FirstOrDefault(a => a != null);
             float dy = f ? headScan.y - f.transform.position.y : 10f;
             if (dy >= -0.2f && dy < bestY) { bestY = dy; found = r; }
         }

@@ -180,7 +180,7 @@ public class EditModeController : MonoBehaviour
         const float pad = 18, h = 56, w = 112, g = 10;
         titleText = XRUi.CreateText(t, "Title", "", 24, TextAlignmentOptions.MidlineLeft, pad + 4, 12, CanvasW - 2 * pad, 32, XRUi.TextColor, FontStyles.Bold);
         infoText = XRUi.CreateText(t, "Info", "", 16, TextAlignmentOptions.MidlineLeft, pad + 4, 44, CanvasW - 2 * pad - 3 * (w + g), 64, XRUi.MutedText);
-        infoText.enableWordWrapping = true;
+        infoText.textWrappingMode = TextWrappingModes.Normal;
         float y = CanvasH - pad - h;
         undoButton = XRUi.CreateButton(t, "Undo", CanvasW - pad - 3 * w - 2 * g, y, w, h, OnUndo, 22);
         redoButton = XRUi.CreateButton(t, "Redo", CanvasW - pad - 2 * w - g, y, w, h, OnRedo, 22);
