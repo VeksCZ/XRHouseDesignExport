@@ -277,7 +277,9 @@ public class HoleEditTool : MonoBehaviour
     {
         if (!wasActive || !head) return;
         ClosePanel();
-        panel = XRUi.CreateWorldCanvas("HoleEditPanel", new Vector2(PW, PH), PScale);
+        bool movable = state == State.Idle && selectedId != null;
+        float ph = PH + (movable ? RowH + Gap : 0f);   // a selected opening also gets a Move row
+        panel = XRUi.CreateWorldCanvas("HoleEditPanel", new Vector2(PW, ph), PScale);
         var t = panel.transform;
         if (!panelPlaced)
         {
@@ -287,8 +289,8 @@ public class HoleEditTool : MonoBehaviour
             panelPlaced = true;
         }
         t.SetPositionAndRotation(panelPos, panelRot);
-        panelDrag = PanelDrag.Attach(panel, PW, PH);
-        XRUi.CreatePanel(t, "Background", XRUi.PanelColor, 0, 0, PW, PH);
+        panelDrag = PanelDrag.Attach(panel, PW, ph);
+        XRUi.CreatePanel(t, "Background", XRUi.PanelColor, 0, 0, PW, ph);
 
         float x0 = 20, fullW = PW - 40, y = 8;
         string title = state switch
@@ -308,6 +310,15 @@ public class HoleEditTool : MonoBehaviour
         XRUi.CreateText(t, "Hint", hint, 18, TextAlignmentOptions.TopLeft, x0, y, fullW, 64, XRUi.MutedText);
         y += 70 + Gap;
         float w3 = (fullW - Gap * 2) / 3f;
+        if (movable)
+        {
+            // 10 cm steps as seen from where you stand (a re-scan can leave an opening a little off)
+            float b4 = (fullW - Gap * 3) / 4f;
+            string[] label = { "Away 10 cm", "Closer 10 cm", "Left 10 cm", "Right 10 cm" };
+            Action[] move = { () => Nudge(1f, 0f), () => Nudge(-1f, 0f), () => Nudge(0f, -1f), () => Nudge(0f, 1f) };
+            for (int k = 0; k < 4; k++) XRUi.CreateButton(t, label[k], x0 + (b4 + Gap) * k, y, b4, RowH, move[k], 18);
+            y += RowH + Gap;
+        }
         if (state == State.Idle)
         {
             XRUi.CreateButton(t, "New opening", x0, y, w3, RowH, () => { state = State.CornerA; RebuildPanel(); }, 20);
@@ -316,6 +327,30 @@ public class HoleEditTool : MonoBehaviour
         }
         else XRUi.CreateButton(t, "Cancel", x0, y, w3 * 2 + Gap, RowH, () => { state = State.Idle; RebuildPanel(); }, 20);
         XRUi.CreateButton(t, "Close", x0 + (w3 + Gap) * 2, y, w3, RowH, () => { state = State.Idle; ClosePanel(); }, 20);
+    }
+
+    /// <summary>Moves the selected opening 10 cm away from / towards you (forward) or left / right of your view (right), in plan.</summary>
+    async void Nudge(float forward, float right)
+    {
+        if (selectedId == null || !head || !frameRoot) return;
+        string id = selectedId;
+        var h0 = HouseEditsStore.Current.holes.FirstOrDefault(x => x.id == id);
+        var room = h0 == null ? null : rooms.FirstOrDefault(r => DoorCatalog.RoomId(r) == h0.roomUuid);
+        if (room == null) return;
+        Vector3 f = Vector3.ProjectOnPlane(head.forward, Vector3.up);
+        if (f.sqrMagnitude < 1e-4f) return;
+        f.Normalize();
+        Vector3 o = WorldToScan(head.position);
+        Vector3 worldDir = (f * forward + Vector3.Cross(Vector3.up, f) * right) * 0.1f;           // metres, in the real world
+        Vector3 scanDir = WorldToScan(head.position + worldDir) - o;                               // the same step in the scan's frame
+        Vector3 local = room.transform.InverseTransformDirection(new Vector3(scanDir.x, 0f, scanDir.z));
+        await editMode.Commit(e =>
+        {
+            var h = e.holes.FirstOrDefault(x => x.id == id);
+            if (h == null || h.localA == null || h.localB == null) return;
+            h.localA = new Vector3Data(new Vector3(h.localA.x + local.x, h.localA.y, h.localA.z + local.z));
+            h.localB = new Vector3Data(new Vector3(h.localB.x + local.x, h.localB.y, h.localB.z + local.z));
+        });
     }
 
     async void Delete()

@@ -156,7 +156,7 @@ and exports 3D models, floor plans and reports from the scan.
   (scan-frame floor points). Use these to verify walk-through changes before asking the user to try the headset.
 - **Stairs on a moved room**: `StairGeometry.WorldPoints` puts a stair back on the nearest floor under its first point when it is
   > 35 cm off every floor there (`StairFloorSnap`, stored on a saved scan); `Reanchor` (room pose stamped in the edit) keeps
-  it on its spot after a re-scan. The stair panel has Move (10 cm forward/back/left/right) and Turn (5 deg) for what is left.
+  it on its spot after a re-scan. The stair panel has Move (10 cm forward/back/left/right) and Turn (5 deg) for what is left. A selected opening has Move (10 cm away/closer/left/right of your view).
 - **Walk-through rules**: stairs cut nothing - only openings drawn with the Hole tool cut floors/ceilings; you can
   fall only inside a drawn opening (never out of a wall your head went into); a walled-up doorway is removed for
   every room that captured it (DoorCatalog.IsWalledUp).
