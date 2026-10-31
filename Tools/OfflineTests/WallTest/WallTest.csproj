@@ -13,6 +13,7 @@
     <Compile Include="Program.cs" />
     <Compile Include="../../../Assets/Scripts/SceneJsonEdit.cs" />
     <Compile Include="../../../Assets/Scripts/MissingWall.cs" />
+    <Compile Include="../../../Assets/Scripts/StairFloorSnap.cs" />
     <PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
   </ItemGroup>
 </Project>

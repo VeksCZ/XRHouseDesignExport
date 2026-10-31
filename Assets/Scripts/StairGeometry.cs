@@ -78,11 +78,39 @@ public static class StairGeometry
     {
         var room = rooms.FirstOrDefault(r => DoorCatalog.RoomId(r) == s.roomUuid);
         if (room != null) Reanchor(s.id, room.transform, ref s.roomPos, ref s.roomYaw, s.localPoints);
-        return s.localPoints.Select(p =>
+        var pts = s.localPoints.Select(p =>
         {
             var v = new Vector3(p.x, p.y, p.z);
             return room != null ? room.transform.TransformPoint(v) : v;
         }).ToList();
+
+        // The first step stands on a floor. When it is clearly off every floor under it (a room that was re-scanned moved
+        // by a storey, the stairs came along room-local), the whole stair is put back on the nearest floor - and, on a
+        // saved scan, stored that way so it stays.
+        float dy = pts.Count > 0 ? StairFloorSnap.Offset(pts[0], ScannedFloors(rooms)) : 0f;
+        if (dy != 0f)
+        {
+            for (int i = 0; i < pts.Count; i++) pts[i] += Vector3.up * dy;
+            if (room != null && HouseEditsStore.CurrentScan != null)
+            {
+                for (int i = 0; i < pts.Count; i++) s.localPoints[i] = new Vector3Data(room.transform.InverseTransformPoint(pts[i]));
+                Debug.Log($"[StairGeometry] Stair '{s.id}' was {Mathf.Abs(dy):0.00} m {(dy > 0 ? "below" : "above")} the floor it starts on - put back on it.");
+                HouseEditsStore.SaveSilently();
+            }
+        }
+        return pts;
+    }
+
+    /// <summary>Every scanned floor as its outline in the scan's world frame and its height.</summary>
+    static IEnumerable<(List<Vector3> outline, float y)> ScannedFloors(List<MRUKRoom> rooms)
+    {
+        foreach (var r in rooms)
+            if (r != null)
+                foreach (var f in r.FloorAnchors)
+                {
+                    if (f == null || f.PlaneBoundary2D == null || f.PlaneBoundary2D.Count < 3) continue;
+                    yield return (f.PlaneBoundary2D.Select(q => f.transform.position + f.transform.rotation * new Vector3(q.x, q.y, 0)).ToList(), f.transform.position.y);
+                }
     }
 
     /// <summary>A drawn hole's two corners in the scan's world frame.</summary>

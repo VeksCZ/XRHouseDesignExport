@@ -147,5 +147,19 @@ class T {
     closed.WallAnchors.Add(an);
     Check(!MissingWall.Find(new List<MRUKRoom> { closed }, new Ray(new Vector3(2, 1.5f, 1.5f), new Vector3(0, 0, 1)), out _, out _, out _, out _), "a closed outline reports no missing wall");
 
+    // ---- stairs snap back onto the floor ----
+    {
+      var sq = new List<Vector3> { new Vector3(0, 0, 0), new Vector3(4, 0, 0), new Vector3(4, 0, 3), new Vector3(0, 0, 3) };
+      var floors = new List<(List<Vector3>, float)> { (sq, -3.137f), (sq, 0f) };                    // two storeys on top of each other
+      Check(StairFloorSnap.Offset(new Vector3(1, -3.19f, 1), floors) == 0f, "stair on its floor (6 cm off) is left alone");
+      Check(StairFloorSnap.Offset(new Vector3(1, -3.0f, 1), floors) == 0f, "finished floor 14 cm higher is left alone");
+      float dy = StairFloorSnap.Offset(new Vector3(1, -6.33f, 1), floors);
+      Check(Math.Abs(dy - 3.193f) < 1e-3f, $"stair a storey too low is lifted onto the floor ({dy:0.000} m)");
+      float dy2 = StairFloorSnap.Offset(new Vector3(1, 2.9f, 1), floors);
+      Check(Math.Abs(dy2 - (-2.9f)) < 1e-3f, $"stair a storey too high comes down to the nearest floor ({dy2:0.000} m)");
+      Check(StairFloorSnap.Offset(new Vector3(9, -6.33f, 9), floors) == 0f, "no floor under the spot: nothing to snap to");
+      Check(StairFloorSnap.Offset(new Vector3(1, -20f, 1), floors) == 0f, "absurdly far off: left alone");
+    }
+
     Console.WriteLine(fails == 0 ? "ALL PASSED" : fails + " FAILED"); return fails; }
 }
