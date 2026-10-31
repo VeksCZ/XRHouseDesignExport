@@ -178,10 +178,26 @@ var mrukAnchor = room.GetComponent<MRUKAnchor>();
     /// Used by MRUKExporter and DollHouseVisualizer so the export and the in-headset
     /// preview always agree on the same room set (dedup by anchor UUID + area filtering).
     /// </summary>
+    static List<MRUKRoom> cachedValid;
+    static long cachedKey;
+
+    /// <summary>The valid, de-duplicated rooms of the loaded scene. Working it out re-extracts every room's plan (a few
+    /// hundred ms in a big house) and it is asked for from ~20 places (walk, Dollhouse, tools, minimap...), so the answer
+    /// is kept until the scene changes: another scan loaded (SceneVersion), a room added / removed / recreated.</summary>
     public static List<MRUKRoom> GetValidRooms(MRUK mruk)
     {
         if (mruk == null) return new List<MRUKRoom>();
+        if (MRUKExporter.Loading) return ComputeValidRooms(mruk);   // halfway through a load the rooms may be incomplete: never kept
+        long key = MRUKExporter.SceneVersion * 1000003L + mruk.Rooms.Count;
+        foreach (var r in mruk.Rooms) if (r != null) key = key * 31 + r.GetInstanceID();
+        if (cachedValid != null && key == cachedKey && cachedValid.All(r => r != null)) return new List<MRUKRoom>(cachedValid);
+        var rooms = ComputeValidRooms(mruk);
+        cachedValid = rooms; cachedKey = key;
+        return new List<MRUKRoom>(rooms);   // a copy: callers may sort / filter it
+    }
 
+    static List<MRUKRoom> ComputeValidRooms(MRUK mruk)
+    {
         var valid = mruk.Rooms
             .GroupBy(r => r.Anchor.Uuid)
             .Select(g => g.First())
