@@ -1062,13 +1062,20 @@ public class XRMenu : MonoBehaviour
     }
 
 
+    bool dataBusy; // Save / Export running: a second press meanwhile is dropped (it would make a second copy / a second export)
+
     public async void OnExportAll()
     {
-        if (!RequireExporter()) return;
-        AddLog($"Exporting '{exporter.SelectedSource}'...");
-        await Busy("Exporting...");
-        bool ok = await exporter.ExportAllRooms(this);
-        SetStatus(ok ? "Export done" : "ERROR");
+        if (!RequireExporter() || dataBusy) return;
+        dataBusy = true;
+        try
+        {
+            AddLog($"Exporting '{exporter.SelectedSource}'...");
+            await Busy("Exporting...");
+            bool ok = await exporter.ExportAllRooms(this);
+            SetStatus(ok ? "Export done" : "ERROR");
+        }
+        finally { dataBusy = false; }
     }
 
     /// <summary>Plain on/off - it always shows whatever mode was last picked with the Mode button, so it never
@@ -1164,15 +1171,21 @@ public class XRMenu : MonoBehaviour
             AddLog($"'{exporter.SelectedSource}' saves its edits by itself - nothing to save. Export writes the files for the PC. (To save the Quest's live scan, pick Live scan with < > first.)");
             return;
         }
-        await Busy("Saving...");
-        string name = await exporter.SaveScanToCache(this);
-        if (name != null && HouseEditsStore.CarryLiveInto(name))
+        if (dataBusy) return;
+        dataBusy = true;
+        try
         {
-            exporter.AdoptSavedLiveScan(name); // the edits belong to the saved copy now - show it
-            AddLog($"<color=green>Edits made on the live scan saved with it - now on '{name}'.</color>");
+            await Busy("Saving...");
+            string name = await exporter.SaveScanToCache(this);
+            if (name != null && HouseEditsStore.CarryLiveInto(name))
+            {
+                exporter.AdoptSavedLiveScan(name); // the edits belong to the saved copy now - show it
+                AddLog($"<color=green>Edits made on the live scan saved with it - now on '{name}'.</color>");
+            }
+            SetStatus(name != null ? "Scan saved" : "Save failed");
+            RefreshScanLabel();
         }
-        SetStatus(name != null ? "Scan saved" : "Save failed");
-        RefreshScanLabel();
+        finally { dataBusy = false; }
     }
 
     /// <summary>

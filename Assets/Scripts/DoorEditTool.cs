@@ -257,14 +257,18 @@ public class DoorEditTool : MonoBehaviour
         XRUi.CreateButton(t, "-", 130, y, bw, rowH, () => { newDoorWidthIdx = Mathf.Max(0, newDoorWidthIdx - 1); RefreshAddPanel(); }, 30);
         XRUi.CreateButton(t, "+", 130 + bw + gap, y, bw, rowH, () => { newDoorWidthIdx = Mathf.Min(NewDoorWidths.Length - 1, newDoorWidthIdx + 1); RefreshAddPanel(); }, 30);
         y += rowH + gap;
-        XRUi.CreateText(t, "Hint", "A doorway the scan missed, standing on the floor (height 197 cm). Hold the trigger and move your hand to slide it along the wall - the box shows where it'll land. It becomes part of this saved scan; then set its type like any door. Undo: the scan file is backed up (*.bak_doors).",
+        bool onLive = HouseEditsStore.CurrentScan == null;
+        XRUi.CreateText(t, "Hint", onLive
+                ? "<color=#ffa040>This is the live scan - it isn't saved, so it can't take a doorway.</color> Save it first (menu Data > Save live scan), pick the saved scan, then add the doorway there."
+                : "A doorway the scan missed, standing on the floor (height 197 cm). Hold the trigger and move your hand to slide it along the wall - the box shows where it'll land. It becomes part of this saved scan; then set its type like any door. Undo: the scan file is backed up (*.bak_doors).",
             16, TextAlignmentOptions.TopLeft, x0, y, PW - 40, 80, XRUi.MutedText);
         y += 86;
         var add = XRUi.CreateButton(t, "Add doorway", x0, y, (PW - 40 - gap) / 2f, rowH, AddDoorway, 22);
-        XRUi.SetTint(add, XRUi.ButtonOnColor);
+        XRUi.SetTint(add, onLive ? XRUi.ButtonDisabled : XRUi.ButtonOnColor);
         XRUi.CreateButton(t, "Cancel", x0 + (PW - 40 - gap) / 2f + gap, y, (PW - 40 - gap) / 2f, rowH, ClosePanel, 22);
         y += rowH + gap;
-        XRUi.CreateButton(t, "Missing wall instead", x0, y, PW - 40, rowH, ShowMissingWall, 22);
+        var wallBtn = XRUi.CreateButton(t, "Missing wall instead", x0, y, PW - 40, rowH, ShowMissingWall, 22);
+        if (onLive) XRUi.SetTint(wallBtn, XRUi.ButtonDisabled);
         RefreshAddPanel();
     }
 

@@ -146,6 +146,10 @@ and exports 3D models, floor plans and reports from the scan.
   every room that captured it (DoorCatalog.IsWalledUp).
 - **Offline compile check**: compile `Assets/Scripts/**/*.cs` with dotnet against `Library/ScriptAssemblies/*.dll`
   (defines `UNITY_EDITOR;UNITY_ANDROID;META_XR_SDK_INSTALLED`) for a fast error check without a Unity reload.
+  Without Unity's DLLs (a cloud session; `apt-get install -y dotnet-sdk-8.0` works there): `Tools/OfflineTests/SyntaxCheck`
+  parses every script (syntax errors only) and `Tools/OfflineTests/WallTest` runs the Missing-wall logic (`MissingWall`,
+  `SceneJsonEdit.AddWall`, V1 + V2 scan formats) against a synthetic room with stand-ins for the Unity types (`Stubs.cs`).
+  Run `dotnet run -c Release` inside each folder; keep `WallTest` passing when touching those files.
 - **Built-in modules**: unused ones (cloth, terrain, tilemap, wind, video...) are out of `manifest.json`;
   Meta's SDK needs `assetbundle`, `physics2d`, `particlesystem` and (Android) `director` without declaring them - keep
   those. `com.unity.xr.meta-openxr` (+ AR Foundation, XR Simulation assets) was removed - nothing used it; Meta XR Core

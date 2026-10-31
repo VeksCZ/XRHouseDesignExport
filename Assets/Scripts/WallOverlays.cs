@@ -126,6 +126,7 @@ public class WallOverlays : MonoBehaviour
     readonly Dictionary<string, Photo> photoByPath = new Dictionary<string, Photo>();
     Coroutine loader;
     int photoVersion;
+    const float PhotoMaxDepth = 6f;
     const int PhotoTexW = 640, PhotoTexH = 480, PhotoGridX = 12, PhotoGridY = 9;
 
     void OnDestroy()
@@ -166,17 +167,22 @@ public class WallOverlays : MonoBehaviour
         // Over passthrough: only on a scan lined up with the real house (the live one), and not while inside the model.
         if (exporter != null && exporter.WorldAligned && !walkOn) Sync(worldCtx, null, 0f, Vector3.zero, routes, pics, ShowFittings, scan); else Clear(worldCtx);
 
-        foreach (var ctx in new[] { worldCtx, walkCtx, dollCtx })
-            for (int i = ctx.waiting.Count - 1; i >= 0; i--)
-            {
-                var (ph, mr) = ctx.waiting[i];
-                if (ph.tex == null) continue;
-                if (mr) { mr.sharedMaterial = PhotoMaterial(ph); mr.enabled = true; }
-                ctx.waiting.RemoveAt(i);
-            }
+        ShowLoadedPhotos(worldCtx); ShowLoadedPhotos(walkCtx); ShowLoadedPhotos(dollCtx);
 #if META_XR_SDK_INSTALLED
         UpdateAim(walkOn ? walkCtx : worldCtx, walkOn);
 #endif
+    }
+
+    /// <summary>Photos whose texture has finished loading in the background get their material and are shown.</summary>
+    void ShowLoadedPhotos(Ctx ctx)
+    {
+        for (int i = ctx.waiting.Count - 1; i >= 0; i--)
+        {
+            var (ph, mr) = ctx.waiting[i];
+            if (ph.tex == null) continue;
+            if (mr) { mr.sharedMaterial = PhotoMaterial(ph); mr.enabled = true; }
+            ctx.waiting.RemoveAt(i);
+        }
     }
 
     static string SceneSignature()
@@ -738,7 +744,9 @@ public class WallOverlays : MonoBehaviour
                 idx[i, j] = -1;
                 var uv = new Vector2(i / (float)(PhotoGridX - 1), j / (float)(PhotoGridY - 1));
                 Vector3 dir = rot * new Vector3((uv.x - s.cu) / s.fu, (uv.y - s.cv) / s.fv, 1f).normalized;
-                if (!Hit(new Ray(pos, dir), rooms, out var hp)) continue;
+                // a photo shows a wall within a few metres; where the wall wasn't scanned (a mirror the Quest missed) the ray would
+                // run on to a far wall of another room and drape the photo there, "in the air" - better a hole
+                if (!Hit(new Ray(pos, dir), rooms, out var hp, PhotoMaxDepth)) continue;
                 idx[i, j] = verts.Count;
                 verts.Add(hp - dir * lift);
                 uvs.Add(uv);
@@ -762,11 +770,11 @@ public class WallOverlays : MonoBehaviour
         return m;
     }
 
-    static bool Hit(Ray ray, List<MRUKRoom> rooms, out Vector3 point)
+    static bool Hit(Ray ray, List<MRUKRoom> rooms, out Vector3 point, float maxDistance = 12f)
     {
         point = default; float best = float.MaxValue;
         foreach (var room in rooms)
-            if (room.Raycast(ray, 12f, out RaycastHit hit, out _) && hit.distance < best) { best = hit.distance; point = hit.point; }
+            if (room.Raycast(ray, maxDistance, out RaycastHit hit, out _) && hit.distance < best) { best = hit.distance; point = hit.point; }
         return best < float.MaxValue;
     }
 #endif

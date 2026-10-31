@@ -48,6 +48,10 @@ public static class StairGeometry
     /// </summary>
     static void Reanchor(string id, Transform room, ref Vector3Data roomPos, ref float roomYaw, List<Vector3Data> points)
     {
+        // Only on a saved scan: it comes back from its file in the same frame every time, so a room whose pose differs
+        // really was re-scanned. The live scan's frame can move between sessions together with all of its rooms - there
+        // the world position must not be held fixed.
+        if (HouseEditsStore.CurrentScan == null) return;
         Vector3 curPos = room.position; float curYaw = room.eulerAngles.y;
         if (roomPos == null)
         {
