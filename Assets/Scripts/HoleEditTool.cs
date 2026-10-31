@@ -315,7 +315,7 @@ public class HoleEditTool : MonoBehaviour
             // 10 cm steps as seen from where you stand (a re-scan can leave an opening a little off)
             float b4 = (fullW - Gap * 3) / 4f;
             string[] label = { "Away 10 cm", "Closer 10 cm", "Left 10 cm", "Right 10 cm" };
-            Action[] move = { () => Nudge(1f, 0f), () => Nudge(-1f, 0f), () => Nudge(0f, -1f), () => Nudge(0f, 1f) };
+            UnityEngine.Events.UnityAction[] move = { () => Nudge(1f, 0f), () => Nudge(-1f, 0f), () => Nudge(0f, -1f), () => Nudge(0f, 1f) };
             for (int k = 0; k < 4; k++) XRUi.CreateButton(t, label[k], x0 + (b4 + Gap) * k, y, b4, RowH, move[k], 18);
             y += RowH + Gap;
         }

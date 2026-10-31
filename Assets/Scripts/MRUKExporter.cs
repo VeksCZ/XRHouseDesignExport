@@ -553,11 +553,16 @@ public class MRUKExporter : MonoBehaviour
         SetProgress(45, ui);
 
         ui?.AddLog("<color=cyan>[5/6] Exporting models...</color>");
-        Save(XRModelFactory.CreateAnchorAnalytical(rooms, angle, LastHouseCenter), session, MRUKPathUtility.MODEL_CLEAN_OBJ, MRUKPathUtility.MODEL_CLEAN_GLB); SetProgress(55, ui); await Task.Yield();
-        Save(XRModelFactory.CreateAnchorAnalyticalWithDimensions(rooms, angle, LastHouseCenter), session, MRUKPathUtility.MODEL_DIM_OBJ, MRUKPathUtility.MODEL_DIM_GLB); SetProgress(65, ui); await Task.Yield();
-        Save(await XRModelFactory.CreateMeshAnalytical(rooms, angle, LastHouseCenter), session, MRUKPathUtility.MODEL_MESH_ANALYTICAL_OBJ, MRUKPathUtility.MODEL_MESH_ANALYTICAL_GLB); SetProgress(75, ui); await Task.Yield();
-        Save(XRModelFactory.CreateReconstruction(rooms, angle, LastHouseCenter), session, MRUKPathUtility.MODEL_MESH_OBJ, MRUKPathUtility.MODEL_MESH_GLB); SetProgress(85, ui); await Task.Yield();
-        Save(await XRModelFactory.CreateRawScan(rooms, angle, LastHouseCenter), session, MRUKPathUtility.MODEL_RAW_OBJ, MRUKPathUtility.MODEL_RAW_GLB); SetProgress(95, ui); await Task.Yield();
+        var mClean = XRModelFactory.CreateAnchorAnalytical(rooms, angle, LastHouseCenter); AddStairs(mClean, rooms, angle, LastHouseCenter);
+        Save(mClean, session, MRUKPathUtility.MODEL_CLEAN_OBJ, MRUKPathUtility.MODEL_CLEAN_GLB); SetProgress(55, ui); await Task.Yield();
+        var mDim = XRModelFactory.CreateAnchorAnalyticalWithDimensions(rooms, angle, LastHouseCenter); AddStairs(mDim, rooms, angle, LastHouseCenter);
+        Save(mDim, session, MRUKPathUtility.MODEL_DIM_OBJ, MRUKPathUtility.MODEL_DIM_GLB); SetProgress(65, ui); await Task.Yield();
+        var mMeshA = await XRModelFactory.CreateMeshAnalytical(rooms, angle, LastHouseCenter); AddStairs(mMeshA, rooms, angle, LastHouseCenter);
+        Save(mMeshA, session, MRUKPathUtility.MODEL_MESH_ANALYTICAL_OBJ, MRUKPathUtility.MODEL_MESH_ANALYTICAL_GLB); SetProgress(75, ui); await Task.Yield();
+        var mRecon = XRModelFactory.CreateReconstruction(rooms, angle, LastHouseCenter); AddStairs(mRecon, rooms, angle, LastHouseCenter);
+        Save(mRecon, session, MRUKPathUtility.MODEL_MESH_OBJ, MRUKPathUtility.MODEL_MESH_GLB); SetProgress(85, ui); await Task.Yield();
+        var mRaw = await XRModelFactory.CreateRawScan(rooms, angle, LastHouseCenter); AddStairs(mRaw, rooms, angle, LastHouseCenter);
+        Save(mRaw, session, MRUKPathUtility.MODEL_RAW_OBJ, MRUKPathUtility.MODEL_RAW_GLB); SetProgress(95, ui); await Task.Yield();
 
         File.WriteAllText(Path.Combine(session, MRUKPathUtility.MODEL_MTL), OBJWriter.GenerateMTL());
 
@@ -606,6 +611,26 @@ public class MRUKExporter : MonoBehaviour
     /// <summary>Editor-only entry point, so tooling like the Unity MCP bridge can start the fast device build without a menu click.</summary>
     public void EditorFastBuildAndInstall() => MRUKEditorTools.BuildAPKFast();
 #endif
+
+    /// <summary>
+    /// The exported model (OBJ/GLB) had no stairs at all: StairsInModel only adds their geometry to a live Unity
+    /// GameObject (the walk-through/Dollhouse), never to the XRHouseModel data the exporter writes out. Adds the
+    /// same step/landing meshes (StairGeometry.Parts) as their own "Stairs" room group here, so every exported
+    /// flavour actually shows the stairs the user drew. Floor/ceiling stairwell holes (Hole tool) still aren't cut
+    /// into these static exports - only the live view does that - so a floor may show solid under a drawn opening.
+    /// </summary>
+    static void AddStairs(XRHouseModel model, List<MRUKRoom> rooms, float yaw, Vector3 center)
+    {
+        var stairs = HouseEditsStore.Current?.stairs;
+        if (model == null || stairs == null || stairs.Count == 0) return;
+        var group = new XRRoomModel { roomName = "Stairs" };
+        foreach (var s in stairs)
+        {
+            var r = StairGeometry.Resolve(s, rooms);
+            if (r != null) group.parts.AddRange(StairGeometry.Parts(r, yaw, center));
+        }
+        if (group.parts.Count > 0) model.rooms.Add(group);
+    }
 
     private void SetProgress(float v, XRMenu m) { if (m != null) m.SetProgress(v); }
     private void Save(XRHouseModel m, string f, string obj, string glb) {

@@ -633,9 +633,9 @@ public class StairEditTool : MonoBehaviour
                 XRUi.CreateText(t, "Len", $"Width {width:0.00} m", 20, TextAlignmentOptions.MidlineLeft, x0, y, fullW, RowH, XRUi.TextColor);
             }
             y += RowH + Gap;
-            float b2 = (fullW - Gap) / 2f;
-            XRUi.CreateButton(t, "Back", x0, y, b2, RowH, Back, 22);
-            XRUi.CreateButton(t, "Cancel", x0 + b2 + Gap, y, b2, RowH, CancelPlacing, 22);
+            float backW = (fullW - Gap) / 2f;
+            XRUi.CreateButton(t, "Back", x0, y, backW, RowH, Back, 22);
+            XRUi.CreateButton(t, "Cancel", x0 + backW + Gap, y, backW, RowH, CancelPlacing, 22);
             return;
         }
 
@@ -664,7 +664,7 @@ public class StairEditTool : MonoBehaviour
         // the whole stair in small steps (a re-scanned room can leave it a little off): 'forward' = the way the first flight runs
         float b4 = (fullW - Gap * 3) / 4f;
         string[] moveLabel = { "Back 10 cm", "Forward 10 cm", "Left 10 cm", "Right 10 cm" };
-        Action[] move = { () => Nudge(-0.1f, 0f), () => Nudge(0.1f, 0f), () => Nudge(0f, -0.1f), () => Nudge(0f, 0.1f) };
+        UnityEngine.Events.UnityAction[] move = { () => Nudge(-0.1f, 0f), () => Nudge(0.1f, 0f), () => Nudge(0f, -0.1f), () => Nudge(0f, 0.1f) };
         for (int k = 0; k < 4; k++) XRUi.CreateButton(t, moveLabel[k], x0 + (b4 + Gap) * k, y, b4, RowH, move[k], 18);
         y += RowH + Gap;
         float b2 = (fullW - Gap) / 2f;
