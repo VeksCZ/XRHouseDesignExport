@@ -27,10 +27,33 @@ public static class WallScan
     {
         public string id, roomUuid;
         public Vector3 origin, axisU, axisV, normal;
-        public RenderTexture acc;
+        public int pxW, pxH;
         public Material show, cover;
         public HashSet<string> frames = new HashSet<string>();
         public bool dirty;
+
+        RenderTexture accTex;
+        /// <summary>The accumulation texture, allocated on first use: a house of 45 rooms has ~300 planes and most of them
+        /// never see a frame (each is up to several MB at half-float with mips).</summary>
+        public RenderTexture acc => accTex ? accTex : accTex = Allocate(this);
+        public bool Allocated => accTex != null;
+        /// <summary>Something is painted on it - worth drawing.</summary>
+        public bool HasData => accTex != null && frames.Count > 0;
+        public void Release() { if (accTex) { accTex.Release(); UnityEngine.Object.Destroy(accTex); } accTex = null; }
+    }
+
+    /// <summary>Mips (the Show shader reads them for distance and to fill pinholes) are built by hand after painting,
+    /// anisotropic filtering keeps walls seen at a grazing angle sharp.</summary>
+    static RenderTexture Allocate(Plane p)
+    {
+        var rt = new RenderTexture(p.pxW, p.pxH, 0, RenderTextureFormat.ARGBHalf)
+        {
+            name = "WallScan_" + p.id.Substring(0, 8), wrapMode = TextureWrapMode.Clamp, filterMode = FilterMode.Trilinear,
+            useMipMap = true, autoGenerateMips = false, anisoLevel = 4,
+        };
+        rt.Create();
+        var prev = RenderTexture.active; RenderTexture.active = rt; GL.Clear(false, true, Color.clear); RenderTexture.active = prev;
+        return rt;
     }
 
     [Serializable] class ManifestEntry { public string id; public List<string> frames = new List<string>(); }
@@ -143,11 +166,9 @@ public static class WallScan
                 // nooks, so it can't decide); floors/ceilings: towards the room's middle height
                 p.normal = a.HasAnyLabel(MRUKAnchor.SceneLabels.WALL_FACE) ? n : (Vector3.Dot(inside - c, n) >= 0 ? n : -n);
                 if (planes.ContainsKey(p.id)) continue;
-                int w = Mathf.Clamp(Mathf.CeilToInt(r.width * PxPerMeter), 16, MaxSize), h = Mathf.Clamp(Mathf.CeilToInt(r.height * PxPerMeter), 16, MaxSize);
-                p.acc = new RenderTexture(w, h, 0, RenderTextureFormat.ARGBHalf) { name = "WallScan_" + p.id.Substring(0, 8), wrapMode = TextureWrapMode.Clamp, filterMode = FilterMode.Bilinear };
-                p.acc.Create();
-                var prev = RenderTexture.active; RenderTexture.active = p.acc; GL.Clear(false, true, Color.clear); RenderTexture.active = prev;
-                LoadCached(p, manifest);
+                p.pxW = Mathf.Clamp(Mathf.CeilToInt(r.width * PxPerMeter), 16, MaxSize);
+                p.pxH = Mathf.Clamp(Mathf.CeilToInt(r.height * PxPerMeter), 16, MaxSize);
+                LoadCached(p, manifest);   // allocates the texture only for a plane that has saved frames
                 planes[p.id] = p;
             }
         }
@@ -169,6 +190,7 @@ public static class WallScan
             if (!tex.LoadImage(File.ReadAllBytes(png))) return;
             SplatMat.SetFloat("_LoadWeight", LoadWeight);
             Graphics.Blit(tex, p.acc, SplatMat, 1);
+            p.acc.GenerateMips();
             foreach (var f in entry.frames) p.frames.Add(f);
         }
         catch (Exception e) { Debug.LogWarning($"[WallScan] {png}: {e.Message}"); }
@@ -227,7 +249,10 @@ public static class WallScan
             }
             mat.SetVectorArray("_OccO", occO); mat.SetVectorArray("_OccU", occU); mat.SetVectorArray("_OccV", occV);
             mat.SetInteger("_OccCount", k);
+            bool fresh = !p.Allocated;
             Graphics.Blit(photo, p.acc, mat, 0);
+            p.acc.GenerateMips();
+            if (fresh) Version++;   // a plane that had nothing now has a texture - the views add its quad
             if (key != null) p.frames.Add(key);
             p.dirty = true;
             any = true;
@@ -253,6 +278,7 @@ public static class WallScan
             foreach (var p in planes.Values.Where(p => p.frames.Any(k => !onDisk.Contains(k))).ToList())
             {
                 var prev = RenderTexture.active; RenderTexture.active = p.acc; GL.Clear(false, true, Color.clear); RenderTexture.active = prev;
+                p.acc.GenerateMips();
                 p.frames.Clear(); p.dirty = true;
             }
             var roomIds = new HashSet<string>(planes.Values.Select(p => p.roomUuid));
@@ -290,7 +316,7 @@ public static class WallScan
     /// <summary>Writes every changed plane (PNG: colour + coverage) and the manifest.</summary>
     public static void SaveAll()
     {
-        var changed = planes.Values.Where(p => p.dirty && p.acc).ToList();
+        var changed = planes.Values.Where(p => p.dirty && p.Allocated).ToList();
         if (changed.Count == 0 || SplatMat == null) return;
         try
         {
@@ -338,7 +364,7 @@ public static class WallScan
     {
         foreach (var p in planes.Values)
         {
-            if (p.acc) { p.acc.Release(); UnityEngine.Object.Destroy(p.acc); }
+            p.Release();
             if (p.show) UnityEngine.Object.Destroy(p.show);
             if (p.cover) UnityEngine.Object.Destroy(p.cover);
         }

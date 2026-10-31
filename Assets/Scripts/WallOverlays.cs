@@ -310,10 +310,12 @@ public class WallOverlays : MonoBehaviour
         var go = new GameObject("WallScan");
         go.transform.SetParent(ctx.go.transform, false);
         int n = 0;
+        bool cover = ctx == worldCtx && ForceScan;
         foreach (var p in WallScan.Planes)
         {
-            // recording over passthrough: the blue "not scanned yet" veil; otherwise the photos themselves
-            var mat = ctx == worldCtx && ForceScan ? WallScan.CoverMaterial(p) : WallScan.ShowMaterial(p);
+            // recording over passthrough: the blue "not scanned yet" veil on every plane; otherwise only planes with photos
+            if (!cover && !p.HasData) continue;
+            var mat = cover ? WallScan.CoverMaterial(p) : WallScan.ShowMaterial(p);
             if (mat == null) break;
             Vector3 lift = p.normal * (ctx == worldCtx ? 0.004f : 0.011f);
             var m = new Mesh { name = "WallScan_" + p.id.Substring(0, 8) };
