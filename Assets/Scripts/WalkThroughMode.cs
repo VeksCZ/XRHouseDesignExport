@@ -879,7 +879,7 @@ public class WalkThroughMode : MonoBehaviour
         // overlapping can report a hit at distance 0 every frame and you could never walk out. Let the move through.
         if (Physics.CheckCapsule(p1, p2, BodyRadius * 0.9f, WalkMask, QueryTriggerInteraction.Ignore))
         {
-            LastBlocker = "started inside a collider - moving freely";
+            blocker = Blocker.Inside;
             return move;
         }
         for (int i = 0; i < 3; i++)
@@ -889,14 +889,10 @@ public class WalkThroughMode : MonoBehaviour
             Vector3 dir = move / dist;
             if (!Physics.CapsuleCast(p1, p2, BodyRadius, dir, out var hit, dist + Skin, WalkMask, QueryTriggerInteraction.Ignore))
                 return move;
-            {
-                Quaternion gInv = Quaternion.Inverse(Quaternion.Euler(0, yaw, 0));
-                Vector3 S(Vector3 w) => gInv * root.transform.InverseTransformPoint(w) + center;
-                var bnd = hit.collider.bounds;
-                LastBlocker = $"{hit.collider.name} ({hit.collider.transform.parent?.name}) at {hit.point.y - TargetFloorY:0.00} m above feet, " +
-                              $"point {S(hit.point)}, normal {hit.normal}, collider {S(bnd.min)}..{S(bnd.max)}, capsule {S(p1)}..{S(p2)} r {BodyRadius}, " +
-                              $"iter {i} move {dist:0.000} hitDist {hit.distance:0.000} dir {dir}";
-            }
+            // only the raw numbers: the text is made when somebody asks (LastBlocker) - building it here, every frame you
+            // slide along a wall, was several KB of garbage per frame
+            blocker = Blocker.Hit; bCollider = hit.collider; bPoint = hit.point; bNormal = hit.normal;
+            bP1 = p1; bP2 = p2; bIter = i; bMove = dist; bHitDist = hit.distance; bDir = dir;
             Vector3 n = hit.normal; n.y = 0f;
             if (i == 2 || n.sqrMagnitude < 1e-4f) return dir * Mathf.Max(0f, hit.distance - Skin);
             move = Vector3.ProjectOnPlane(move, n.normalized);
@@ -905,7 +901,27 @@ public class WalkThroughMode : MonoBehaviour
     }
 
     /// <summary>What stopped the last move (diagnostics / desktop tests).</summary>
-    public string LastBlocker { get; private set; } = "";
+    enum Blocker { None, Inside, Hit }
+    Blocker blocker;
+    Collider bCollider;
+    Vector3 bPoint, bNormal, bP1, bP2, bDir;
+    int bIter; float bMove, bHitDist;
+
+    /// <summary>What blocked the last move, as text (for the log and the desktop tests) - made on demand.</summary>
+    public string LastBlocker
+    {
+        get
+        {
+            if (blocker == Blocker.Inside) return "started inside a collider - moving freely";
+            if (blocker != Blocker.Hit || !bCollider) return "";
+            Quaternion gInv = Quaternion.Inverse(Quaternion.Euler(0, yaw, 0));
+            Vector3 S(Vector3 w) => gInv * root.transform.InverseTransformPoint(w) + center;
+            var bnd = bCollider.bounds;
+            return $"{bCollider.name} ({bCollider.transform.parent?.name}) at {bPoint.y - TargetFloorY:0.00} m above feet, " +
+                   $"point {S(bPoint)}, normal {bNormal}, collider {S(bnd.min)}..{S(bnd.max)}, capsule {S(bP1)}..{S(bP2)} r {BodyRadius}, " +
+                   $"iter {bIter} move {bMove:0.000} hitDist {bHitDist:0.000} dir {bDir}";
+        }
+    }
 
     float fallSpeed;
     const float FallRing = 0.3f;     // a narrower gap than this all round you (doorway between slabs) is no hole
