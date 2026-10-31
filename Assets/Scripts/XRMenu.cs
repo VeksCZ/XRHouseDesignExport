@@ -195,6 +195,7 @@ public class XRMenu : MonoBehaviour
         photoMarkersButton = XRUi.CreateButton(layers, "Photo markers\n<size=72%><color=#9aa6b8>where photos were taken</color></size>", X2(1), LY(1), w2, h, () => WallOverlays.ShowPhotoIcons = !WallOverlays.ShowPhotoIcons, 24);
         showPhotosButton = XRUi.CreateButton(layers, "Photos on walls\n<size=72%><color=#9aa6b8>cable photos on the wall</color></size>", X2(0), LY(2), w2, h, () => WallOverlays.ShowPhotos = !WallOverlays.ShowPhotos, 24);
         fittingsButton = XRUi.CreateButton(layers, "Fittings\n<size=72%><color=#9aa6b8>real walls only</color></size>", X2(1), LY(2), w2, h, OnToggleFittings, 24);
+        alignButton = XRUi.CreateButton(layers, "Align to real walls", X2(1), LY(3), w2, h, OnToggleAlign, 20);
         scanOverlayButton = XRUi.CreateButton(layers, "Scan outline\n<size=72%><color=#9aa6b8>real walls only</color></size>", X2(0), LY(3), w2, h, OnToggleScanOverlay, 24);
 
         // ---- Tools: each one straight away; pressed again = leave it ----
@@ -223,9 +224,8 @@ public class XRMenu : MonoBehaviour
         XRUi.CreateCaption(data, "This scan", Pad, y0 - cap, ContentW);
         saveButton = XRUi.CreateButton(data, "Save live scan", X2(0), y0, w2, h, OnSaveScan, 24);
         exportButton = XRUi.CreateButton(data, "Export", X2(1), y0, w2, h, OnExportAll, 24);
-        alignButton = XRUi.CreateButton(data, "Align to real walls", X2(0), y0 + h + gap, ContentW, h, OnToggleAlign, 20);
-        pendingText = XRUi.CreateText(data, "PendingHint", "", 18, TextAlignmentOptions.TopLeft, Pad + 4, y0 + 2 * (h + gap), ContentW - 8, 52, XRUi.MutedText);
-        float d1 = y0 + 2 * (h + gap) + 52 + cap + 8;
+        pendingText = XRUi.CreateText(data, "PendingHint", "", 18, TextAlignmentOptions.TopLeft, Pad + 4, y0 + h + 8, ContentW - 8, 52, XRUi.MutedText);
+        float d1 = y0 + h + 60 + cap + 8;
         XRUi.CreateCaption(data, "Clean up", Pad, d1 - cap, ContentW);
         var deleteExportsButton = XRUi.CreateButton(data, "Delete exports\n<size=72%><color=#9aa6b8>frees space on the headset</color></size>", X2(0), d1, w2, h, OnDeleteExports, 22);
         XRUi.SetTint(deleteExportsButton, XRUi.ButtonDangerColor);
@@ -695,7 +695,7 @@ public class XRMenu : MonoBehaviour
     {
         if (alignButton == null || exporter == null) return;
         bool onLive = exporter.SelectedSource == MRUKExporter.LiveSource;
-        XRUi.SetLabel(alignButton, onLive ? "Align to real walls\n<size=72%><color=#9aa6b8>the live scan is always aligned</color></size>" : "Align to real walls\n<size=72%><color=#9aa6b8>match this scan to the room you stand in</color></size>");
+        XRUi.SetLabel(alignButton, onLive ? "Align to real walls\n<size=72%><color=#9aa6b8>live scan: always aligned</color></size>" : "Align to real walls\n<size=72%><color=#9aa6b8>snap to the room you stand in</color></size>");
         if (onLive) XRUi.SetTint(alignButton, XRUi.ButtonDisabled);
         else XRUi.SetToggle(alignButton, exporter.AlignEnabled);
     }
@@ -750,7 +750,7 @@ public class XRMenu : MonoBehaviour
             string t = MRUKExporter.Loading ? "Loading the scan..."
                 : exporter.WorldAligned
                     ? "<color=#7fe07f>On the real walls here</color>, in Walk and in the Dollhouse. Point at a route or box to see what it is."
-                    : "<color=#ffa040>This scan is of another place</color> - layers show in Walk and the Dollhouse only. Real-wall layers need the scan of the place you stand in (pick it with < >).";
+                    : "<color=#ffa040>This scan is of another place</color> - layers show in Walk and the Dollhouse only. Real-wall layers need this scan lined up with the place you stand in: press Align to real walls, or pick that place's scan.";
             if (!string.IsNullOrEmpty(WallScan.Status)) t += $"  <color=#9ecbff>{WallScan.Status}</color>";
             if (t != layersShown) { layersShown = t; layersText.text = t; }
         }
