@@ -574,7 +574,7 @@ public class StairEditTool : MonoBehaviour
             : HouseEditsStore.Current.stairs.FirstOrDefault(s => s.id == selectedId);
         if (state == State.Adjusting && sel == null) return;
         int flights = sel != null ? Mathf.Max(0, sel.localPoints.Count - 1) : 0;
-        float ph = Placing ? 60 + 76 + (RowH + Gap) * 2 + 20 : 60 + 50 + 64 + (RowH + Gap) * (4 + flights) + 20;
+        float ph = Placing ? 60 + 76 + (RowH + Gap) * 2 + 20 : 60 + 50 + 64 + (RowH + Gap) * (6 + flights) + 20;
 
         panel = XRUi.CreateWorldCanvas("StairEditPanel", new Vector2(PW, ph), PScale);
         var t = panel.transform;
@@ -661,6 +661,16 @@ public class StairEditTool : MonoBehaviour
             XRUi.CreateButton(t, "+", PW - 20 - 90, y, 90, RowH, () => Change(s => SetRisers(s, fi, +1)), 30);
             y += RowH + Gap;
         }
+        // the whole stair in small steps (a re-scanned room can leave it a little off): 'forward' = the way the first flight runs
+        float b4 = (fullW - Gap * 3) / 4f;
+        string[] moveLabel = { "Back 10 cm", "Forward 10 cm", "Left 10 cm", "Right 10 cm" };
+        Action[] move = { () => Nudge(-0.1f, 0f), () => Nudge(0.1f, 0f), () => Nudge(0f, -0.1f), () => Nudge(0f, 0.1f) };
+        for (int k = 0; k < 4; k++) XRUi.CreateButton(t, moveLabel[k], x0 + (b4 + Gap) * k, y, b4, RowH, move[k], 18);
+        y += RowH + Gap;
+        float b2 = (fullW - Gap) / 2f;
+        XRUi.CreateButton(t, "Turn left 5\u00B0", x0, y, b2, RowH, () => TurnBy(-5f), 20);
+        XRUi.CreateButton(t, "Turn right 5\u00B0", x0 + b2 + Gap, y, b2, RowH, () => TurnBy(5f), 20);
+        y += RowH + Gap;
         float w3 = (fullW - Gap * 2) / 3f;
         XRUi.CreateButton(t, "New stair", x0, y, w3, RowH, () => { StartNew(); RebuildPanel(); }, 22);
         var del = XRUi.CreateButton(t, "Delete", x0 + w3 + Gap, y, w3, RowH, Delete, 22);
@@ -773,6 +783,35 @@ public class StairEditTool : MonoBehaviour
         {
             var s = e.stairs.FirstOrDefault(x => x.id == id);
             if (s != null) mutate(s);
+        });
+    }
+
+    static Vector3 V(Vector3Data d) => new Vector3(d.x, d.y, d.z);
+
+    /// <summary>Moves the whole stair (room-local plan) 'forward' along its first flight and 'right' across it, in metres.</summary>
+    void Nudge(float forward, float right)
+    {
+        Change(s =>
+        {
+            if (s.localPoints.Count < 2) return;
+            Vector3 a = V(s.localPoints[0]), b = V(s.localPoints[1]);
+            Vector3 along = new Vector3(b.x - a.x, 0f, b.z - a.z);
+            if (along.sqrMagnitude < 1e-6f) return;
+            along.Normalize();
+            Vector3 d = along * forward + Vector3.Cross(Vector3.up, along) * right;
+            for (int i = 0; i < s.localPoints.Count; i++) s.localPoints[i] = new Vector3Data(V(s.localPoints[i]) + d);
+        });
+    }
+
+    /// <summary>Turns the whole stair about its first point, degrees (positive = clockwise seen from above).</summary>
+    void TurnBy(float deg)
+    {
+        Change(s =>
+        {
+            if (s.localPoints.Count < 2) return;
+            Vector3 pivot = V(s.localPoints[0]);
+            var q = Quaternion.AngleAxis(deg, Vector3.up);
+            for (int i = 0; i < s.localPoints.Count; i++) s.localPoints[i] = new Vector3Data(pivot + q * (V(s.localPoints[i]) - pivot));
         });
     }
 
