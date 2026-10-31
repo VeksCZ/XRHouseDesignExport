@@ -356,13 +356,50 @@ public static class StairGeometry
     /// </summary>
     public static Mesh CutHoles(Mesh mesh, List<Vector2[]> rects, float minY, float maxY)
     {
-        var v = mesh.vertices;
-        var t = mesh.triangles;
         var col = mesh.colors; // shaded (walk-through) meshes carry their colour per vertex - keep it
-        bool hasCol = col.Length == v.Length;
-        var outV = new List<Vector3>();
-        var outT = new List<int>();
-        var outC = new List<Color>();
+        if (!CutCore(mesh.vertices, mesh.triangles, col, rects, minY, maxY, out var outV, out var outT, out var outC)) return null;
+        var m = new Mesh { name = mesh.name + "_cut", indexFormat = outV.Count > 65535 ? UnityEngine.Rendering.IndexFormat.UInt32 : UnityEngine.Rendering.IndexFormat.UInt16 };
+        m.SetVertices(outV);
+        if (outC.Count == outV.Count) m.SetColors(outC);
+        m.SetTriangles(outT, 0);
+        m.RecalculateNormals();
+        m.RecalculateBounds();
+        return m;
+    }
+
+    /// <summary>The same cut for a part of the exported model data (OBJ / GLB): a copy of 'part' with the openings cut out
+    /// of its near-horizontal triangles, or null if nothing was cut.</summary>
+    public static XRMeshPart CutHoles(XRMeshPart part, List<Vector2[]> rects, float minY, float maxY)
+    {
+        if (!CutCore(part.vertices.ToArray(), part.triangles.ToArray(), null, rects, minY, maxY, out var outV, out var outT, out _)) return null;
+        return new XRMeshPart { name = part.name, materialName = part.materialName, color = part.color, vertices = outV, triangles = outT };
+    }
+
+    /// <summary>Where the user's openings (Hole tool) lie in model space: footprint rectangle + the height band they cut.</summary>
+    public static List<(List<Vector2[]> rects, float minY, float maxY)> HoleCuts(HouseEdits edits, List<MRUKRoom> rooms, float yaw, Vector3 center)
+    {
+        var holes = new List<(List<Vector2[]> rects, float minY, float maxY)>();
+        if (edits?.holes == null) return holes;
+        Quaternion gRot = Quaternion.Euler(0, yaw, 0);
+        foreach (var h in edits.holes)
+        {
+            if (!HoleWorld(h, rooms, out var a, out var b)) continue;
+            Vector3 ma = gRot * (a - center), mb = gRot * (b - center);
+            float x0 = Mathf.Min(ma.x, mb.x), x1 = Mathf.Max(ma.x, mb.x), z0 = Mathf.Min(ma.z, mb.z), z1 = Mathf.Max(ma.z, mb.z);
+            var rect = new[] { new Vector2(x0, z0), new Vector2(x1, z0), new Vector2(x1, z1), new Vector2(x0, z1) };
+            float y = (ma.y + mb.y) / 2f;
+            holes.Add((new List<Vector2[]> { rect }, y - 0.6f, y + 0.6f));
+        }
+        return holes;
+    }
+
+    static bool CutCore(Vector3[] v, int[] t, Color[] col, List<Vector2[]> rects, float minY, float maxY,
+                        out List<Vector3> outV, out List<int> outT, out List<Color> outC)
+    {
+        bool hasCol = col != null && col.Length == v.Length;
+        outV = new List<Vector3>();
+        outT = new List<int>();
+        outC = new List<Color>();
         bool changed = false;
         for (int i = 0; i + 2 < t.Length; i += 3)
         {
@@ -394,14 +431,7 @@ public static class StairGeometry
                     if (hasCol) { outC.Add(triCol); outC.Add(triCol); outC.Add(triCol); }
                 }
         }
-        if (!changed) return null;
-        var m = new Mesh { name = mesh.name + "_cut", indexFormat = outV.Count > 65535 ? UnityEngine.Rendering.IndexFormat.UInt32 : UnityEngine.Rendering.IndexFormat.UInt16 };
-        m.SetVertices(outV);
-        if (outC.Count == outV.Count) m.SetColors(outC);
-        m.SetTriangles(outT, 0);
-        m.RecalculateNormals();
-        m.RecalculateBounds();
-        return m;
+        return changed;
     }
 
     static void Emit(List<Vector3> v, List<int> t, Vector3 a, Vector3 b, Vector3 c)
@@ -519,16 +549,7 @@ public class StairsInModel
             group.parts.AddRange(StairGeometry.Parts(r, yaw, center));
         }
         // Openings the user drew themselves (Hole tool): square to the walls in model space.
-        if (edits.holes != null)
-            foreach (var h in edits.holes)
-            {
-                if (!StairGeometry.HoleWorld(h, rooms, out var a, out var b)) continue;
-                Vector3 ma = gRot * (a - center), mb = gRot * (b - center);
-                float x0 = Mathf.Min(ma.x, mb.x), x1 = Mathf.Max(ma.x, mb.x), z0 = Mathf.Min(ma.z, mb.z), z1 = Mathf.Max(ma.z, mb.z);
-                var rect = new[] { new Vector2(x0, z0), new Vector2(x1, z0), new Vector2(x1, z1), new Vector2(x0, z1) };
-                float y = (ma.y + mb.y) / 2f;
-                holes.Add((new List<Vector2[]> { rect }, y - 0.6f, y + 0.6f));
-            }
+        holes.AddRange(StairGeometry.HoleCuts(edits, rooms, yaw, center));
 
         stairsGo = UnityModelLoader.LoadToScene(model, shaded);
         if (stairsGo)

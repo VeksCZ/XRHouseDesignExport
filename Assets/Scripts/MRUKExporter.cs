@@ -621,8 +621,21 @@ public class MRUKExporter : MonoBehaviour
     /// </summary>
     static void AddStairs(XRHouseModel model, List<MRUKRoom> rooms, float yaw, Vector3 center)
     {
-        var stairs = HouseEditsStore.Current?.stairs;
-        if (model == null || stairs == null || stairs.Count == 0) return;
+        var edits = HouseEditsStore.Current;
+        if (model == null || edits == null) return;
+        // the openings the user drew (Hole tool) are cut out of the exported floors, as in the live view
+        var holes = StairGeometry.HoleCuts(edits, rooms, yaw, center);
+        if (holes.Count > 0)
+            foreach (var room in model.rooms)
+                for (int i = 0; i < room.parts.Count; i++)
+                {
+                    if (room.parts[i] == null || room.parts[i].name == null || !room.parts[i].name.StartsWith("FLOOR")) continue;
+                    XRMeshPart cut = room.parts[i];
+                    foreach (var (rects, minY, maxY) in holes) cut = StairGeometry.CutHoles(cut, rects, minY, maxY) ?? cut;
+                    room.parts[i] = cut;
+                }
+        var stairs = edits.stairs;
+        if (stairs == null || stairs.Count == 0) return;
         var group = new XRRoomModel { roomName = "Stairs" };
         foreach (var s in stairs)
         {

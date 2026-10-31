@@ -36,6 +36,11 @@ namespace UnityEngine {
     public static Quaternion identity => new Quaternion(0, 0, 0, 1);
     public static Quaternion AngleAxis(float deg, Vector3 axis) { axis = axis.normalized; float h = deg * Mathf.Deg2Rad / 2f; float s = Mathf.Sin(h); return new Quaternion(axis.x * s, axis.y * s, axis.z * s, Mathf.Cos(h)); }
     public static Quaternion Inverse(Quaternion q) => new Quaternion(-q.x, -q.y, -q.z, q.w);
+    public static Quaternion Euler(float x, float y, float z) { var qx = AngleAxis(x, Vector3.right); var qy = AngleAxis(y, Vector3.up); var qz = AngleAxis(z, Vector3.forward); return qy * qx * qz; }
+    public static Quaternion Euler(Vector3 e) => Euler(e.x, e.y, e.z);
+    public static Quaternion LookRotation(Vector3 forward) => identity; public static Quaternion LookRotation(Vector3 forward, Vector3 up) => identity;
+    public static Quaternion FromToRotation(Vector3 a, Vector3 b) => identity; public static Quaternion Slerp(Quaternion a, Quaternion b, float t) => a;
+    public Vector3 eulerAngles => new Vector3(0, 0, 0);
     public static Quaternion operator *(Quaternion a, Quaternion b) => new Quaternion(
       a.w * b.x + a.x * b.w + a.y * b.z - a.z * b.y, a.w * b.y + a.y * b.w + a.z * b.x - a.x * b.z,
       a.w * b.z + a.z * b.w + a.x * b.y - a.y * b.x, a.w * b.w - a.x * b.x - a.y * b.y - a.z * b.z);
