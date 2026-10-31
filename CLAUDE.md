@@ -15,6 +15,12 @@ and exports 3D models, floor plans and reports from the scan.
     `%USERPROFILE%\.xrhouse\meta.json` on the user's PC - in a cloud session none of that exists: say so, give the two
     commands, don't pretend it ran.
   - `ship` = `cip` + `rel` (commit, push, then release).
+- **UI text**: short and factual - what it does and how to use it (which button / trigger / stick), no long paragraphs.
+  Main-menu buttons carry a one-line subtitle in the muted colour (`<size=72%><color=#9aa6b8>...`).
+- **Platform versions** (checked 2026-10-31): Unity 6000.3 LTS (6.3) stays - 6.6 is still alpha, the Oculus XR plugin is
+  deprecated from 6.5 (we use OpenXR via Meta XR Core), 6.6 raises the Android minimum to OpenGLES 3.1 (we build Vulkan
+  first). Meta XR Core / MRUK 205 in use, Core 207 exists (upgrade when convenient, read its notes first). Passthrough
+  camera = MRUK `PassthroughCameraAccess` (the current API; `WebCamTexture` is the old one).
 - **Always target the newest available Meta Quest / Meta XR SDK (and MRUK) APIs**, not
   older/deprecated patterns. When in doubt, check current Meta docs/SDK versions rather
   than relying on possibly-stale knowledge. `Packages/manifest.json` pins the SDK version

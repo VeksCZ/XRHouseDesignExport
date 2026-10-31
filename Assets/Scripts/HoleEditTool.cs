@@ -299,8 +299,8 @@ public class HoleEditTool : MonoBehaviour
         };
         string hint = state switch
         {
-            State.CornerA => "Trigger on the ceiling from below, or on the upper floor from above. Corners snap onto nearby walls.",
-            State.CornerB => "Trigger at the opposite corner. The rectangle is square to the walls and cuts ceiling and floor.",
+            State.CornerA => "Trigger on the ceiling from below or on the floor above from the top. Corners snap to walls.",
+            State.CornerB => "Trigger at the opposite corner. The opening cuts the ceiling and the floor above it.",
             _ => "Trigger on an opening to select it.",
         };
         XRUi.CreateText(t, "Title", title, 22, TextAlignmentOptions.MidlineLeft, x0, y, fullW, 44, XRUi.TextColor, FontStyles.Bold);

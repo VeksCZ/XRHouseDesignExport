@@ -885,12 +885,12 @@ public class RouteEditTool : MonoBehaviour
         string sel = tr != null && r == null && SelRoute != null ? $"<b>Picked:</b> {RouteStyle.Name(tr.kind)} {RouteLength(tr)} {RouteStyle.Describe(tr)}\n"
                    : tm != null ? $"<b>Picked:</b> {tm.type}{(string.IsNullOrEmpty(tm.circuit) ? "" : ", circuit " + tm.circuit)}\n" : "";
         SetHint(sel + (r != null
-            ? "Trigger on every bend and on the end. A point near another route joins it. Finish route (or trigger twice on the same spot) when done."
-            : deleteMode ? "Point at the route or box to delete and pull the trigger. Undo brings it back."
-            : joinMode ? "Joins two routes into one - e.g. a pipe drawn in two rooms on both sides of a wall: trigger near the end of one, then near the end of the other. Undo splits them again."
-            : markerMode ? "Trigger on the wall/floor where the box, socket or outlet is. Colour = the kind picked above."
-            : pickMode ? "Point at a route or a box and pull the trigger - then Spec, Circuit and Leads to change it."
-            : "Pick the kind, then trigger on the start of a pipe or cable. Points snap to boxes, straight above/below them and to the levels of other routes (white cursor). Pick... to label an existing route."));
+            ? "Trigger at every bend and at the end. A point near another route joins it. Finish route when done."
+            : deleteMode ? "Trigger on a route or box to delete it. Undo brings it back."
+            : joinMode ? "Join two routes into one (e.g. a pipe traced from both sides of a wall): trigger near the end of one, then near the end of the other."
+            : markerMode ? "Trigger on the wall or floor where the box or socket is. Colour = the kind picked above."
+            : pickMode ? "Trigger on a route or box, then change its Spec, Circuit and Leads to."
+            : "Pick the kind, then trigger at the start of a pipe or cable. Points snap to boxes, to the spot straight above/below them and to the levels of other routes (white cursor)."));
     }
 
     static string RouteLength(PipeRoute r)

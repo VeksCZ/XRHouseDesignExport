@@ -602,12 +602,12 @@ public class StairEditTool : MonoBehaviour
             };
             string hint = state switch
             {
-                State.Corner1 => "Trigger on the floor at ONE corner of the bottom step. Next to a wall it snaps onto the wall and the stairs will run along it.",
-                State.Corner2 => "Trigger at the OTHER corner - sets the width (stops on the opposite wall if there is one). The stairs run away from you.",
+                State.Corner1 => "Trigger on the floor at one corner of the bottom step. Next to a wall it snaps to the wall.",
+                State.Corner2 => "Trigger at the other corner. This sets the width; the stairs run away from you.",
                 State.FlightEnd => pts.Count == 1
-                    ? "Point along the stairs to the end of this flight and pull the trigger - or build a whole U stair (3 steps, landing, turn, the rest, landing, turn, 3 steps)."
-                    : "Point along the stairs to the end of this flight (works through walls) and pull the trigger.",
-                _ => "Add a landing turning left or right (it snaps against a wall right behind it), or finish here if this is the top.",
+                    ? "Point along the stairs to the end of this flight and trigger - or build a whole U stair."
+                    : "Point to the end of this flight (works through walls) and trigger.",
+                _ => "Add a landing (left or right turn; snaps to a wall behind it), or Finish if this is the top.",
             };
             XRUi.CreateText(t, "Title", title, 22, TextAlignmentOptions.MidlineLeft, x0, y, fullW, 44, XRUi.TextColor, FontStyles.Bold);
             y += 52;
@@ -643,8 +643,8 @@ public class StairEditTool : MonoBehaviour
         string info = r != null ? $"{sel.risers.Sum()} steps x {r.rise * 100f:0.0} cm = {r.topY - r.bottomY:0.00} m, {Mathf.Atan2(r.rise, r.tread) * Mathf.Rad2Deg:0} deg" : "";
         XRUi.CreateText(t, "Title", $"Stair  {info}", 22, TextAlignmentOptions.MidlineLeft, x0, y, fullW, 44, XRUi.TextColor, FontStyles.Bold);
         y += 52;
-        XRUi.CreateText(t, "Sticks", "Hold LEFT grip:  left stick up/down = length of the white flight, sideways = width.  " +
-                        "Right stick up/down = one step more/less here (taken from / given to the longest other flight), sideways = next flight.", 17, TextAlignmentOptions.TopLeft, x0, y, fullW, 58, XRUi.MutedText);
+        XRUi.CreateText(t, "Sticks", "Hold the LEFT grip: left stick up/down = flight length, sideways = width. " +
+                        "Right stick up/down = one step more/less, sideways = next flight.", 17, TextAlignmentOptions.TopLeft, x0, y, fullW, 58, XRUi.MutedText);
         y += 64;
         WidthRow(t, ref y, sel.width, d => Change(s => s.width = Mathf.Clamp(s.width + d, 0.6f, 2.0f)));
         float tr = StairGeometry.TreadOf(sel);

@@ -166,34 +166,34 @@ public class XRMenu : MonoBehaviour
 
         // ---- View: how you look at the house ----
         XRUi.CreateCaption(view, "Show", Pad, y0 - cap, ContentW);
-        walkButton = XRUi.CreateButton(view, "Walk", X2(0), y0, w2, h, OnToggleWalk, 24);
-        dollhouseButton = XRUi.CreateButton(view, "Dollhouse", X2(1), y0, w2, h, OnToggleHouseView, 24);
-        plansButton = XRUi.CreateButton(view, "Floor plans", X2(0), y0 + h + gap, w2, h, OnShowPlans, 24);
-        miniMapButton = XRUi.CreateButton(view, "Minimap", X2(1), y0 + h + gap, w2, h, OnToggleMiniMap, 24);
+        walkButton = XRUi.CreateButton(view, "Walk\n<size=72%><color=#9aa6b8>walk inside the model</color></size>", X2(0), y0, w2, h, OnToggleWalk, 24);
+        dollhouseButton = XRUi.CreateButton(view, "Dollhouse\n<size=72%><color=#9aa6b8>small model to look at</color></size>", X2(1), y0, w2, h, OnToggleHouseView, 24);
+        plansButton = XRUi.CreateButton(view, "Floor plans\n<size=72%><color=#9aa6b8>rooms, names, sizes</color></size>", X2(0), y0 + h + gap, w2, h, OnShowPlans, 24);
+        miniMapButton = XRUi.CreateButton(view, "Minimap\n<size=72%><color=#9aa6b8>tap a room to jump there</color></size>", X2(1), y0 + h + gap, w2, h, OnToggleMiniMap, 24);
         float m0 = y0 + 2 * (h + gap) + cap + 8;
         XRUi.CreateCaption(view, "Model", Pad, m0 - cap, ContentW);
         modeButton = XRUi.CreateButton(view, "", X2(0), m0, w2, h, OnCycleDollhouseMode, 22);
         nextFloorButton = XRUi.CreateButton(view, "Next floor", X2(1), m0, w2, h, OnNextFloor, 22);
-        finishedButton = XRUi.CreateButton(view, "Finished floors", X2(0), m0 + h + gap, w2, h, () => SetFinished(!Furniture.Finished), 22);
+        finishedButton = XRUi.CreateButton(view, "Finished floors\n<size=72%><color=#9aa6b8>off = bare shell, for pipes</color></size>", X2(0), m0 + h + gap, w2, h, () => SetFinished(!Furniture.Finished), 22);
 
         // ---- Layers: what is drawn on the walls (real walls, Walk and Dollhouse alike) ----
         layersText = XRUi.CreateText(layers, "Where", "", 18, TextAlignmentOptions.TopLeft, Pad + 4, y0 - cap, ContentW - 8, 56, XRUi.MutedText);
         float l0 = y0 + 36;
         float LY(int r) => l0 + r * (h + gap);
-        wallScanButton = XRUi.CreateButton(layers, "Wall scan", X2(0), LY(0), w2, h, () =>
+        wallScanButton = XRUi.CreateButton(layers, "Wall scan\n<size=72%><color=#9aa6b8>photos of the bare walls</color></size>", X2(0), LY(0), w2, h, () =>
         {
             WallOverlays.ShowScan = !WallOverlays.ShowScan;
             AddLog(WallOverlays.ShowScan ? "Wall scan on: the 3D scan of the bare walls painted on them (holes = not scanned yet)." : "Wall scan off.");
         }, 24);
-        showRoutesButton = XRUi.CreateButton(layers, "Routes", X2(1), LY(0), w2, h, () => WallOverlays.ShowRoutes = !WallOverlays.ShowRoutes, 24);
-        zonesButton = XRUi.CreateButton(layers, "No-drill zones", X2(0), LY(1), w2, h, () =>
+        showRoutesButton = XRUi.CreateButton(layers, "Routes\n<size=72%><color=#9aa6b8>traced pipes and cables</color></size>", X2(1), LY(0), w2, h, () => WallOverlays.ShowRoutes = !WallOverlays.ShowRoutes, 24);
+        zonesButton = XRUi.CreateButton(layers, "No-drill zones\n<size=72%><color=#9aa6b8>bands around routes</color></size>", X2(0), LY(1), w2, h, () =>
         {
             WallOverlays.ShowZones = !WallOverlays.ShowZones;
             if (WallOverlays.ShowZones && !WallOverlays.ShowRoutes) WallOverlays.ShowRoutes = true;
             AddLog(WallOverlays.ShowZones ? $"No-drill zones: {WallOverlays.ZoneMargin * 100:0} cm either side of every route and box." : "No-drill zones off.");
         }, 24);
-        photoMarkersButton = XRUi.CreateButton(layers, "Photo markers", X2(1), LY(1), w2, h, () => WallOverlays.ShowPhotoIcons = !WallOverlays.ShowPhotoIcons, 24);
-        showPhotosButton = XRUi.CreateButton(layers, "Photos on walls", X2(0), LY(2), w2, h, () => WallOverlays.ShowPhotos = !WallOverlays.ShowPhotos, 24);
+        photoMarkersButton = XRUi.CreateButton(layers, "Photo markers\n<size=72%><color=#9aa6b8>where photos were taken</color></size>", X2(1), LY(1), w2, h, () => WallOverlays.ShowPhotoIcons = !WallOverlays.ShowPhotoIcons, 24);
+        showPhotosButton = XRUi.CreateButton(layers, "Photos on walls\n<size=72%><color=#9aa6b8>cable photos on the wall</color></size>", X2(0), LY(2), w2, h, () => WallOverlays.ShowPhotos = !WallOverlays.ShowPhotos, 24);
         fittingsButton = XRUi.CreateButton(layers, "Fittings\n<size=72%><color=#9aa6b8>real walls only</color></size>", X2(1), LY(2), w2, h, OnToggleFittings, 24);
         scanOverlayButton = XRUi.CreateButton(layers, "Scan outline\n<size=72%><color=#9aa6b8>real walls only</color></size>", X2(0), LY(3), w2, h, OnToggleScanOverlay, 24);
 
@@ -217,7 +217,7 @@ public class XRMenu : MonoBehaviour
         ToolButton(EditModeController.Tool.Furniture, "Furniture", 0, t2);
         ToolButton(EditModeController.Tool.Measure, "Measure", 1, t2);
         ToolButton(EditModeController.Tool.Sun, "Sun", 2, t2);
-        XRUi.CreateText(tools, "Hint", "The active tool is blue - press it again to leave. Hold Y = leave any tool.", 17, TextAlignmentOptions.Center, Pad, t2 + h + 10, ContentW, 30, XRUi.MutedText);
+        XRUi.CreateText(tools, "Hint", "Pick a tool - it turns blue. Press it again, or hold Y, to leave it.", 17, TextAlignmentOptions.Center, Pad, t2 + h + 10, ContentW, 30, XRUi.MutedText);
 
         // ---- Data: keep and hand over; the destructive ones apart below ----
         XRUi.CreateCaption(data, "This scan", Pad, y0 - cap, ContentW);
@@ -227,9 +227,9 @@ public class XRMenu : MonoBehaviour
         pendingText = XRUi.CreateText(data, "PendingHint", "", 18, TextAlignmentOptions.TopLeft, Pad + 4, y0 + 2 * (h + gap), ContentW - 8, 52, XRUi.MutedText);
         float d1 = y0 + 2 * (h + gap) + 52 + cap + 8;
         XRUi.CreateCaption(data, "Clean up", Pad, d1 - cap, ContentW);
-        var deleteExportsButton = XRUi.CreateButton(data, "Delete exports", X2(0), d1, w2, h, OnDeleteExports, 22);
+        var deleteExportsButton = XRUi.CreateButton(data, "Delete exports\n<size=72%><color=#9aa6b8>frees space on the headset</color></size>", X2(0), d1, w2, h, OnDeleteExports, 22);
         XRUi.SetTint(deleteExportsButton, XRUi.ButtonDangerColor);
-        XRUi.CreateText(data, "ScansHint", "Scans: open the list at the top - each has its bin, old copies are marked.", 17, TextAlignmentOptions.MidlineLeft, X2(1) + 6, d1, w2 - 6, h, XRUi.MutedText);
+        XRUi.CreateText(data, "ScansHint", "Scans: tap the name at the top. Each row has a bin; an old copy is one a newer scan already covers.", 17, TextAlignmentOptions.MidlineLeft, X2(1) + 6, d1, w2 - 6, h, XRUi.MutedText);
 
         foreach (var b in new[] { walkButton, dollhouseButton, plansButton, miniMapButton, showRoutesButton, showPhotosButton, fittingsButton, scanOverlayButton, zonesButton, wallScanButton, photoMarkersButton })
             XRUi.SetToggle(b, false);
@@ -695,7 +695,7 @@ public class XRMenu : MonoBehaviour
     {
         if (alignButton == null || exporter == null) return;
         bool onLive = exporter.SelectedSource == MRUKExporter.LiveSource;
-        XRUi.SetLabel(alignButton, onLive ? "Align to real walls (live scan is always here)" : "Align to real walls");
+        XRUi.SetLabel(alignButton, onLive ? "Align to real walls\n<size=72%><color=#9aa6b8>the live scan is always aligned</color></size>" : "Align to real walls\n<size=72%><color=#9aa6b8>match this scan to the room you stand in</color></size>");
         if (onLive) XRUi.SetTint(alignButton, XRUi.ButtonDisabled);
         else XRUi.SetToggle(alignButton, exporter.AlignEnabled);
     }
@@ -799,8 +799,8 @@ public class XRMenu : MonoBehaviour
         XRUi.SetLabel(saveButton, live ? "Save live scan" : "Saved automatically");
         XRUi.SetTint(exportButton, export ? XRUi.ButtonWarnColor : XRUi.ButtonColor);
         string s1 = live
-            ? (save ? (liveEdits ? "Edits on the live scan are not saved yet - Save live scan keeps them with a new scan. " : "Quest has rooms no saved scan has - Save live scan keeps them. ") : "The live scan is saved. ")
-            : "Edits, routes and names of this scan save by themselves. ";
+            ? (save ? (liveEdits ? "Edits on the live scan are not saved. Save live scan keeps them in a new scan. " : "The live scan has rooms no saved scan has. Save live scan keeps them. ") : "The live scan is saved. ")
+            : "This scan saves its edits, routes and names by itself. ";
         pendingText.text = s1 + (export ? $"Not exported yet: {what}." : "Exported.");
         if (tabButtons != null) XRUi.SetLabel(tabButtons[3], save || export ? "Data <color=#ffb050>•</color>" : "Data");
     }

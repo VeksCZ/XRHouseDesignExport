@@ -1184,8 +1184,8 @@ public class WallPhotoCapture : MonoBehaviour
         else roomText.text = "Outside the scanned rooms";
         if (!statusText.text.StartsWith("<color=red>"))
             statusText.text = dense
-                ? "Look around slowly - it records by itself, only views that add something. Blue = not scanned yet; it fades as you look at it. Done when the walls are clear. Trigger = a single photo."
-                : "Look at a bare wall, floor or ceiling and hold still - it clicks by itself. Trigger = photo now. Green outline = already covered, red patches = not photographed yet.";
+                ? "Look around slowly; it records by itself. Blue = not scanned yet, it fades as you look. Done when no blue is left. Trigger = a single photo."
+                : "Look at a bare wall, floor or ceiling and hold still; it shoots by itself. Trigger = photo now. Green = covered, red = still missing.";
 
         XRUi.SetToggle(coverageButton, showCoverage);
     }
@@ -1247,7 +1247,7 @@ public class WallPhotoCapture : MonoBehaviour
         hudFrame.color = new Color(1, 1, 1, now < flashUntil ? 0.85f : 0f);
         if (now < tipUntil)
         {
-            SetHud("<size=26>Look at a bare wall and hold still - it clicks by itself.\nGreen outline = done.  Panel above your left hand.</size>");
+            SetHud("<size=26>Look at a bare wall and hold still; it shoots by itself.\nGreen outline = covered.</size>");
             return;
         }
         if (now < flashUntil && flashText != null) { SetHud(flashText); return; }
