@@ -255,13 +255,19 @@ public static class WallScan
             bool fresh = !p.Allocated;
             Graphics.Blit(photo, p.acc, mat, 0);
             p.acc.GenerateMips();
-            if (fresh) Version++;   // a plane that had nothing now has a texture - the views add its quad
+            if (fresh) { versionDirty = true; if (!Building) BumpVersion(); }   // a plane that had nothing now has a texture - the views add its quad
             if (key != null) p.frames.Add(key);
             p.dirty = true;
             any = true;
         }
         return any;
     }
+
+    static bool versionDirty;
+    static float lastBump;
+    /// <summary>Tells the views to rebuild their quads. While the background build runs it is at most once every 1.5 s:
+    /// every rebuild redoes all overlays, and a new plane gets its first frame every few frames.</summary>
+    static void BumpVersion() { Version++; versionDirty = false; lastBump = Time.realtimeSinceStartup; }
 
     const int MaxOccluders = 24;
     /// <summary>Tests: log which plane hides another from a frame.</summary>
@@ -306,8 +312,10 @@ public static class WallScan
                 catch (Exception e) { Debug.LogWarning($"[WallScan] {t.jpg}: {e.Message}"); }
                 done++;
                 if (done % 60 == 0) SaveAll();
+                if (versionDirty && Time.realtimeSinceStartup - lastBump > 1.5f) BumpVersion();
                 yield return null;
             }
+            if (versionDirty) BumpVersion();
             SaveAll();
             Debug.Log($"[WallScan] added {done} frame(s)");
             Status = "";
