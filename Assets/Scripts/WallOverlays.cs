@@ -104,12 +104,27 @@ public class WallOverlays : MonoBehaviour
     static int toggleVersion;
     static void Bump() => toggleVersion++;
 
+    /// <summary>What an overlay set was built from. Compared every frame, so a struct (a formatted string was ~150 bytes of
+    /// garbage per context per frame); the pose is compared with the same tolerance the old text had.</summary>
+    readonly struct Stamp : IEquatable<Stamp>
+    {
+        readonly int rootId, routeVer, photoVer, scanVer, toggleVer, flags;
+        readonly float yaw; readonly Vector3 center; readonly string sceneSig;
+        public Stamp(int rootId, float yaw, Vector3 center, string sceneSig, int routeVer, int photoVer, int scanVer, int toggleVer, int flags)
+        { this.rootId = rootId; this.yaw = yaw; this.center = center; this.sceneSig = sceneSig; this.routeVer = routeVer; this.photoVer = photoVer; this.scanVer = scanVer; this.toggleVer = toggleVer; this.flags = flags; }
+        public bool Equals(Stamp o) => rootId == o.rootId && routeVer == o.routeVer && photoVer == o.photoVer && scanVer == o.scanVer
+            && toggleVer == o.toggleVer && flags == o.flags && sceneSig == o.sceneSig
+            && Mathf.Abs(Mathf.DeltaAngle(yaw, o.yaw)) < 0.0005f && (center - o.center).sqrMagnitude < 0.0025f;
+        public override bool Equals(object obj) => obj is Stamp s && Equals(s);
+        public override int GetHashCode() => rootId;
+    }
+
     class Ctx
     {
         public string name;
         public GameObject go, routesGo, photosGo;
         public Transform root; public float yaw; public Vector3 center;
-        public string stamp;
+        public Stamp stamp;
         public readonly List<Mesh> meshes = new List<Mesh>();
         /// <summary>Photos still waiting for their texture: hidden until it is there (no grey placeholders).</summary>
         public readonly List<(Photo photo, MeshRenderer mr)> waiting = new List<(Photo, MeshRenderer)>();
@@ -204,8 +219,9 @@ public class WallOverlays : MonoBehaviour
     void Sync(Ctx ctx, Transform root, float yaw, Vector3 center, bool routes, bool pics, bool fittings = false, bool scan = false)
     {
         if (!routes && !pics && !fittings && !scan && !ShowPhotoIcons) { Clear(ctx); return; }
-        string stamp = $"{(root ? root.GetInstanceID() : 0)}|{yaw:F3}|{center}|{sceneSig}|{RouteStore.Version}|{photoVersion}|{routes}|{pics}|{fittings}|{ShowZones}|{ShowPhotoIcons}|{scan}|{WallScan.Version}|{toggleVersion}";
-        if (ctx.go != null && stamp == ctx.stamp) return;
+        int flags = (routes ? 1 : 0) | (pics ? 2 : 0) | (fittings ? 4 : 0) | (ShowZones ? 8 : 0) | (ShowPhotoIcons ? 16 : 0) | (scan ? 32 : 0);
+        var stamp = new Stamp(root ? root.GetInstanceID() : 0, yaw, center, sceneSig, RouteStore.Version, photoVersion, WallScan.Version, toggleVersion, flags);
+        if (ctx.go != null && stamp.Equals(ctx.stamp)) return;
         Clear(ctx);
         float t0 = Time.realtimeSinceStartup;
         ctx.stamp = stamp; ctx.root = root; ctx.yaw = yaw; ctx.center = center;
@@ -240,7 +256,7 @@ public class WallOverlays : MonoBehaviour
         ctx.meshes.Clear();
         ctx.waiting.Clear();
         ctx.go = ctx.routesGo = ctx.photosGo = null;
-        ctx.stamp = null;
+        ctx.stamp = default;
     }
 
     static MeshRenderer AddRenderer(GameObject go, Mesh mesh, Material mat)
