@@ -613,13 +613,6 @@ public class MRUKExporter : MonoBehaviour
     public void EditorFastBuildAndInstall() => MRUKEditorTools.BuildAPKFast();
 #endif
 
-    /// <summary>
-    /// The exported model (OBJ/GLB) had no stairs at all: StairsInModel only adds their geometry to a live Unity
-    /// GameObject (the walk-through/Dollhouse), never to the XRHouseModel data the exporter writes out. Adds the
-    /// same step/landing meshes (StairGeometry.Parts) as their own "Stairs" room group here, so every exported
-    /// flavour actually shows the stairs the user drew. Floor/ceiling stairwell holes (Hole tool) still aren't cut
-    /// into these static exports - only the live view does that - so a floor may show solid under a drawn opening.
-    /// </summary>
     /// <summary>16_Model_Wall_Photos.glb: the 3D wall scan (photos of the bare walls) as textured planes in the same frame as the
     /// other models, so the pipes and cables can be looked at on the PC in any glTF viewer next to the clean model.
     /// Nothing is written until the 3D scan tool has recorded something.</summary>
@@ -639,6 +632,10 @@ public class MRUKExporter : MonoBehaviour
 #endif
     }
 
+    /// <summary>
+    /// The exported model (OBJ/GLB): the stairs the user drew are added as their own "Stairs" room group (the same step/landing
+    /// meshes as the live view, StairGeometry.Parts), and the openings drawn with the Hole tool are cut out of the exported floors.
+    /// </summary>
     static void AddStairs(XRHouseModel model, List<MRUKRoom> rooms, float yaw, Vector3 center)
     {
         var edits = HouseEditsStore.Current;
