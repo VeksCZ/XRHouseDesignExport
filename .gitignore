@@ -169,3 +169,8 @@ __pycache__/
 # Offline dotnet checks (Tools/OfflineTests)
 /Tools/OfflineTests/**/bin/
 /Tools/OfflineTests/**/obj/
+
+# Offline full-compile check (Tools/OfflineTests/FullCompile)
+/Tools/OfflineTests/FullCompile/Auto.cs
+/Tools/OfflineTests/FullCompile/types.json
+/Tools/OfflineTests/FullCompile/last.txt

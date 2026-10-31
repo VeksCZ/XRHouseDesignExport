@@ -166,6 +166,10 @@ and exports 3D models, floor plans and reports from the scan.
   parses every script (syntax errors only) and `Tools/OfflineTests/WallTest` runs the Missing-wall logic (`MissingWall`,
   `SceneJsonEdit.AddWall`, V1 + V2 scan formats) against a synthetic room with stand-ins for the Unity types (`Stubs.cs`).
   Run `dotnet run -c Release` inside each folder; keep `WallTest` passing when touching those files.
+  `Tools/OfflineTests/FullCompile` (`python3 check.py [--base REV]`, ~30 s) compiles all scripts against generated stand-ins and
+  prints only the errors NEW since a known-good revision (the stand-ins make ~1400 errors of noise): it catches what the
+  syntax check can't - scope clashes (CS0136), unassigned locals, `Action` passed where `UnityAction` is wanted, wrong
+  argument types between project APIs. **Run it before every commit of C# code** (base = the last revision the PC compiled).
 - **Built-in modules**: unused ones (cloth, terrain, tilemap, wind, video...) are out of `manifest.json`;
   Meta's SDK needs `assetbundle`, `physics2d`, `particlesystem` and (Android) `director` without declaring them - keep
   those. `com.unity.xr.meta-openxr` (+ AR Foundation, XR Simulation assets) was removed - nothing used it; Meta XR Core
