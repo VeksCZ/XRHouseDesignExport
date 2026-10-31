@@ -19,6 +19,8 @@ public static class MRUKPathUtility
     public const string MODEL_RAW_OBJ = "24_Model_Raw_Scan.obj";
     public const string MODEL_DIM_OBJ = "25_Model_Analytical_Dimensioned.obj";
     public const string MODEL_MTL = "00_Materials.mtl";
+    /// <summary>The 3D wall scan (photos of the bare walls) as textured planes - open it next to the clean model.</summary>
+    public const string MODEL_PHOTOS_GLB = "16_Model_Wall_Photos.glb";
     
     public const string DATA_JSON = "90_Data_Rooms.json";
     public const string DATA_DUMP = "91_Data_Scene_Dump.txt";

@@ -565,6 +565,7 @@ public class MRUKExporter : MonoBehaviour
         Save(mRaw, session, MRUKPathUtility.MODEL_RAW_OBJ, MRUKPathUtility.MODEL_RAW_GLB); SetProgress(95, ui); await Task.Yield();
 
         File.WriteAllText(Path.Combine(session, MRUKPathUtility.MODEL_MTL), OBJWriter.GenerateMTL());
+        ExportPhotoModel(session, rooms, angle, LastHouseCenter, ui);
 
         ui?.AddLog("<color=cyan>[6/6] Per-room exports...</color>");
         // Everything the whole-house export has (all 4 model tiers, the HTML report), but scoped to just this
@@ -619,6 +620,25 @@ public class MRUKExporter : MonoBehaviour
     /// flavour actually shows the stairs the user drew. Floor/ceiling stairwell holes (Hole tool) still aren't cut
     /// into these static exports - only the live view does that - so a floor may show solid under a drawn opening.
     /// </summary>
+    /// <summary>16_Model_Wall_Photos.glb: the 3D wall scan (photos of the bare walls) as textured planes in the same frame as the
+    /// other models, so the pipes and cables can be looked at on the PC in any glTF viewer next to the clean model.
+    /// Nothing is written until the 3D scan tool has recorded something.</summary>
+    static void ExportPhotoModel(string session, List<MRUKRoom> rooms, float yaw, Vector3 center, XRMenu ui)
+    {
+#if META_XR_SDK_INSTALLED
+        try
+        {
+            var quads = WallScan.ExportQuads(rooms, yaw, center);
+            if (quads.Count == 0) { ui?.AddLog("Wall photos: nothing recorded yet (Tools > 3D scan) - no photo model."); return; }
+            byte[] glb = PhotoModelGlb.Write(quads);
+            if (glb == null) return;
+            File.WriteAllBytes(Path.Combine(session, MRUKPathUtility.MODEL_PHOTOS_GLB), glb);
+            ui?.AddLog($"<color=green>Wall photos: {quads.Count} plane(s), {glb.Length / 1048576f:0.0} MB -> {MRUKPathUtility.MODEL_PHOTOS_GLB}</color>");
+        }
+        catch (Exception ex) { Debug.LogException(ex); ui?.AddLog("<color=orange>Wall photo model failed: " + ex.Message + "</color>"); }
+#endif
+    }
+
     static void AddStairs(XRHouseModel model, List<MRUKRoom> rooms, float yaw, Vector3 center)
     {
         var edits = HouseEditsStore.Current;

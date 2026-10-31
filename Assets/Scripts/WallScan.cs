@@ -324,6 +324,30 @@ public static class WallScan
     }
 #endif
 
+    /// <summary>The planes that hold photos, as textured quads in model space (yaw / centre = the exported model's frame) for
+    /// PhotoModelGlb: each plane's saved PNG as it is (colour + coverage in alpha). Planes without photos are left out.</summary>
+    public static List<PhotoQuad> ExportQuads(List<MRUKRoom> rooms, float yaw, Vector3 center)
+    {
+        var res = new List<PhotoQuad>();
+        EnsurePlanes(rooms);
+        SaveAll();   // what is only in memory goes to disk first
+        var manifest = ReadManifest();
+        Quaternion g = Quaternion.Euler(0, yaw, 0);
+        Vector3 M(Vector3 w) => g * (w - center);
+        foreach (var p in planes.Values)
+        {
+            string png = Path.Combine(Root, p.id + ".png");
+            if (!File.Exists(png) || manifest.planes.All(e => e.id != p.id)) continue;
+            res.Add(new PhotoQuad
+            {
+                name = $"Wall scan {res.Count + 1} (room {p.roomUuid.Substring(0, Mathf.Min(8, p.roomUuid.Length))})",
+                p0 = M(p.origin), p1 = M(p.origin + p.axisU), p2 = M(p.origin + p.axisU + p.axisV), p3 = M(p.origin + p.axisV),
+                png = File.ReadAllBytes(png),
+            });
+        }
+        return res;
+    }
+
     /// <summary>Writes every changed plane (PNG: colour + coverage) and the manifest.</summary>
     public static void SaveAll()
     {

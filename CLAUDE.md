@@ -108,6 +108,10 @@ and exports 3D models, floor plans and reports from the scan.
   frame (`Plane.acc` allocates lazily, `HasData`; cover mode allocates all), has mips + aniso (`GenerateMips` after every
   paint), and a frame is only painted onto planes it sees (`FrameCulling.SeesPlane`). `WallScanShow` fills gaps of a few cm
   from mip 2 (`_FillLod`); big holes stay holes. Views rebuild at most every 1.5 s while the background build adds planes.
+  Export writes `16_Model_Wall_Photos.glb` (`MRUKExporter.ExportPhotoModel` -> `WallScan.ExportQuads` -> `PhotoModelGlb`): one
+  unlit, alpha-masked quad per photographed plane with its PNG embedded, same frame as the other models (open both in a viewer
+  to see pipes and cables on the bare walls). The writer is validated with the Khronos glTF validator (0 issues) and tested in
+  `Tools/OfflineTests/WallTest`; to re-validate: `npm i gltf-validator`, run it on the `photo_test.glb` the test writes.
 - **Per-frame cost** (Quest): no string building / LINQ / allocation in `Update` paths (overlay `Stamp` struct, `LastBlocker`
   on demand, menu sync ~10x/s); `MRUKDataProcessor.GetValidRooms` is cached per loaded scene - don't add callers that need
   fresh results mid-load (it is not cached while `MRUKExporter.Loading`).

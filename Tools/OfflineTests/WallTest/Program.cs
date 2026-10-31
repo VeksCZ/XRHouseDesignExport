@@ -172,5 +172,32 @@ class T {
       Check(!FrameCulling.SeesPlane(id, 1f, 1f, .5f, .5f, new Vector3(-2, 4, 3), new Vector3(4, 0, 0), new Vector3(0, 2, 0)), "a wall above the view is not");
     }
 
+    // ---- textured GLB of the wall scan ----
+    {
+      byte[] png = Convert.FromBase64String("iVBORw0KGgoAAAANSUhEUgAAAAQAAAAECAYAAACp8Z5+AAAAEklEQVR4nGM4UWHzHxkzkC4AAEKnJ7GoAuNuAAAAAElFTkSuQmCC");
+      var quads = new List<PhotoQuad> {
+        new PhotoQuad { name = "Wall A", p0 = new Vector3(0, 0, 0), p1 = new Vector3(4, 0, 0), p2 = new Vector3(4, 2.5f, 0), p3 = new Vector3(0, 2.5f, 0), png = png },
+        new PhotoQuad { name = "Floor \"B\"", p0 = new Vector3(0, 0, 0), p1 = new Vector3(4, 0, 0), p2 = new Vector3(4, 0, 3), p3 = new Vector3(0, 0, 3), png = png },
+        new PhotoQuad { name = "no image", p0 = Vector3.zero, p1 = Vector3.right, p2 = Vector3.one, p3 = Vector3.up, png = null },
+      };
+      byte[] glb = PhotoModelGlb.Write(quads);
+      Check(glb != null && glb.Length > 100, "textured GLB is written");
+      Check(PhotoModelGlb.Write(new List<PhotoQuad>()) == null && PhotoModelGlb.Write(null) == null, "nothing to write: null");
+      if (glb != null) {
+        File.WriteAllBytes("photo_test.glb", glb);
+        Check(BitConverter.ToUInt32(glb, 0) == 0x46546C67 && BitConverter.ToUInt32(glb, 4) == 2 && BitConverter.ToUInt32(glb, 8) == (uint)glb.Length, "GLB header: magic, version 2, total length");
+        int jl = (int)BitConverter.ToUInt32(glb, 12);
+        var j = JObject.Parse(System.Text.Encoding.UTF8.GetString(glb, 20, jl));
+        Check(jl % 4 == 0 && (glb.Length - 20 - jl - 8) % 4 == 0, "chunks are 4-byte aligned");
+        Check(((JArray)j["nodes"]).Count == 2 && ((JArray)j["images"]).Count == 2 && ((JArray)j["materials"]).Count == 2, "2 planes (the one without an image is left out)");
+        Check((string)j["images"][0]["mimeType"] == "image/png" && (string)j["materials"][0]["alphaMode"] == "MASK" && (string)j["extensionsUsed"][0] == "KHR_materials_unlit", "PNG images, alpha-masked, unlit");
+        var posAcc = j["accessors"][0];
+        Check((float)posAcc["max"][2] == 0f && (float)posAcc["max"][1] == 2.5f, "POSITION min / max present and correct (Z mirrored)");
+        int imgView = (int)j["images"][0]["bufferView"]; int off = (int)j["bufferViews"][imgView]["byteOffset"], len = (int)j["bufferViews"][imgView]["byteLength"];
+        int binStart = 20 + jl + 8;
+        Check(len == png.Length && glb[binStart + off] == 0x89 && glb[binStart + off + 1] == (byte)'P' && off % 4 == 0, "the PNG sits in the BIN chunk, intact and aligned");
+      }
+    }
+
     Console.WriteLine(fails == 0 ? "ALL PASSED" : fails + " FAILED"); return fails; }
 }
