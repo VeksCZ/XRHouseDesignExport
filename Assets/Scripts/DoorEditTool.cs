@@ -158,7 +158,14 @@ public class DoorEditTool : MonoBehaviour
                 aim = new Ray(o, (WorldToScan(rightHand.position + rightHand.forward) - o).normalized); // for "Missing wall"
                 OpenAddPanel(room, hit, normal);
             }
-            else ClosePanel();
+            else
+            {
+                // no wall behind the ray (it goes out through a wall the scan missed): offer that wall if there is a gap there
+                Vector3 o = WorldToScan(rightHand.position);
+                aim = new Ray(o, (WorldToScan(rightHand.position + rightHand.forward) - o).normalized);
+                if (MissingWall.Find(rooms, aim, out var gapRoomFound, out var gp, out var gq, out float gh)) OpenWallPanel(gapRoomFound, gp, gq, gh);
+                else ClosePanel();
+            }
             return;
         }
         if (DoorCatalog.FindEdit(HouseEditsStore.Current, selected, rooms) == null) GuessAndOpen(selected);

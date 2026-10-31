@@ -104,6 +104,13 @@ and exports 3D models, floor plans and reports from the scan.
   otherwise built in the background from the frames on disk (`BuildMissing`). Cached per plane as PNG + `manifest.json`
   (frames held) in `WallPhotos/WallScan` (headset) / `Exports/RoomData/WallScan` (PC). Desktop: `-overlays scan`,
   `-test views -views rooms`. Single photos (cable photos) are the secondary mode of the same tool.
+  Texture density 220 px/m (4.5 mm, up to 2048 px; `CacheVersion` 3). A plane's half-float texture exists only once it has a
+  frame (`Plane.acc` allocates lazily, `HasData`; cover mode allocates all), has mips + aniso (`GenerateMips` after every
+  paint), and a frame is only painted onto planes it sees (`FrameCulling.SeesPlane`). `WallScanShow` fills gaps of a few cm
+  from mip 2 (`_FillLod`); big holes stay holes. Views rebuild at most every 1.5 s while the background build adds planes.
+- **Per-frame cost** (Quest): no string building / LINQ / allocation in `Update` paths (overlay `Stamp` struct, `LastBlocker`
+  on demand, menu sync ~10x/s); `MRUKDataProcessor.GetValidRooms` is cached per loaded scene - don't add callers that need
+  fresh results mid-load (it is not cached while `MRUKExporter.Loading`).
 - **Niches** (furniture spec item `"type": "niche"`): cut into the walls by `XRModelFactory` (`Niches`, installed with the
   spec's ceilings by `Furniture.InstallCeilings`); `furnish.py` only marks them on the wall face.
 - **Scan sources**: the selected scan never changes by itself (only a tap in the scan list; taps are debounced, loads
