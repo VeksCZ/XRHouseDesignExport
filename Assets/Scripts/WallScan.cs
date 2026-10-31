@@ -19,8 +19,8 @@ using Meta.XR.MRUtilityKit;
 public static class WallScan
 {
     public const string Folder = "WallScan";
-    const float PxPerMeter = 160f;   // ~6 mm per texel
-    const int MaxSize = 1024;
+    const float PxPerMeter = 220f;   // ~4.5 mm per texel (the passthrough camera resolves ~2 mm at 2 m)
+    const int MaxSize = 2048;
     const float LoadWeight = 1f;     // a saved texel counts like one good straight-on view
 
     public class Plane
@@ -58,7 +58,7 @@ public static class WallScan
 
     [Serializable] class ManifestEntry { public string id; public List<string> frames = new List<string>(); }
     /// <summary>Bumped when the way frames are painted changes - older caches are rebuilt.</summary>
-    const int CacheVersion = 2; // 2: occlusion by the room's other planes
+    const int CacheVersion = 3; // 2: occlusion by the room's other planes; 3: denser textures (4.5 mm per texel)
     [Serializable] class Manifest { public int version; public List<ManifestEntry> planes = new List<ManifestEntry>(); }
 
     static readonly Dictionary<string, Plane> planes = new Dictionary<string, Plane>();
@@ -212,6 +212,7 @@ public static class WallScan
         mat.SetVector("_Intr", new Vector4(m.fu, m.fv, m.cu, m.cv));
         mat.SetFloat("_Sharp", Mathf.Clamp(m.relativeSharpness > 0 ? m.relativeSharpness : 1f, 0.5f, 1.3f));
         Vector3 fwd = rot * Vector3.forward;
+        Func<Vector3, Vector3> toCam = wp => worldToCam.MultiplyPoint3x4(wp);   // once per frame, not per plane
         bool any = false;
         var roomPlanes = planes.Values.Where(x => x.roomUuid == m.roomUuid).ToList();
         foreach (var p in roomPlanes)
@@ -222,6 +223,8 @@ public static class WallScan
             if (Vector3.Dot(pos - c, p.normal) <= 0.05f) continue;
             float half = (p.axisU.magnitude + p.axisV.magnitude) / 2f;
             if (Vector3.Dot(c - pos, fwd) < -half) continue;
+            // the frame has to look at some part of the plane at all (most planes of a room are out of view)
+            if (!FrameCulling.SeesPlane(toCam, m.fu, m.fv, m.cu, m.cv, p.origin, p.axisU, p.axisV)) continue;
             mat.SetVector("_Origin", p.origin); mat.SetVector("_AxisU", p.axisU); mat.SetVector("_AxisV", p.axisV); mat.SetVector("_Normal", p.normal);
             // the room's other planes hide what is behind them
             int k = 0;

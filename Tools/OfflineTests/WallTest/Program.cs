@@ -161,5 +161,16 @@ class T {
       Check(StairFloorSnap.Offset(new Vector3(1, -20f, 1), floors) == 0f, "absurdly far off: left alone");
     }
 
+    // ---- frame culling ----
+    {
+      // camera at the origin looking along +z, a pinhole with fu = fv = 1 (about 53 degrees), centre of the image (0.5, 0.5)
+      Func<Vector3, Vector3> id = v => v;
+      Check(FrameCulling.SeesPlane(id, 1f, 1f, .5f, .5f, new Vector3(-2, -1, 3), new Vector3(4, 0, 0), new Vector3(0, 2, 0)), "a wall straight ahead is seen");
+      Check(!FrameCulling.SeesPlane(id, 1f, 1f, .5f, .5f, new Vector3(5, -1, 3), new Vector3(4, 0, 0), new Vector3(0, 2, 0)), "a wall far to the side is not");
+      Check(!FrameCulling.SeesPlane(id, 1f, 1f, .5f, .5f, new Vector3(-2, -1, -3), new Vector3(4, 0, 0), new Vector3(0, 2, 0)), "a wall behind the camera is not");
+      Check(FrameCulling.SeesPlane(id, 1f, 1f, .5f, .5f, new Vector3(-30, -2, 4), new Vector3(60, 0, 0), new Vector3(0, 4, 0)), "a long wall of which only a slice is in view is seen");
+      Check(!FrameCulling.SeesPlane(id, 1f, 1f, .5f, .5f, new Vector3(-2, 4, 3), new Vector3(4, 0, 0), new Vector3(0, 2, 0)), "a wall above the view is not");
+    }
+
     Console.WriteLine(fails == 0 ? "ALL PASSED" : fails + " FAILED"); return fails; }
 }
