@@ -526,6 +526,8 @@ public class WallPhotoCapture : MonoBehaviour
                 Count(denseByRoom, meta.roomUuid);
                 Click(0.12f);
                 flashUntil = Time.time + 0.12f; flashText = null;
+                string roomDone = RoomDoneText(meta.roomUuid);
+                if (roomDone != null) { flashUntil = Time.time + 2.5f; flashText = roomDone; Haptic(); Click(0.6f); }
                 if (denseCount % 5 == 0) RefreshPanel();
                 if (denseCount % 25 == 0) Debug.Log($"[WallPhotos] 3D frames: {denseCount} saved, {blurryDropped} blurry dropped, coverage cells {coverage.Count}, pending writes {pendingWrites}");
                 return;
@@ -567,6 +569,20 @@ public class WallPhotoCapture : MonoBehaviour
         catch (Exception e) { Debug.LogWarning($"[WallPhotos] live wall scan: {e.Message}"); }
     }
 #endif
+
+    readonly HashSet<string> roomsAnnounced = new HashSet<string>();
+    /// <summary>Once per room and session: at least 90 % of its walls are covered - a message, a click and a buzz, so you know to move on.</summary>
+    string RoomDoneText(string roomUuid)
+    {
+#if META_XR_SDK_INSTALLED
+        if (string.IsNullOrEmpty(roomUuid) || roomsAnnounced.Contains(roomUuid)) return null;
+        if (WallScan.CoverageOf(roomUuid) < 0.9f) return null;
+        roomsAnnounced.Add(roomUuid);
+        return "<color=#7dff9a>Walls of this room are done</color> <size=26>- on to the next room</size>";
+#else
+        return null;
+#endif
+    }
 
     /// <summary>"  -  walls 63 %": how much of this room's walls the 3D scan has seen so far (empty until the room has planes).</summary>
     string CoverageText()
