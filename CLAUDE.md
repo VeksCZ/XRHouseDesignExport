@@ -189,5 +189,5 @@ and exports 3D models, floor plans and reports from the scan.
   background) - the OS shows it instantly instead of the loading dots. Unity's own splash is off.
 - **Do not add packages that spawn helper processes** (`com.unity.ai.assistant`'s `relay_win.exe` inherited the MCP
   bridge's listening socket on Windows and made the bridge unable to rebind after a domain reload).
-- Tests: `Assets/Tests/EditMode` (plan geometry, room names) and `Assets/Tests/PlayMode` (whole export pipeline on
+- Tests: `Assets/Tests/EditMode` (plan geometry, room names, `GeometryTests`: frame culling, stair floor snap, textured GLB structure - these also compile and pass as plain NUnit against the offline stand-ins) and `Assets/Tests/PlayMode` (whole export pipeline on
   MRUK sample scenes, results in `Exports/Test/`).
