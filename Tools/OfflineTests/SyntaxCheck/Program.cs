@@ -3,7 +3,7 @@ using Microsoft.CodeAnalysis; using Microsoft.CodeAnalysis.CSharp;
 class P { static int Main(string[] a) {
   int bad = 0, n = 0;
   var defs = new[] { "UNITY_EDITOR", "UNITY_ANDROID", "META_XR_SDK_INSTALLED" };
-  var opts = new CSharpParseOptions(LanguageVersion.Latest, DocumentationMode.None, SourceCodeKind.Regular, defs);
+  var opts = new CSharpParseOptions(LanguageVersion.CSharp9, DocumentationMode.None, SourceCodeKind.Regular, defs);
   foreach (var f in Directory.EnumerateFiles(a[0], "*.cs", SearchOption.AllDirectories)) {
     n++;
     var tree = CSharpSyntaxTree.ParseText(File.ReadAllText(f), opts, f);
