@@ -42,6 +42,7 @@ public static class WallDrawings
         Directory.CreateDirectory(dir);
         string path = Path.Combine(dir, FileName);
         var photos = CollectPhotos(dir, rooms);
+        wallPhotos = WallScan.CopyPhotosTo(dir, WallPhotoFolder);   // the 3D scan's photo of each wall, as the drawing's background
         File.WriteAllText(path, Build(rooms, title, null, null, photos), Encoding.UTF8);
         foreach (var (file, kinds, trade) in new[] { (ElectricFile, ElectricKinds, "Elektro"), (PlumbingFile, PlumbingKinds, "Voda, odpad, topení") })
         {
@@ -50,8 +51,13 @@ public static class WallDrawings
             if (any) File.WriteAllText(tp, Build(rooms, title, kinds, trade, photos), Encoding.UTF8);
             else if (File.Exists(tp)) File.Delete(tp);
         }
+        wallPhotos = null;
         return path;
     }
+
+    const string WallPhotoFolder = "97_Wall_Photos";
+    /// <summary>Wall anchor UUID (N) -> relative path of its 3D-scan photo; set while Write builds the files.</summary>
+    static Dictionary<string, string> wallPhotos;
 
     /// <summary>The cable photos and where on the scan they look (linked from the drawings, relative to 'dir').</summary>
     static List<PhotoAt> CollectPhotos(string dir, List<MRUKRoom> rooms)
@@ -125,10 +131,12 @@ public static class WallDrawings
         sb.Append("text{font-family:system-ui,Arial,sans-serif}.dim{fill:#333}.lbl{fill:#000;font-weight:600}");
         sb.Append("body.noroutes .route{display:none}body.nodims .dim{display:none}");
         foreach (var k in RouteStyle.Kinds) sb.Append($"body.nok{(int)k} .k{(int)k}{{display:none}}");
-        sb.Append("body.noprop .prop{display:none}body.nomark .mark{display:none}body.nophoto .photo{display:none}");
+        sb.Append("body.noprop .prop{display:none}body.nomark .mark{display:none}body.nophoto .photo{display:none}body.nowallphoto .wp{display:none}");
         sb.Append("table{border-collapse:collapse;margin:6px 0 14px;font-size:13px}td,th{border:1px solid #ccc;padding:3px 7px;text-align:left;vertical-align:top}th{background:#f0f0f0}td.n{text-align:right;white-space:nowrap}");
         sb.Append(".photo{cursor:pointer}.photo:hover rect{stroke:#06c;stroke-width:2}");
         sb.Append("@page{size:A4 landscape;margin:10mm}@media print{.bar{display:none}.card{break-inside:avoid}section{break-before:page}h2{margin-top:0}a{color:inherit;text-decoration:none}}</style></head><body>\n");
+        // what no frame has seen has alpha 0, a seen texel at least ~0.02: the filter makes every seen texel fully opaque
+        sb.Append("<svg width=0 height=0 style=\"position:absolute\"><filter id=wpa><feComponentTransfer><feFuncA type=linear slope=60 /></feComponentTransfer></filter></svg>\n");
         sb.Append($"<h1>Stěny a trasy – {Esc(title)}</h1><div style=\"color:#666\">Pohledy na stěny zevnitř místnosti; kóty bodů tras „vodorovně/svisle“ v cm od levého rohu zdiva a od hrubé podlahy (scan = holé zdivo). V půdorysu od bodu 0,0 (levý horní roh místnosti); kroužek = stoupačka. Vytvořeno {DateTime.Now:d. M. yyyy HH:mm}, tras: {routes.Count}.</div>\n");
         sb.Append("<div class=bar><label><input type=checkbox checked onchange=\"document.body.classList.toggle('noroutes',!this.checked)\"> <b>Trasy</b></label>");
         foreach (var k in RouteStyle.Kinds)
@@ -140,6 +148,8 @@ public static class WallDrawings
         int nProp = routes.Count(r => r.route.proposed);
         sb.Append($"<label><input type=checkbox checked onchange=\"document.body.classList.toggle('nomark',!this.checked)\"> Krabice a vývody ({nMarkers})</label>");
         sb.Append("<label><input type=checkbox checked onchange=\"document.body.classList.toggle('nophoto',!this.checked)\"> Fotky (klik = otevřít)</label>");
+        if (wallPhotos != null && wallPhotos.Count > 0)
+            sb.Append("<label><input type=checkbox checked onchange=\"document.body.classList.toggle('nowallphoto',!this.checked)\"> Fotka stěny (3D scan)</label>");
         if (nProp > 0) sb.Append($"<label><input type=checkbox checked onchange=\"document.body.classList.toggle('noprop',!this.checked)\"> Návrhy z fotek ({nProp}, čárkovaně)</label>");
         sb.Append("<label><input type=checkbox checked onchange=\"document.body.classList.toggle('nodims',!this.checked)\"> Kóty</label></div>\n");
     }
@@ -367,6 +377,16 @@ public static class WallDrawings
         sb.Append($"<div class=card><h3>Stěna {number} <span style=\"color:#777;font-weight:normal\">– {Cm(W)} cm</span></h3><svg viewBox=\"0 0 {N(vw)} {N(vh)}\" width=\"{N(Mathf.Min(vw * 1.25f, 760))}\">");
         // wall outline (top follows a sloped ceiling)
         sb.Append($"<polygon points=\"{N(X(0))},{N(Y(0))} {N(X(W))},{N(Y(0))} {N(X(W))},{N(Y(hR))} {N(X(0))},{N(Y(hL))}\" fill=\"#f7f5f0\" stroke=\"#333\" stroke-width=\"2\"/>");
+        // the 3D scan's photo of this wall (its plane texture: u along the anchor's right = mirrored against this view, v up)
+        if (wallPhotos != null && wallPhotos.TryGetValue(wall.Anchor.Uuid.ToString("N"), out var wallHref))
+        {
+            var rc = wall.PlaneRect.Value; var tr = wall.transform;
+            Vector3 po = tr.TransformPoint(new Vector3(rc.xMin, rc.yMin, 0f)), pu = tr.TransformVector(new Vector3(rc.width, 0f, 0f)), pv = tr.TransformVector(new Vector3(0f, rc.height, 0f));
+            float uA = U(po), uB = U(po + pu), vB = V(po), vT = V(po + pv);
+            float ix = X(Mathf.Min(uA, uB)), iw = Mathf.Abs(uA - uB) * 100f, iy = Y(vT), ih = (vT - vB) * 100f;
+            string flip = uB < uA ? $" transform=\"translate({N(2 * ix + iw)},0) scale(-1,1)\"" : "";
+            sb.Append($"<image class=wp href=\"{Esc(wallHref)}\" x=\"{N(ix)}\" y=\"{N(iy)}\" width=\"{N(iw)}\" height=\"{N(ih)}\" preserveAspectRatio=\"none\" filter=\"url(#wpa)\"{flip}/>");
+        }
         sb.Append($"<text class=dim x=\"{N(X(0) - 4)}\" y=\"{N(Y(0) + 3)}\" font-size=\"9\" text-anchor=\"end\">±0 HP</text>");
         sb.Append($"<text class=dim x=\"{N(X(W) / 2 + padL / 2)}\" y=\"{N(Y(0) + 30)}\" font-size=\"11\" text-anchor=\"middle\">{Cm(W)}</text>");
         sb.Append($"<text class=dim x=\"{N(X(0) - 4)}\" y=\"{N(Y(hL) + 3)}\" font-size=\"9\" text-anchor=\"end\">{Cm(hL)}</text>");

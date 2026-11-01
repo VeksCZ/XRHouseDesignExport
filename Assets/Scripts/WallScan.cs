@@ -348,6 +348,29 @@ public static class WallScan
         return res;
     }
 
+    /// <summary>Copies the saved texture of every plane that has photos into dir/folder (for the wall drawings) and returns
+    /// plane id (the wall anchor's UUID, "N" format) -> path relative to dir.</summary>
+    public static Dictionary<string, string> CopyPhotosTo(string dir, string folder)
+    {
+        var res = new Dictionary<string, string>();
+        try
+        {
+            SaveAll();   // what is only in memory goes to disk first
+            var manifest = ReadManifest();
+            string target = Path.Combine(dir, folder);
+            foreach (var e in manifest.planes)
+            {
+                string png = Path.Combine(Root, e.id + ".png");
+                if (!File.Exists(png)) continue;
+                Directory.CreateDirectory(target);
+                File.Copy(png, Path.Combine(target, e.id + ".png"), true);
+                res[e.id] = folder + "/" + e.id + ".png";
+            }
+        }
+        catch (Exception ex) { Debug.LogWarning($"[WallScan] copying photos for the drawings: {ex.Message}"); }
+        return res;
+    }
+
     /// <summary>Writes every changed plane (PNG: colour + coverage) and the manifest.</summary>
     public static void SaveAll()
     {

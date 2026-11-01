@@ -75,6 +75,8 @@ and exports 3D models, floor plans and reports from the scan.
   projected onto the walls ("Photos on walls") into passthrough / walk / Dollhouse, each switchable (menu, desktop K / P).
   `WallDrawings` writes `97_Walls_Routes.html` (plans + wall elevations with openings, niches and routes, cm from the left
   corner and the rough floor, check boxes to hide routes/dimensions): on Export, and desktop key E (scan folder).
+  Each elevation has the 3D scan's photo of that wall as its background (`WallScan.CopyPhotosTo` copies the plane PNGs to
+  `97_Wall_Photos/`, referenced by wall anchor UUID; mirrored against the inside view; check box "Fotka stěny").
   Desktop tests: `-routes <file>` (never the real file) `-addroutes "kind:x,y,z;...|..."` (GLB frame), `-test walls`.
   Routes/boxes carry `spec` (material preset per kind), `circuit`, `note` and a per-item `modified` (RouteStore.Apply
   stamps what a change touched; Merge keeps the newer copy). Tool panel: Pick... selects a route/box for Spec / Circuit
