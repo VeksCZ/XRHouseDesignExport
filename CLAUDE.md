@@ -133,7 +133,7 @@ and exports 3D models, floor plans and reports from the scan.
   the floor and cables above the ceiling.
 - **New doorway** (Doors tool: trigger on a bare wall): `SceneJsonEdit.AddDoor` writes a DOOR_FRAME into the saved
   scan's own JSON (V1 entity or V2 room-mesh face; JSON/Unity axis flip calibrated from the walls; backup
-  `*.bak_doors`). Desktop test `-test adddoor` (run it on a copy of a scan).
+  `*.bak_doors` = before the first edit, `*.bak_last` = before the latest one). Desktop test `-test adddoor` (run it on a copy of a scan).
   Not on the live scan (save it first, then pick the saved scan). **Missing wall** (button in the add panel): `MissingWall.Find` takes the
   loose wall ends of a room's outline nearest to where you pointed, `SceneJsonEdit.AddWall` joins them with a WALL_FACE
   (V2 face / V1 entity inserted in `wallUuids`); the walk-through keeps your spot over a reload (`TryGetFeetInRoom`, room + room-local point).

@@ -54,15 +54,20 @@ public static class SceneJsonEdit
             : AddDoorV1(entities, roomEnt, unityWalls, worldPoint, width, height);
         if (err != null) return err;
 
-        try
-        {
-            string bak = path + ".bak_doors";
-            if (!File.Exists(bak)) File.Copy(path, bak);
-            File.WriteAllText(path, json.ToString(Formatting.Indented));
-        }
+        try { WriteWithBackups(path, json); }
         catch (Exception e) { return "can't write the scan: " + e.Message; }
         Debug.Log($"[SceneJsonEdit] {scanName}: door {width:0.00} x {height:0.00} m added in room {ida.Substring(0, 8)} at {worldPoint}");
         return null;
+    }
+
+    /// <summary>Writes the edited scan. Two backups: *.bak_doors = the scan as it was before its first edit (made once), and
+    /// *.bak_last = the scan as it was before this edit (overwritten each time) - one step back is always possible.</summary>
+    static void WriteWithBackups(string path, JObject json)
+    {
+        string first = path + ".bak_doors", last = path + ".bak_last";
+        if (!File.Exists(first)) File.Copy(path, first);
+        File.Copy(path, last, true);
+        File.WriteAllText(path, json.ToString(Formatting.Indented));
     }
 
     static bool Eq(string a, string b) => string.Equals(a, b, StringComparison.OrdinalIgnoreCase);
@@ -92,12 +97,7 @@ public static class SceneJsonEdit
             : AddWallV1(entities, roomEnt, unityWalls, p, q, height);
         if (err != null) return err;
 
-        try
-        {
-            string bak = path + ".bak_doors";
-            if (!File.Exists(bak)) File.Copy(path, bak);
-            File.WriteAllText(path, json.ToString(Formatting.Indented));
-        }
+        try { WriteWithBackups(path, json); }
         catch (Exception e) { return "can't write the scan: " + e.Message; }
         Debug.Log($"[SceneJsonEdit] {scanName}: wall {Vector3.Distance(p, q):0.00} x {height:0.00} m added in room {ida.Substring(0, 8)}");
         return null;
