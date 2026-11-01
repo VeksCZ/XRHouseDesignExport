@@ -172,6 +172,29 @@ class T {
       Check(!FrameCulling.SeesPlane(id, 1f, 1f, .5f, .5f, new Vector3(-2, 4, 3), new Vector3(4, 0, 0), new Vector3(0, 2, 0)), "a wall above the view is not");
     }
 
+    // ---- coverage grid ----
+    {
+      Func<Vector3, Vector3> id = v => v;
+      Vector3 cam = Vector3.zero;
+      var full = new CoverageGrid(2f, 1f);
+      full.Mark(id, 1f, 1f, .5f, .5f, cam, new Vector3(-1, -0.5f, 3), new Vector3(2, 0, 0), new Vector3(0, 1, 0), new Vector3(0, 0, -1));
+      Check(full.Fraction > 0.99f, $"a plane in full view 3 m ahead is covered ({full.Fraction:0.00})");
+      var far = new CoverageGrid(2f, 1f);
+      far.Mark(id, 1f, 1f, .5f, .5f, cam, new Vector3(-1, -0.5f, 5), new Vector3(2, 0, 0), new Vector3(0, 1, 0), new Vector3(0, 0, -1));
+      Check(far.Fraction == 0f, "5 m away counts for nothing (max 3.5 m)");
+      var away = new CoverageGrid(2f, 1f);
+      away.Mark(id, 1f, 1f, .5f, .5f, cam, new Vector3(-1, -0.5f, 3), new Vector3(2, 0, 0), new Vector3(0, 1, 0), new Vector3(0, 0, 1));
+      Check(away.Fraction == 0f, "a plane facing away from the camera is not covered");
+      var part = new CoverageGrid(6f, 1f);
+      part.Mark(id, 1f, 1f, .5f, .5f, cam, new Vector3(0, -0.5f, 3), new Vector3(6, 0, 0), new Vector3(0, 1, 0), new Vector3(0, 0, -1));
+      Check(part.Fraction > 0.15f && part.Fraction < 0.3f, $"a long wall seen only in part: a fraction of it ({part.Fraction:0.00})");
+      float before = part.Fraction; part.Mark(id, 1f, 1f, .5f, .5f, cam, new Vector3(0, -0.5f, 3), new Vector3(6, 0, 0), new Vector3(0, 1, 0), new Vector3(0, 0, -1));
+      Check(part.Fraction == before, "the same frame twice adds nothing");
+      var tex = new CoverageGrid(4f, 2f); tex.MarkFromAlpha((u, v) => u < 0.5f ? 1f : 0f);
+      Check(Math.Abs(tex.Fraction - 0.5f) < 0.02f, $"from a saved texture: half covered ({tex.Fraction:0.00})");
+      tex.Clear(); Check(tex.Seen == 0, "clear");
+    }
+
     // ---- textured GLB of the wall scan ----
     {
       byte[] png = Convert.FromBase64String("iVBORw0KGgoAAAANSUhEUgAAAAQAAAAECAYAAACp8Z5+AAAAEklEQVR4nGM4UWHzHxkzkC4AAEKnJ7GoAuNuAAAAAElFTkSuQmCC");

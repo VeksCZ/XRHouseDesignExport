@@ -568,6 +568,17 @@ public class WallPhotoCapture : MonoBehaviour
     }
 #endif
 
+    /// <summary>"  -  walls 63 %": how much of this room's walls the 3D scan has seen so far (empty until the room has planes).</summary>
+    string CoverageText()
+    {
+#if META_XR_SDK_INSTALLED
+        float c = currentRoomUuid != null ? WallScan.CoverageOf(currentRoomUuid) : -1f;
+        return c >= 0f ? $"  -  walls {Mathf.RoundToInt(c * 100f)} %" : "";
+#else
+        return "";
+#endif
+    }
+
     /// <summary>Mean luminance gradient over a sparse grid (every 4th pixel, 2 px steps) - drops with motion blur and
     /// defocus. Absolute values depend on the surface (bare brick >> smooth plaster), so frames are compared with the
     /// recent median, not with a fixed limit.</summary>
@@ -1258,7 +1269,7 @@ public class WallPhotoCapture : MonoBehaviour
             bool tooFast = headDegPerSec > DenseMaxDegPerSec || headMetersPerSec > DenseMaxMetersPerSec;
             SetHud(tooFast ? "<color=#ffb347>Slower - the images get blurry</color>"
                            : (currentRoomUuid != null && denseByRoom.TryGetValue(currentRoomUuid, out int inRoom)
-                               ? $"<color=#ff5050>\u25CF</color> 3D scan  -  {inRoom} frames in this room" + (blurryDropped > 0 ? $"<size=24>  ({blurryDropped} blurry dropped)</size>" : "")
+                               ? $"<color=#ff5050>\u25CF</color> 3D scan  -  {inRoom} frames in this room" + CoverageText() + (blurryDropped > 0 ? $"<size=24>  ({blurryDropped} blurry dropped)</size>" : "")
                                : $"<color=#ff5050>\u25CF</color> 3D scan  -  starting..."));
             return;
         }

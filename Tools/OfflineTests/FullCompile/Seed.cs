@@ -2,7 +2,7 @@ using System; using System.Collections.Generic; using System.Linq;
 namespace UnityEngine {
   public static class Mathf { public const float Rad2Deg = 57.29578f, Deg2Rad = 0.0174532924f;
     public static float Min(float a, float b) => a < b ? a : b; public static float Max(float a, float b) => a > b ? a : b;
-    public static float Abs(float a) => Math.Abs(a); public static int CeilToInt(float a) => (int)Math.Ceiling(a); public static int Clamp(int v, int a, int b) => v < a ? a : v > b ? b : v; public static int Abs(int a) => Math.Abs(a); public static int Max(int a, int b) => a > b ? a : b; public static int Min(int a, int b) => a < b ? a : b; public static float Clamp(float v, float a, float b) => v < a ? a : v > b ? b : v;
+    public static float Abs(float a) => Math.Abs(a); public static int CeilToInt(float a) => (int)Math.Ceiling(a); public static int RoundToInt(float a) => (int)Math.Round(a); public static int FloorToInt(float a) => (int)Math.Floor(a); public static int Clamp(int v, int a, int b) => v < a ? a : v > b ? b : v; public static int Abs(int a) => Math.Abs(a); public static int Max(int a, int b) => a > b ? a : b; public static int Min(int a, int b) => a < b ? a : b; public static float Clamp(float v, float a, float b) => v < a ? a : v > b ? b : v;
     public static float Sqrt(float a) => (float)Math.Sqrt(a); public static float Atan2(float y, float x) => (float)Math.Atan2(y, x);
     public static float Sin(float a) => (float)Math.Sin(a); public static float Cos(float a) => (float)Math.Cos(a); public static float Acos(float a) => (float)Math.Acos(a); }
   public struct Vector3 { public float x, y, z;

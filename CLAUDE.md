@@ -110,6 +110,8 @@ and exports 3D models, floor plans and reports from the scan.
   frame (`Plane.acc` allocates lazily, `HasData`; cover mode allocates all), has mips + aniso (`GenerateMips` after every
   paint), and a frame is only painted onto planes it sees (`FrameCulling.SeesPlane`). `WallScanShow` fills gaps of a few cm
   from mip 2 (`_FillLod`); big holes stay holes. Views rebuild at most every 1.5 s while the background build adds planes.
+  The 3D-scan HUD shows "walls 63 %" for the room you are in: `CoverageGrid` (10 cm cells per plane, switched on by frames that
+  see them well - `Splat` marks them, a loaded cache texture seeds them from its alpha) summed by area in `WallScan.CoverageOf`.
   Export writes `16_Model_Wall_Photos.glb` (`MRUKExporter.ExportPhotoModel` -> `WallScan.ExportQuads` -> `PhotoModelGlb`): one
   unlit, alpha-masked quad per photographed plane with its PNG embedded, same frame as the other models (open both in a viewer
   to see pipes and cables on the bare walls). The writer is validated with the Khronos glTF validator (0 issues) and tested in
@@ -175,7 +177,7 @@ and exports 3D models, floor plans and reports from the scan.
   `Tools/OfflineTests/FullCompile` (`python3 check.py [--base REV]`, ~30 s) compiles all scripts against generated stand-ins and
   prints only the errors NEW since a known-good revision (the stand-ins make ~1400 errors of noise): it catches what the
   syntax check can't - scope clashes (CS0136), unassigned locals, `Action` passed where `UnityAction` is wanted, wrong
-  argument types between project APIs. **Run it before every commit of C# code** (base = the last revision the PC compiled).
+  argument types between project APIs (a NEW "does not contain a definition" on a Unity / Meta type is stand-in noise - check the member exists). **Run it before every commit of C# code** (base = the last revision the PC compiled).
 - **Built-in modules**: unused ones (cloth, terrain, tilemap, wind, video...) are out of `manifest.json`;
   Meta's SDK needs `assetbundle`, `physics2d`, `particlesystem` and (Android) `director` without declaring them - keep
   those. `com.unity.xr.meta-openxr` (+ AR Foundation, XR Simulation assets) was removed - nothing used it; Meta XR Core

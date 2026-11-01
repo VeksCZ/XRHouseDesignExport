@@ -28,6 +28,9 @@ public static class WallScan
         public string id, roomUuid;
         public Vector3 origin, axisU, axisV, normal;
         public int pxW, pxH;
+        public bool isWall;
+        /// <summary>Which 10 cm cells of the plane the frames have seen (the "x % covered" figure).</summary>
+        public CoverageGrid grid;
         public Material show, cover;
         public HashSet<string> frames = new HashSet<string>();
         public bool dirty;
@@ -166,6 +169,8 @@ public static class WallScan
                 // nooks, so it can't decide); floors/ceilings: towards the room's middle height
                 p.normal = a.HasAnyLabel(MRUKAnchor.SceneLabels.WALL_FACE) ? n : (Vector3.Dot(inside - c, n) >= 0 ? n : -n);
                 if (planes.ContainsKey(p.id)) continue;
+                p.isWall = a.HasAnyLabel(MRUKAnchor.SceneLabels.WALL_FACE);
+                p.grid = new CoverageGrid(r.width, r.height);
                 p.pxW = Mathf.Clamp(Mathf.CeilToInt(r.width * PxPerMeter), 16, MaxSize);
                 p.pxH = Mathf.Clamp(Mathf.CeilToInt(r.height * PxPerMeter), 16, MaxSize);
                 LoadCached(p, manifest);   // allocates the texture only for a plane that has saved frames
@@ -191,6 +196,7 @@ public static class WallScan
             SplatMat.SetFloat("_LoadWeight", LoadWeight);
             Graphics.Blit(tex, p.acc, SplatMat, 1);
             p.acc.GenerateMips();
+            p.grid?.MarkFromAlpha((u, v) => tex.GetPixelBilinear(u, v).a);   // what the saved texture already covers
             foreach (var f in entry.frames) p.frames.Add(f);
         }
         catch (Exception e) { Debug.LogWarning($"[WallScan] {png}: {e.Message}"); }
@@ -252,6 +258,7 @@ public static class WallScan
             }
             mat.SetVectorArray("_OccO", occO); mat.SetVectorArray("_OccU", occU); mat.SetVectorArray("_OccV", occV);
             mat.SetInteger("_OccCount", k);
+            p.grid?.Mark(toCam, m.fu, m.fv, m.cu, m.cv, pos, p.origin, p.axisU, p.axisV, p.normal);
             bool fresh = !p.Allocated;
             Graphics.Blit(photo, p.acc, mat, 0);
             p.acc.GenerateMips();
@@ -288,6 +295,7 @@ public static class WallScan
             {
                 var prev = RenderTexture.active; RenderTexture.active = p.acc; GL.Clear(false, true, Color.clear); RenderTexture.active = prev;
                 p.acc.GenerateMips();
+                p.grid?.Clear();
                 p.frames.Clear(); p.dirty = true;
             }
             var roomIds = new HashSet<string>(planes.Values.Select(p => p.roomUuid));
@@ -323,6 +331,20 @@ public static class WallScan
         finally { Building = false; }
     }
 #endif
+
+    /// <summary>How much of the walls (or of every plane) of a room the 3D scan has seen, 0..1 by area; -1 when the room has no
+    /// planes. Cheap: the grids are kept up to date by Splat.</summary>
+    public static float CoverageOf(string roomUuid, bool wallsOnly = true)
+    {
+        float seen = 0f, total = 0f;
+        foreach (var p in planes.Values)
+        {
+            if (p.roomUuid != roomUuid || p.grid == null || (wallsOnly && !p.isWall)) continue;
+            float area = p.axisU.magnitude * p.axisV.magnitude;
+            seen += area * p.grid.Fraction; total += area;
+        }
+        return total > 0f ? seen / total : -1f;
+    }
 
     /// <summary>The planes that hold photos, as textured quads in model space (yaw / centre = the exported model's frame) for
     /// PhotoModelGlb: each plane's saved PNG as it is (colour + coverage in alpha). Planes without photos are left out.</summary>
