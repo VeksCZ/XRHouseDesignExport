@@ -41,3 +41,22 @@ Když něco nevyjde, napište mi (nebo PC session) číslo bodu a log (`Logs/Que
 18. Ray: tenká čára, kroužek na konci; nad panelem/Dollhouse čtyři šipky, po stisknutí gripu vyplněný.
 19. Menu: podtitulky pod tlačítky; **Align to real walls** je teď v záložce Layers.
 20. Walk / Dollhouse: rychlé dvojité kliknutí na Walk nebo přepínání detailu nesmí vytvořit druhý model.
+
+## Dveře a prohlídka (2026-11-02)
+21. **Dveře se otevírají tak daleko, jak mohou, až do 120°** (kolizní sweep křídla proti zdím). Otevřete několik dveří různými směry:
+    nemají procházet zdí; u dveří s pantem těsně u rohu (dětský pokoj nahoře u záchodu, dveře `e1baa5`) se mají zastavit u boční zdi.
+    Když se dveře otevřou jen o pár stupňů nebo naopak do zdi, napište mi, které (pokoj + strana).
+22. **Zárubně** kolem dveří (šedobílé sloupky + překlad, 6 cm): nemají zužovat průchod, ani trčet víc než pár cm do pokoje. Okna a garážová
+    vrata je nemají.
+23. Dveře, které v úpravách neměly vyplněné „otevírá se do“, se otevírají do naskenované místnosti (ne ven).
+
+## 3D scan – kvalita (2026-11-02)
+24. Nafoťte jeden pokoj a podívejte se na stěnu zblízka: obraz má být o něco ostřejší (unsharp mask), bez světlých lemů u děr. Když je moc
+    ostrý nebo se objevují halo, zmenšit `_Sharpen` v `WallScanShow.shader` (0.35).
+25. Snímky z menší vzdálenosti než 0,9 m mají menší váhu: stěna zblízka by neměla být z jediného rozmazaného záběru; díry se i tak plní.
+26. Expozice: fotky stejné stěny z různých míst mají mít podobný jas (sidecar `exposureGain`, 0.85–1.18). Starší snímky bez hodnoty se nemění.
+27. Ukazatel (ray): ikona se čtyřmi šipkami je teď menší a průhlednější.
+
+## PERF log (po 5+ minutách používání)
+28. V `Logs/Quest` hledejte řádky `PERF calls:` – `validRooms(hit/miss/loading)`: hodně `miss` nebo velké `computeMs` mimo načítání scanu =
+    zbytečný přepočet; `overlayRebuilds` vysoké ve stoje = pohledy se přestavují zbytečně. Pošlete mi je.
