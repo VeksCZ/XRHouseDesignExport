@@ -20,7 +20,7 @@ Shader "Hidden/XRHouse/WallScanSplat"
             sampler2D _MainTex;
             float4 _Origin, _AxisU, _AxisV, _Normal, _CamPos, _Intr; // _Intr = fu, fv, cu, cv (viewport units)
             float4x4 _WorldToCam;
-            float _Sharp;
+            float _Sharp, _Gain;
             // the room's other planes: a texel hidden behind one of them (an L-shaped room's corner, a wall jutting
             // out) is not painted from this frame
             float4 _OccO[24], _OccU[24], _OccV[24];
@@ -63,7 +63,7 @@ Shader "Hidden/XRHouse/WallScanSplat"
                 float near = lerp(0.65, 1.0, smoothstep(0.5, 0.9, dist));
                 float s = facing * facing * edge * near * _Sharp / max(dist, 0.9);
                 float w = s * s * s * s;
-                float3 col = tex2D(_MainTex, img).rgb;
+                float3 col = saturate(tex2D(_MainTex, img).rgb * _Gain);
                 return float4(col * w, w);
             }
             ENDCG

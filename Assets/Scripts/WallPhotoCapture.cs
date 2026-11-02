@@ -110,6 +110,7 @@ public class WallPhotoCapture : MonoBehaviour
     bool preparing, capturing;
     // sharpness of recent frames (for the relative blur test) and what the session logged
     readonly List<float> sharpDense = new List<float>(), sharpCable = new List<float>();
+    readonly List<float> lumaDense = new List<float>(), lumaCable = new List<float>();
     int blurryDropped;
     Vector3 prevDensePos; Quaternion prevDenseRot; bool prevHaveDense; float prevDenseTime;
     static readonly object logLock = new object();
@@ -497,6 +498,12 @@ public class WallPhotoCapture : MonoBehaviour
             float median = Median(hist);
             meta.relativeSharpness = median > 0 ? meta.sharpness / median : 1f;
             hist.Add(meta.sharpness); if (hist.Count > 40) hist.RemoveAt(0);
+            // exposure: the passthrough camera's auto exposure moves between frames; the wall scan evens it out against the recent median
+            float luma = MeanLuma(pixels, w, h);
+            var lhist = isDense ? lumaDense : lumaCable;
+            float lmed = Median(lhist);
+            meta.exposureGain = lmed > 8f && luma > 8f ? Mathf.Clamp(Mathf.Sqrt(lmed / luma), 0.85f, 1.18f) : 1f;
+            lhist.Add(luma); if (lhist.Count > 40) lhist.RemoveAt(0);
             if (isDense && hist.Count > 8 && meta.relativeSharpness < MinRelSharpness)
             {
                 // blurry: not saved; the next frame from about here is due right away
@@ -639,6 +646,19 @@ public class WallPhotoCapture : MonoBehaviour
                 n++;
             }
         return n > 0 ? (float)(sum / n / 8.0) : 0f;
+    }
+
+    /// <summary>Mean luminance (0-255) of a sparse pixel grid.</summary>
+    static float MeanLuma(byte[] px, int w, int h)
+    {
+        long sum = 0; int n = 0;
+        for (int y = 4; y < h - 4; y += 8)
+            for (int x = 4; x < w - 4; x += 8)
+            {
+                int o = (y * w + x) * 4;
+                sum += px[o] * 2 + px[o + 1] * 5 + px[o + 2]; n++;
+            }
+        return n > 0 ? (float)sum / n / 8f : 0f;
     }
 
     static float Median(List<float> v)
@@ -1417,6 +1437,8 @@ public class WallPhotoMeta
     public List<Color32> seedColors = new List<Color32>();
     /// <summary>Image sharpness (mean luminance gradient) and its ratio to the recent median of the same kind.</summary>
     public float sharpness, relativeSharpness;
+    /// <summary>Colour gain that evens out the camera's auto exposure against recent frames (0.85-1.18; 0 = not recorded = 1).</summary>
+    public float exposureGain;
     /// <summary>Head motion at the moment of the shot (deg/s, m/s).</summary>
     public float headDegPerSec, headMetersPerSec;
 }

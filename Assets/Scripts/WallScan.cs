@@ -228,6 +228,7 @@ public static class WallScan
         mat.SetVector("_CamPos", pos);
         mat.SetVector("_Intr", new Vector4(m.fu, m.fv, m.cu, m.cv));
         mat.SetFloat("_Sharp", Mathf.Clamp(m.relativeSharpness > 0 ? m.relativeSharpness : 1f, 0.5f, 1.3f));
+        mat.SetFloat("_Gain", m.exposureGain > 0f ? Mathf.Clamp(m.exposureGain, 0.8f, 1.25f) : 1f);
         Vector3 fwd = rot * Vector3.forward;
         Func<Vector3, Vector3> toCam = wp => worldToCam.MultiplyPoint3x4(wp);   // once per frame, not per plane
         bool any = false;
