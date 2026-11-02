@@ -102,21 +102,55 @@ public static class MRUKSceneCache
             .ToList();
     }
 
-    /// <summary>Deletes a cached scan by name (in the Editor: its whole export/scan folder). True if something was removed.</summary>
+    public const string TrashFolder = "_trash";
+    const int TrashKeep = 10;
+
+    /// <summary>"Deletes" a cached scan by name (in the Editor: its whole export/scan folder): it is moved to _trash/, with its edits,
+    /// furniture spec and backups, and the 10 latest stay there - a scan removed by mistake (or as a wrongly judged old copy) can be
+    /// moved back by hand. True if something was removed.</summary>
     public static bool DeleteCachedScan(string name)
     {
         if (string.IsNullOrEmpty(name)) return false;
-        if (FolderMode)
+        string root = GetCacheRoot(), trash = Path.Combine(root, TrashFolder), stamp = DateTime.Now.ToString("yyyyMMdd_HHmmss");
+        try
         {
-            string dir = Path.Combine(GetCacheRoot(), name);
-            if (!File.Exists(Path.Combine(dir, MRUKPathUtility.DATA_SCENE))) return false;
-            Directory.Delete(dir, true);
+            if (FolderMode)
+            {
+                string dir = Path.Combine(root, name);
+                if (!File.Exists(Path.Combine(dir, MRUKPathUtility.DATA_SCENE))) return false;
+                Directory.CreateDirectory(trash);
+                Directory.Move(dir, Path.Combine(trash, stamp + "_" + name));
+            }
+            else
+            {
+                string path = ScanPath(name);
+                if (!File.Exists(path)) return false;
+                Directory.CreateDirectory(trash);
+                var files = new List<string> { path, EditsPath(name), EditsPath(name) + ".bak", FurniturePath(name) };
+                files.AddRange(Directory.GetFiles(root, Path.GetFileName(path) + ".bak_*"));
+                foreach (var f in files)
+                    if (!string.IsNullOrEmpty(f) && File.Exists(f)) File.Move(f, Path.Combine(trash, stamp + "_" + Path.GetFileName(f)));
+            }
+            PruneTrash(trash);
             return true;
         }
-        string path = ScanPath(name);
-        if (!File.Exists(path)) return false;
-        File.Delete(path);
-        return true;
+        catch (Exception e) { Debug.LogWarning($"[Scans] could not remove '{name}': {e.Message}"); return false; }
+    }
+
+    /// <summary>Keeps the TrashKeep latest removals (entries are named yyyyMMdd_HHmmss_...).</summary>
+    static void PruneTrash(string trash)
+    {
+        try
+        {
+            var entries = Directory.GetFileSystemEntries(trash).Select(Path.GetFileName).ToList();
+            var stamps = entries.Select(e => e.Length >= 15 ? e.Substring(0, 15) : e).Distinct().OrderByDescending(x => x, StringComparer.Ordinal).Skip(TrashKeep).ToHashSet();
+            foreach (var e in entries.Where(e => stamps.Contains(e.Length >= 15 ? e.Substring(0, 15) : e)))
+            {
+                string full = Path.Combine(trash, e);
+                if (Directory.Exists(full)) Directory.Delete(full, true); else File.Delete(full);
+            }
+        }
+        catch (Exception e) { Debug.LogWarning($"[Scans] trash: {e.Message}"); }
     }
 
     /// <summary>An old saved scan that a newer one fully covers.</summary>
@@ -211,11 +245,17 @@ public static class MRUKSceneCache
         return ids;
     }
 
+    /// <summary>Does the scan have edits of its own? A file that can't be read counts as "yes": this decides whether a scan may be
+    /// removed as an old copy, and one whose edits are merely damaged must never be.</summary>
     static bool HasEdits(string path)
     {
         if (!File.Exists(path)) return false;
-        var e = JsonUtility.FromJson<HouseEdits>(File.ReadAllText(path));
-        return e != null && ((e.doors?.Count ?? 0) + (e.stairs?.Count ?? 0) + (e.holes?.Count ?? 0)) > 0;
+        try
+        {
+            var e = JsonUtility.FromJson<HouseEdits>(File.ReadAllText(path));
+            return e == null || ((e.doors?.Count ?? 0) + (e.stairs?.Count ?? 0) + (e.holes?.Count ?? 0)) > 0;
+        }
+        catch (Exception) { return true; }
     }
 
 #if META_XR_SDK_INSTALLED
