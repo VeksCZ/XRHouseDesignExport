@@ -172,8 +172,33 @@ public class WalkDoors
                     break;
                 }
             }
+            if (e.kind != DoorKind.Garage) AddFrame(visual, layer, hingeM, toOtherM, w, h);
             doors.Add(door);
         }
+    }
+
+    static readonly Color FrameColor = new Color(0.92f, 0.91f, 0.88f);
+    const float FrameWidth = 0.06f, FrameDepth = 0.12f;
+
+    /// <summary>A door frame (zarubne): two jambs and a head just outside the opening, centred on the door's plane. No
+    /// colliders - the opening stays as wide as scanned; where the wall is thicker than the frame it is hidden in it, where the
+    /// door sits at a wall face it shows as a casing about 6 cm wide.</summary>
+    void AddFrame(GameObject visual, int layer, Vector3 hingeM, Vector3 toOtherM, float w, float h)
+    {
+        Quaternion rot = Quaternion.LookRotation(toOtherM, Vector3.up);
+        var parts = new List<XRMeshPart>();
+        float half = FrameWidth / 2f;
+        void Box(Vector3 centre, Vector3 size) => parts.Add(XRModelFactory.CreateBoxPart("DOOR_FRAME", centre, rot, size, "DOORLEAF", Vector3.zero, 0f));
+        Box(hingeM - toOtherM * half + Vector3.up * (h / 2f), new Vector3(FrameDepth, h, FrameWidth));
+        Box(hingeM + toOtherM * (w + half) + Vector3.up * (h / 2f), new Vector3(FrameDepth, h, FrameWidth));
+        Box(hingeM + toOtherM * (w / 2f) + Vector3.up * (h + half), new Vector3(FrameDepth, FrameWidth, w + 2f * FrameWidth));
+        foreach (var part in parts) part.color = FrameColor;
+        var model = new XRHouseModel();
+        model.rooms.Add(new XRRoomModel { roomName = "Frame", parts = parts });
+        var go = UnityModelLoader.LoadToScene(model, shaded: true);
+        go.transform.SetParent(visual.transform, false);
+        foreach (var t in go.GetComponentsInChildren<Transform>()) t.gameObject.layer = layer;
+        created.Add(go);
     }
 
     enum LeafStyle { Door, SlidingDoor, Window, SlidingWindow, Garage, FixedPane }
