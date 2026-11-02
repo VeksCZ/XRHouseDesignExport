@@ -216,7 +216,9 @@ public static class DoorCatalog
     {
         float s;
         string into = e.opensIntoRoomUuid ?? "";
-        if (RoomId(roomFront) == into) s = 1f;
+        // not set: doors open inward, into a scanned room (front first), never out into the side nobody scanned
+        if (into.Length == 0) s = roomFront != null || roomBack == null ? 1f : -1f;
+        else if (RoomId(roomFront) == into) s = 1f;
         else if (RoomId(roomBack) == into) s = -1f;
         // Room not among those passed in (e.g. a single-room plan): it must be the side we know nothing about.
         else if (roomFront != null && roomBack == null) s = -1f;
