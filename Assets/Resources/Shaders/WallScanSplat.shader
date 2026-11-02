@@ -58,7 +58,10 @@ Shader "Hidden/XRHouse/WallScanSplat"
                 if (Occluded(_CamPos.xyz, p)) return 0;
                 float2 e = min(img, 1 - img);                   // distance to the image border
                 float edge = saturate(min(e.x, e.y) * 6);       // fades out over the outer ~17 %
-                float s = facing * facing * edge * _Sharp / max(dist, 0.6);
+                // working distance: best from ~0.9 m out (1 / dist beyond it); closer frames are damped (pose error and
+                // parallax show most there) but still count, so they fill holes the farther frames missed
+                float near = lerp(0.65, 1.0, smoothstep(0.5, 0.9, dist));
+                float s = facing * facing * edge * near * _Sharp / max(dist, 0.9);
                 float w = s * s * s * s;
                 float3 col = tex2D(_MainTex, img).rgb;
                 return float4(col * w, w);

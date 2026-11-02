@@ -106,7 +106,7 @@ and exports 3D models, floor plans and reports from the scan.
   clickable things, ring + four arrows over anything the grip can drag, filled while the grip is held).
 - **Wall scan** (`WallScan`, layer "Wall scan (3D)", on by default): every 3D-scan (dense) frame is projected onto the
   scanned planes of its room (walls/floors/ceilings, one ARGBHalf accumulation RenderTexture per plane, shader
-  `Resources/Shaders/WallScanSplat` - weight = facing^2 x edge x sharpness / distance, ^4; `WallScanShow` divides and
+  `Resources/Shaders/WallScanSplat` - weight = facing^2 x edge x sharpness x near-damping / max(distance, 0.9 m), ^4 - frames under 0.9 m count less but still fill holes; `WallScanShow` divides, unsharp-masks (`_Sharpen` 0.35 against mip 1.5) and
   alpha-tests, so unseen spots stay holes). Live while recording (`WallPhotoCapture.PaintLive`, `WallOverlays.ForceScan`),
   otherwise built in the background from the frames on disk (`BuildMissing`). Cached per plane as PNG + `manifest.json`
   (frames held) in `WallPhotos/WallScan` (headset) / `Exports/RoomData/WallScan` (PC). Desktop: `-overlays scan`,
