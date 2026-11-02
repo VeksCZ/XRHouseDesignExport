@@ -16,6 +16,7 @@
     <Compile Include="../../../Assets/Scripts/StairFloorSnap.cs" />
     <Compile Include="../../../Assets/Scripts/FrameCulling.cs" />
     <Compile Include="../../../Assets/Scripts/CoverageGrid.cs" />
+    <Compile Include="../../../Assets/Scripts/PipeRouteData.cs" />
     <Compile Include="../../../Assets/Scripts/PhotoModelGlb.cs" />
     <PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
   </ItemGroup>

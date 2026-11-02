@@ -79,7 +79,8 @@ and exports 3D models, floor plans and reports from the scan.
   `97_Wall_Photos/`, referenced by wall anchor UUID; mirrored against the inside view; check box "Fotka stěny").
   Desktop tests: `-routes <file>` (never the real file) `-addroutes "kind:x,y,z;...|..."` (GLB frame), `-test walls`.
   Routes/boxes carry `spec` (material preset per kind), `circuit`, `note` and a per-item `modified` (RouteStore.Apply
-  stamps what a change touched; Merge keeps the newer copy). Tool panel: Pick... selects a route/box for Spec / Circuit
+  stamps what a change touched; Merge keeps the newer copy; deletions are kept as `deleted` marks (id + time, `RouteMerge`) so
+  "Pull" doesn't bring a deleted route back from the other side). Tool panel: Pick... selects a route/box for Spec / Circuit
   / Leads to; points snap onto boxes, plumb above/below boxes and to other routes' levels. Pointing at a route / box /
   photo icon shows a label (WallOverlays.UpdateAim; a photo pops up after a short dwell). "No-drill zones" (Layers tab,
   `WallOverlays.ShowZones`): bands of route width + 10 cm per side on the surface. Export also writes trade sheets

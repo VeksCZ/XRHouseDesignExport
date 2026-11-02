@@ -172,6 +172,45 @@ class T {
       Check(!FrameCulling.SeesPlane(id, 1f, 1f, .5f, .5f, new Vector3(-2, 4, 3), new Vector3(4, 0, 0), new Vector3(0, 2, 0)), "a wall above the view is not");
     }
 
+    // ---- routes: merging the headset's and the PC's file ----
+    {
+      PipeRoute R(string id, string modified, int points = 2) => new PipeRoute { id = id, modified = modified, localPoints = Enumerable.Range(0, points).Select(i => new Vector3Data()).ToList() };
+      PipeRouteFile F(params PipeRoute[] r) => new PipeRouteFile { routes = r.ToList() };
+      var pc = F(R("a", "2026-10-01T10:00:00"), R("b", "2026-10-01T10:00:00"));
+      var quest = F(R("b", "2026-10-02T10:00:00"), R("c", "2026-10-02T09:00:00"));
+      var m = RouteMerge.Merge(pc, quest);
+      Check(m.routes.Count == 3 && m.routes.First(r => r.id == "b").modified == "2026-10-02T10:00:00", "merge: union, the newer edit of a shared route wins");
+
+      // a route deleted on the headset must not come back from the PC's older copy
+      var questAfterDelete = F(R("c", "2026-10-02T09:00:00")); questAfterDelete.deleted.Add(new DeletedItem { id = "a", at = "2026-10-03T08:00:00" });
+      var m2 = RouteMerge.Merge(pc, questAfterDelete);
+      Check(!m2.routes.Any(r => r.id == "a") && m2.routes.Any(r => r.id == "b") && m2.deleted.Any(d => d.id == "a"), "merge: a route deleted on one side stays deleted (not brought back by the other side)");
+      var m2b = RouteMerge.Merge(questAfterDelete, pc);
+      Check(!m2b.routes.Any(r => r.id == "a"), "merge: the same whichever side is first");
+
+      // edited after it was deleted: alive again, the mark is dropped
+      var pcEdited = F(R("a", "2026-10-04T10:00:00"));
+      var m3 = RouteMerge.Merge(pcEdited, questAfterDelete);
+      Check(m3.routes.Any(r => r.id == "a") && !m3.deleted.Any(d => d.id == "a"), "merge: an edit newer than the deletion keeps the route");
+
+      // an old file without dates: the deletion wins
+      var m4 = RouteMerge.Merge(F(R("x", null)), new PipeRouteFile { deleted = new List<DeletedItem> { new DeletedItem { id = "x", at = "2026-10-03T08:00:00" } } });
+      Check(m4.routes.Count == 0, "merge: an undated route that was deleted is dropped");
+
+      // boxes follow the same rule
+      var withBox = new PipeRouteFile { markers = new List<RouteMarker> { new RouteMarker { id = "m1", modified = "2026-10-01T10:00:00" } } };
+      var boxGone = new PipeRouteFile { deleted = new List<DeletedItem> { new DeletedItem { id = "m1", at = "2026-10-02T10:00:00" } } };
+      Check(RouteMerge.Merge(withBox, boxGone).markers.Count == 0, "merge: a deleted box is dropped too");
+
+      // NoteDeletions: what is gone gets marked, what is back loses its mark
+      var f = F(R("keep", "2026-10-05T10:00:00"));
+      RouteMerge.NoteDeletions(f, new[] { "keep", "gone" }, "2026-10-05T11:00:00");
+      Check(f.deleted.Count == 1 && f.deleted[0].id == "gone" && f.deleted[0].at == "2026-10-05T11:00:00", "NoteDeletions marks the route that is gone");
+      f.routes.Add(R("gone", "2026-10-05T12:00:00"));
+      RouteMerge.NoteDeletions(f, new[] { "keep" }, "2026-10-05T12:00:00");
+      Check(f.deleted.Count == 0, "NoteDeletions: a route that is back loses its mark (undo)");
+    }
+
     // ---- coverage grid ----
     {
       Func<Vector3, Vector3> id = v => v;

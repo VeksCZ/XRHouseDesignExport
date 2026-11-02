@@ -58,3 +58,5 @@ public static class PendingChanges {
     string native = $"{hex.Substring(0, 8)}-{hex.Substring(8, 4)}-{hex.Substring(12, 4)}-{hex.Substring(16, 4)}-{hex.Substring(20)}";
     return (g.ToString(), native); } }
 public static class MRUKSceneCache { public static string ScanPath(string n) => System.IO.Path.Combine(System.IO.Path.GetTempPath(), n + ".scene.json"); }
+
+public class Vector3Data { public float x, y, z; public Vector3Data() {} public Vector3Data(UnityEngine.Vector3 v) { x = v.x; y = v.y; z = v.z; } }
