@@ -30,7 +30,10 @@ public class XRPerfLog : MonoBehaviour
         if (elapsed < (Debug.isDebugBuild ? 2f : 10f)) return;
 
         int gc = System.GC.CollectionCount(0);
-        Debug.Log($"PERF fps={frames / elapsed:0.0} avg={sumFrame / frames * 1000f:0.0}ms max={maxFrame * 1000f:0}ms gc={gc - gcBase} mem={System.GC.GetTotalMemory(false) / 1048576}MB");
+        // what is on screen: renderers drawn (each is at least one draw call, twice for stereo) and the wall scan's textures
+        int renderers = 0;
+        foreach (var r in FindObjectsByType<Renderer>(FindObjectsSortMode.None)) if (r.enabled && r.gameObject.activeInHierarchy) renderers++;
+        Debug.Log($"PERF fps={frames / elapsed:0.0} avg={sumFrame / frames * 1000f:0.0}ms max={maxFrame * 1000f:0}ms gc={gc - gcBase} mem={System.GC.GetTotalMemory(false) / 1048576}MB renderers={renderers} scanTex={WallScan.TextureMB:0}MB");
         elapsed = sumFrame = maxFrame = 0f; frames = 0; gcBase = gc;
     }
 }

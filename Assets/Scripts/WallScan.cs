@@ -76,6 +76,17 @@ public static class WallScan
     public static bool Building { get; private set; }
     public static IEnumerable<Plane> Planes => planes.Values;
 
+    /// <summary>Video memory of the allocated plane textures (half-float RGBA + mips), for the PERF log line.</summary>
+    public static float TextureMB
+    {
+        get
+        {
+            float bytes = 0f;
+            foreach (var p in planes.Values) if (p.Allocated) bytes += p.pxW * (float)p.pxH * 8f * 1.34f;
+            return bytes / 1048576f;
+        }
+    }
+
     public static string Root => MRUKPathUtility.IsDesktop
         ? Path.Combine(Path.GetFullPath(MRUKPathUtility.GetExportRoot()), Folder)
         : Path.Combine(Application.persistentDataPath, WallPhotoCapture.RootFolder, Folder);

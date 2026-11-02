@@ -77,7 +77,7 @@ namespace UnityEngine {
   public class Object { public string name; public int GetInstanceID() => 0; public static implicit operator bool(Object o) => !ReferenceEquals(o, null);
     public static void Destroy(Object o) {} public static void Destroy(Object o, float t) {} public static void DestroyImmediate(Object o) {}
     public static T Instantiate<T>(T o) where T : Object => o; public static T FindFirstObjectByType<T>() where T : Object => default; public static T FindAnyObjectByType<T>() where T : Object => default;
-    public static T[] FindObjectsByType<T>(FindObjectsInactive i, FindObjectsSortMode m) where T : Object => null; public static void DontDestroyOnLoad(Object o) {} }
+    public static T[] FindObjectsByType<T>(FindObjectsInactive i, FindObjectsSortMode m) where T : Object => null; public static T[] FindObjectsByType<T>(FindObjectsSortMode m) where T : Object => null; public static void DontDestroyOnLoad(Object o) {} }
   public enum FindObjectsInactive { Exclude, Include } public enum FindObjectsSortMode { None, InstanceID }
   public class Component : Object { public Transform transform; public GameObject gameObject;
     public T GetComponent<T>() => default; public T GetComponentInChildren<T>() => default; public T GetComponentInParent<T>() => default; public T[] GetComponentsInChildren<T>() => null; public T[] GetComponentsInChildren<T>(bool inactive) => null;
@@ -90,7 +90,7 @@ namespace UnityEngine {
     public Vector3 TransformDirection(Vector3 d) => rotation * d; public Vector3 InverseTransformDirection(Vector3 d) => Quaternion.Inverse(rotation) * d; public Vector3 TransformVector(Vector3 d) => rotation * d;
     public void SetParent(Transform p) {} public void SetParent(Transform p, bool worldPositionStays) {} public void SetPositionAndRotation(Vector3 p, Quaternion r) {} public void SetLocalPositionAndRotation(Vector3 p, Quaternion r) {}
     public Transform GetChild(int i) => null; public Transform Find(string n) => null; public bool IsChildOf(Transform t) => false; public void Rotate(Vector3 e) {} public void RotateAround(Vector3 p, Vector3 a, float ang) {} public void Translate(Vector3 t) {} }
-  public class GameObject : Object { public Transform transform; public int layer; public bool activeSelf; public GameObject() {} public GameObject(string n) {} public GameObject(string n, params System.Type[] c) {}
+  public class GameObject : Object { public Transform transform; public int layer; public bool activeSelf, activeInHierarchy; public GameObject() {} public GameObject(string n) {} public GameObject(string n, params System.Type[] c) {}
     public void SetActive(bool b) {} public T AddComponent<T>() where T : Component => default; public T GetComponent<T>() => default; public T GetComponentInChildren<T>() => default; public T[] GetComponentsInChildren<T>() => null; public T[] GetComponentsInChildren<T>(bool inactive) => null;
     public bool TryGetComponent<T>(out T c) { c = default; return false; } public static GameObject CreatePrimitive(PrimitiveType t) => null; }
   public enum PrimitiveType { Sphere, Capsule, Cylinder, Cube, Plane, Quad }
@@ -113,3 +113,5 @@ namespace UnityEngine {
   public static class Application { public static string persistentDataPath, dataPath, streamingAssetsPath, temporaryCachePath; public static bool isEditor, isPlaying, isBatchMode; public static RuntimePlatform platform; public static int targetFrameRate; public static void Quit() {} }
   public static class Time { public static float time, unscaledTime, deltaTime, unscaledDeltaTime, realtimeSinceStartup, timeScale, fixedDeltaTime; public static int frameCount; }
 }
+
+namespace UnityEngine { public class Renderer : Component { public bool enabled; } }
