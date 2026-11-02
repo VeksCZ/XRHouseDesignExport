@@ -261,6 +261,29 @@ public static class MRUKEditorTools {
         else Debug.LogError("<color=red>Could not pull logs (is the Quest connected?).</color>");
     }
 
+    /// <summary>Assigns Assets/Branding/XRHouseIcon.png as the Android app icon (legacy, round, adaptive) - Player
+    /// Settings has none set (m_BuildTargetIcons empty), so every build ships Unity's placeholder icon on the
+    /// headset's app library until this runs. A local build/sideload step, no Store release involved.</summary>
+    [MenuItem("MRUK/7b. Set App Icon (Android)", false, 45)]
+    public static void SetAppIcon() {
+        var icon = AssetDatabase.LoadAssetAtPath<Texture2D>("Assets/Branding/XRHouseIcon.png");
+        if (icon == null) { Debug.LogError("<color=red>Assets/Branding/XRHouseIcon.png not found.</color>"); return; }
+        foreach (var kind in new[] { UnityEditor.Android.AndroidPlatformIconKind.Legacy, UnityEditor.Android.AndroidPlatformIconKind.Round, UnityEditor.Android.AndroidPlatformIconKind.Adaptive }) {
+            var icons = PlayerSettings.GetPlatformIcons(BuildTargetGroup.Android, kind);
+            Debug.Log($"[SetAppIcon] kind {kind}: {icons.Length} slot(s)");
+            foreach (var pi in icons) {
+                pi.layerCount = pi.maxLayerCount;   // 0 by default (unconfigured) - SetTextures needs the slot count set first
+                pi.SetTextures(Enumerable.Repeat(icon, pi.layerCount).ToArray());
+                Debug.Log($"[SetAppIcon]   {pi.width}x{pi.height} layerCount={pi.layerCount} textures-after-set={string.Join(",", pi.GetTextures().Select(t => t ? t.name : "null"))}");
+            }
+            PlayerSettings.SetPlatformIcons(BuildTargetGroup.Android, kind, icons);
+            var check = PlayerSettings.GetPlatformIcons(BuildTargetGroup.Android, kind);
+            foreach (var pi in check) Debug.Log($"[SetAppIcon]   readback {pi.width}x{pi.height} textures={string.Join(",", pi.GetTextures().Select(t => t ? t.name : "null"))}");
+        }
+        AssetDatabase.SaveAssets();
+        Debug.Log("<color=green>App icon set for Android (Legacy, Round, Adaptive) - rebuild to see it on the Quest.</color>");
+    }
+
     [MenuItem("MRUK/8. Open Exports Folder", false, 50)]
     public static void OpenExportsFolder() {
         string path = Path.GetFullPath("Exports/RoomData");

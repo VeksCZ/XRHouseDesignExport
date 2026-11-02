@@ -35,6 +35,7 @@ public class XRMenu : MonoBehaviour
     const float Pad = 28f, ContentW = CanvasWidth - 2 * Pad;
     const float MenuDistance = 0.75f;   // metres in front of the eyes
     const float MenuDrop = 0.24f;       // metres below eye level, so it doesn't cover what you look at
+    const float MenuSide = 0.22f;       // metres to the right, so it opens beside your view, not dead-centre in it
     const int VisibleLogLines = 5;
     const float FlickThreshold = 0.6f;
     const float FlickCooldown = 0.35f;
@@ -501,7 +502,7 @@ public class XRMenu : MonoBehaviour
         bool settling = Time.realtimeSinceStartup < 6f && !moved;
         if (!menuPlaced || settling || (!moved && XRUi.LeftBehind(menuCanvas.transform, cam.transform)))
         {
-            XRUi.PlaceInFront(menuCanvas.transform, cam.transform, MenuDistance, MenuDrop);
+            XRUi.PlaceInFront(menuCanvas.transform, cam.transform, MenuDistance, MenuDrop, MenuSide);
             menuPlaced = true;
         }
     }
@@ -751,10 +752,12 @@ public class XRMenu : MonoBehaviour
     /// <summary>Labels that show state: the Dollhouse mode, and where the Layers tab draws (real walls or only the models).</summary>
     void SyncLabels()
     {
-        if (modeButton != null && dollhouse != null)
+        if (modeButton != null)
         {
-            string m = "Detail: " + dollhouse.ModeLabel;
-            if (m != modeShown) { modeShown = m; XRUi.SetLabel(modeButton, m); }
+            string m = walk != null && walk.IsOn ? walk.ModelLabel
+                : dollhouse != null ? "Detail: " + dollhouse.ModeLabel
+                : null;
+            if (m != null && m != modeShown) { modeShown = m; XRUi.SetLabel(modeButton, m); }
         }
 
         if (layersText != null && exporter != null)

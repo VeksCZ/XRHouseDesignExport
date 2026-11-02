@@ -46,17 +46,30 @@ public class DoorEditTool : MonoBehaviour
 
     void Start()
     {
-        if (editMode != null) editMode.TriggerPressed += OnTrigger;
+        if (editMode != null) { editMode.TriggerPressed += OnTrigger; editMode.MissingWallRequested += OnMissingWallButton; }
         HouseEditsStore.Changed += RefreshPanel;
     }
 
     void OnDestroy()
     {
-        if (editMode != null) editMode.TriggerPressed -= OnTrigger;
+        if (editMode != null) { editMode.TriggerPressed -= OnTrigger; editMode.MissingWallRequested -= OnMissingWallButton; }
         HouseEditsStore.Changed -= RefreshPanel;
         ClosePanel();
         foreach (var lr in pool) if (lr) Destroy(lr.gameObject);
         if (lineMat) Destroy(lineMat);
+    }
+
+    bool missingWallMode;
+
+    /// <summary>The toolbar's "Missing wall" button: arms the next trigger pull to look for the gap nearest to
+    /// wherever you're pointing then, instead of needing to find a bare wall first just to reach this.</summary>
+    void OnMissingWallButton()
+    {
+        if (!Active) return;
+        missingWallMode = true;
+        selected = null;
+        ClosePanel();
+        uiLog?.AddLog("Missing wall: point at the gap in the wall (or a wall near it) and pull the trigger.");
     }
 
     bool Active => editMode != null && editMode.IsOn && editMode.CurrentTool == EditModeController.Tool.Doors;
@@ -69,6 +82,7 @@ public class DoorEditTool : MonoBehaviour
             hovered = null;
             if (panel) ClosePanel();
             selected = null;
+            missingWallMode = false;
             FinishLines();
             return;
         }
@@ -148,6 +162,18 @@ public class DoorEditTool : MonoBehaviour
     {
         if (!Active) return;
         if (!frameRoot) { uiLog?.AddLog("Doors: open the Dollhouse or Walk first."); return; }
+        if (missingWallMode)
+        {
+            Vector3 mo = WorldToScan(rightHand.position);
+            aim = new Ray(mo, (WorldToScan(rightHand.position + rightHand.forward) - mo).normalized);
+            if (MissingWall.Find(rooms, aim, out var gapRoomFound, out var gp, out var gq, out float gh))
+            {
+                missingWallMode = false;
+                OpenWallPanel(gapRoomFound, gp, gq, gh);
+            }
+            else uiLog?.AddLog("<color=orange>Missing wall: no gap found there - aim more at the gap itself (or at a wall close to it) and pull the trigger again.</color>");
+            return;
+        }
         selected = hovered;
         if (selected == null)
         {
@@ -164,7 +190,11 @@ public class DoorEditTool : MonoBehaviour
                 Vector3 o = WorldToScan(rightHand.position);
                 aim = new Ray(o, (WorldToScan(rightHand.position + rightHand.forward) - o).normalized);
                 if (MissingWall.Find(rooms, aim, out var gapRoomFound, out var gp, out var gq, out float gh)) OpenWallPanel(gapRoomFound, gp, gq, gh);
-                else ClosePanel();
+                else
+                {
+                    ClosePanel();
+                    uiLog?.AddLog("<color=orange>Missing wall: point at a nearby wall (not through the gap) and pull the trigger - the panel that opens has a \"Missing wall instead\" button.</color>");
+                }
             }
             return;
         }

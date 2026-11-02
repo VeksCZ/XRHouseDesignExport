@@ -23,7 +23,7 @@ public class EditModeController : MonoBehaviour
 
     Canvas toolbar;
     TMP_Text titleText, infoText;
-    Button undoButton, redoButton;
+    Button undoButton, redoButton, doneButton, missingWallButton;
 
     public bool IsOn { get; private set; }
     /// <summary>Edit mode is on (e.g. doors in the walk-through then open by themselves).</summary>
@@ -31,6 +31,9 @@ public class EditModeController : MonoBehaviour
     public Tool CurrentTool { get; private set; } = Tool.None;
     /// <summary>Right trigger pressed while edit mode is on and the ray isn't on any UI - for the active tool.</summary>
     public event Action TriggerPressed;
+    /// <summary>The Doors tool's "Missing wall" button - a wall the scan missed is otherwise only reachable by
+    /// first pointing at an existing wall and finding the button on its panel, which users don't discover.</summary>
+    public event Action MissingWallRequested;
 
     void OnEnable() { HouseEditsStore.Changed += RefreshInfo; }
     void OnDisable() { HouseEditsStore.Changed -= RefreshInfo; }
@@ -117,7 +120,7 @@ public class EditModeController : MonoBehaviour
     {
         CurrentTool = CurrentTool == t ? Tool.None : t;
         if (CurrentTool == Tool.Stairs) uiLog?.AddLog("Stairs: trigger on the floor under the first step, each landing's middle, the top end - then Finish.");
-        if (CurrentTool == Tool.Doors) uiLog?.AddLog("Doors: point at a door + trigger to pick it, then set it on the panel.");
+        if (CurrentTool == Tool.Doors) uiLog?.AddLog("Doors: point at a door + trigger to pick it, then set it on the panel. A wall the scan missed: use the \"Missing wall\" button below.");
         if (CurrentTool == Tool.Holes) uiLog?.AddLog("Opening: two opposite corners on the ceiling (from below) or the floor (from above).");
         if (CurrentTool == Tool.Sun) uiLog?.AddLog("Sun (while walking): sunny patches from the windows - right stick left/right = half an hour, up/down = a month.");
         if (CurrentTool == Tool.Measure) uiLog?.AddLog("Measure: trigger on the start point, then on the end point (walls, floor, furniture) - trigger again starts a new one.");
@@ -126,7 +129,10 @@ public class EditModeController : MonoBehaviour
         if (CurrentTool == Tool.Furniture) uiLog?.AddLog("Furniture (while walking): trigger on a piece picks it up, it follows the ray over the floor; trigger again puts it down. Right stick click turns it 90 degrees.");
         RefreshInfo();
         ShowToolbarForTool();
+        LayoutBottomRow();
     }
+
+    void OnMissingWallButton() => MissingWallRequested?.Invoke();
 
     void OnUndo() { if (HouseEditsStore.Undo()) uiLog?.AddLog("Undo"); else uiLog?.AddLog("Nothing to undo."); }
     void OnRedo() { if (HouseEditsStore.Redo()) uiLog?.AddLog("Redo"); else uiLog?.AddLog("Nothing to redo."); }
@@ -151,10 +157,30 @@ public class EditModeController : MonoBehaviour
         infoText = XRUi.CreateText(t, "Info", "", 16, TextAlignmentOptions.MidlineLeft, pad + 4, 44, CanvasW - 2 * pad - 3 * (w + g), 64, XRUi.MutedText);
         infoText.textWrappingMode = TextWrappingModes.Normal;
         float y = CanvasH - pad - h;
-        undoButton = XRUi.CreateButton(t, "Undo", CanvasW - pad - 3 * w - 2 * g, y, w, h, OnUndo, 22);
-        redoButton = XRUi.CreateButton(t, "Redo", CanvasW - pad - 2 * w - g, y, w, h, OnRedo, 22);
-        var done = XRUi.CreateButton(t, "Done", CanvasW - pad - w, y, w, h, LeaveTool, 22);
-        XRUi.SetTint(done, XRUi.ButtonOnColor);
+        missingWallButton = XRUi.CreateButton(t, "Missing\nwall", CanvasW - pad - w, y, w, h, OnMissingWallButton, 18);
+        undoButton = XRUi.CreateButton(t, "Undo", CanvasW - pad - w, y, w, h, OnUndo, 22);
+        redoButton = XRUi.CreateButton(t, "Redo", CanvasW - pad - w, y, w, h, OnRedo, 22);
+        doneButton = XRUi.CreateButton(t, "Done", CanvasW - pad - w, y, w, h, LeaveTool, 22);
+        XRUi.SetTint(doneButton, XRUi.ButtonOnColor);
+        LayoutBottomRow();
+    }
+
+    /// <summary>Undo/Redo/Done, plus "Missing wall" only for the Doors tool - resized to fit whichever buttons show.</summary>
+    void LayoutBottomRow()
+    {
+        if (!toolbar) return;
+        const float pad = 18, h = 56, g = 10;
+        bool wall = CurrentTool == Tool.Doors;
+        missingWallButton.gameObject.SetActive(wall);
+        var shown = wall ? new[] { missingWallButton, undoButton, redoButton, doneButton } : new[] { undoButton, redoButton, doneButton };
+        float w = (CanvasW - 2 * pad - (shown.Length - 1) * g) / shown.Length;
+        float y = CanvasH - pad - h;
+        float x = CanvasW - pad - w;
+        for (int i = shown.Length - 1; i >= 0; i--)
+        {
+            XRUi.Place((RectTransform)shown[i].transform, x, y, w, h);
+            x -= w + g;
+        }
     }
 
     Transform head;
