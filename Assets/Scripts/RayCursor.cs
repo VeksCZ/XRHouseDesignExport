@@ -102,7 +102,7 @@ public class RayCursor : MonoBehaviour
 
         bool gripHeld = drag && OVRInput.Get(OVRInput.Button.PrimaryHandTrigger, OVRInput.Controller.RTouch);
         float dist = Vector3.Distance(cam.transform.position, point);
-        float target = Mathf.Max(0.012f, dist * (drag ? 0.05f : 0.024f)) * (gripHeld ? 0.82f : 1f);
+        float target = Mathf.Max(0.012f, dist * (drag ? 0.033f : 0.024f)) * (gripHeld ? 0.82f : 1f);
         float k = 1f - Mathf.Exp(-22f * Time.unscaledDeltaTime);
         size = Mathf.Lerp(size, target, k);
         tint = Mathf.Lerp(tint, drag ? 1f : onButton ? 0.5f : 0f, k);
@@ -110,7 +110,7 @@ public class RayCursor : MonoBehaviour
         if (mat.mainTexture == null) mat.mainTexture = clickTex;
 
         Color c = Color.Lerp(Blue, Green, tint);
-        c.a = gripHeld ? 1f : 0.85f;
+        c.a = gripHeld ? 1f : (drag ? 0.7f : 0.85f);
         mat.color = c;
 
         Vector3 toCam = (cam.transform.position - point).normalized;
