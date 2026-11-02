@@ -7,10 +7,12 @@ writes no Unity code.
 
     python3 Tools/generate_surroundings.py "Exports/RoomData/<scan folder>"
 
-Needs that scan's rooms named GARAGE and (for the terrace/pool corner) KITCHEN first - Data tab > scan list > the
-room-naming UI in the app, or 94_Data_RoomNames.json already present (pulled from the headset). Merges into any
-existing 95_Data_Furniture.json (keeps "items" etc.), and never overwrites a "site" that already has a "driveway_v1"
-marker without --force, so re-running after the user has nudged things in the app doesn't clobber their changes.
+Finds the garage on its own: the one room with a single large garage-door-width opening (>1.8 m - an interior door
+never is). A room actually named GARAGE (94_Data_RoomNames.json, pulled from the headset) is still used first if
+there is one. The terrace/pool corner needs a room named KITCHEN, though - there's nothing in the geometry alone to
+spot a kitchen by. Merges into any existing 95_Data_Furniture.json (keeps "items" etc.), and never overwrites a
+"site" that already has a "driveway_v1" marker without --force, so re-running after the user has nudged things in
+the app doesn't clobber their changes.
 
 Coordinates are GLB axes (metres, y up) - the same frame SiteModel/Furniture already use for "site".
 """
@@ -78,6 +80,20 @@ def find_room(rooms, names, want):
     return None
 
 
+GARAGE_DOOR_MIN_WIDTH = 1.8  # an interior door is ~0.7-1.1 m; a single-leaf garage door starts around here
+
+
+def find_garage_by_door(rooms):
+    """The room with the widest door in the whole scan, if it's wide enough to be a garage door (sectional/up-and-
+    over doors run 2.4-5+ m) - used when no room is named GARAGE. None if nothing stands out."""
+    best_room, best_w = None, GARAGE_DOOR_MIN_WIDTH
+    for r in rooms:
+        for d in r["doors"]:
+            if d.get("width", 0) > best_w:
+                best_room, best_w = r, d["width"]
+    return best_room
+
+
 def garage_door(rooms, garage):
     """(x, z) centre and outward normal (x, z) of the garage's door to the drive."""
     fc = floor_centroid(garage)
@@ -143,9 +159,13 @@ def build_site(scan_dir, out_garage=None, out_kitchen=None):
     names = load_room_names(scan_dir)
 
     garage = find_room(rooms, names, "GARAGE")
+    garage_auto = False
     if garage is None:
-        raise SystemExit("No room named GARAGE in this scan (name it in the app - Data tab - first; "
-                          "94_Data_RoomNames.json must exist next to 92_Data_Scan.scene.json).")
+        garage = find_garage_by_door(rooms)   # the one room with a single large garage-sized door
+        garage_auto = garage is not None
+    if garage is None:
+        raise SystemExit("Can't find the garage: no room is named GARAGE, and no room has a door wider than "
+                          f"{GARAGE_DOOR_MIN_WIDTH} m to spot it by. Name the room in the app (Data tab) and re-run.")
     kitchen = find_room(rooms, names, "KITCHEN")
 
     doorXZ, outN = garage_door(rooms, garage)
@@ -201,11 +221,12 @@ def build_site(scan_dir, out_garage=None, out_kitchen=None):
     ang = math.atan2(slopeDir[0], slopeDir[1])  # align roughly with the drive's approach
     ca, sa = math.cos(ang), math.sin(ang)
     def R(x, z): return (barnC[0] + x * ca - z * sa, barnC[1] + x * sa + z * ca)
-    bx0, bz0 = R(-bw / 2, -bd / 2); bx1, bz1 = R(bw / 2, bd / 2)
+    corners = [R(x, z) for x in (-bw / 2, bw / 2) for z in (-bd / 2, bd / 2)]  # all 4, not just 2 diagonal ones
     barnY = ground_y(barnC)
     # NOTE: SiteModel's buildings are x0/x1/z0/z1 axis-aligned (GLB axes); approximate the barn's rotation with
     # its bounding box (good enough at this distance/scale - rotate further in-editor if it doesn't line up).
-    buildings = [{"name": "barn", "x0": min(bx0, bx1), "x1": max(bx0, bx1), "z0": min(bz0, bz1), "z1": max(bz0, bz1),
+    buildings = [{"name": "barn", "x0": min(c[0] for c in corners), "x1": max(c[0] for c in corners),
+                  "z0": min(c[1] for c in corners), "z1": max(c[1] for c in corners),
                   "eave": barnY + 3.2 - houseFloorY, "ridge": barnY + 5.8 - houseFloorY, "roof": "tiles", "color": "barn"}]
 
     # ---- trees (a cluster NW of the house, near the barn) and hedge lines (south of the garden, along the field)
@@ -264,7 +285,7 @@ def build_site(scan_dir, out_garage=None, out_kitchen=None):
         "hedges": hedges,
         "car_start": [driveStart[0], driveStart[1], carYawDeg],
     }
-    return site, garage["id"], (kitchen["id"] if kitchen else None)
+    return site, garage["id"], (kitchen["id"] if kitchen else None), garage_auto
 
 
 def merge_and_write(scan_dir, site, force):
@@ -294,9 +315,10 @@ if __name__ == "__main__":
     if not args:
         print(__doc__); sys.exit(1)
     scan_dir = args[0]
-    site, garage_id, kitchen_id = build_site(scan_dir)
+    site, garage_id, kitchen_id, garage_auto = build_site(scan_dir)
     out = merge_and_write(scan_dir, site, force)
-    print(f"GARAGE room {garage_id}" + (f", KITCHEN room {kitchen_id}" if kitchen_id else " (no KITCHEN room named - "
-          "terrace/pool placed off the garden-side wall instead)"))
+    print(f"GARAGE room {garage_id}" + (" (found by its wide door, not a name)" if garage_auto else "") +
+          (f", KITCHEN room {kitchen_id}" if kitchen_id else " (no KITCHEN room named - "
+           "terrace/pool placed off the garden-side wall instead)"))
     print(f"{len(site['areas'])} area(s), {len(site['buildings'])} building(s), {len(site['trees'])} tree(s), "
           f"{len(site['hedges'])} hedge line(s) -> {out}")
