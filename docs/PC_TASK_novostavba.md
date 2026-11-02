@@ -14,11 +14,23 @@ Stav: zadáno 2026-11-02. Cloudová session nemá scany (jsou v .gitignore, jen 
 
 ## Postup
 1. ~~Spusť `python3 Tools/extract_scan_geometry.py "Exports/RoomData/Scan_Novostavba Osove/92_Data_Scan.scene.json"
-   novostavba.geometry.json`~~ - hotovo (2026-11-02): 15 místností, 68 zdí, 29 dveří, 17 oken, běžel bez úprav nástroje.
+   novostavba.geometry.json`~~ - hotovo (2026-11-02): 15 místností, 68 zdí, 29 dveří, 17 oken.
    `novostavba.geometry.json` + `93_Data_Edits.json` + `95_Data_Furniture.json` té scény jsou v tomto commitu.
-2. Kam sahat v kódu: `XRModelFactory` (SnapToPerpendicular, EstimateWallThickness, otvory/díry), `DoorCatalog` (otevírání dveří),
+   **Oprava (2026-11-02):** nástroj psal id (room/wall/door/window) v obráceném byte-order prvních tří skupin GUID -
+   neshodovala se s `roomUuid`/`anchorUuid` v `93_Data_Edits.json` ani s tím, co vrací MRUK za běhu (`DoorCatalog.RoomId`).
+   Opraveno (`guid_fix` v nástroji), `novostavba.geometry.json` přegenerován a id teď sedí (ověřeno proti door
+   `anchorUuid` i room `roomUuid` v edits souboru). Pokud ještě vidíš nesedící id, zkontroluj, že pracuješ s touto
+   opravenou verzí souboru, ne se starší z předchozího commitu.
+2. Stávající schody v edits (`risers: [3, 11, 3]`, 4-bodová lomená čára) zhruba odpovídají zadání uživatele (2-3 schody,
+   podesta, dlouhý úsek, podesta, 2-3 schody) a projdou desktopovým `-test stairs`; dřevěné zábradlí nahoře je už v
+   render vidět. Není jisté, že přesná pozice/natočení odpovídá "u dveří ze vstupní chodby vlevo" - ověř/doladit podle
+   popisu výše (StairEditTool, nebo přímo `localPoints`/`risers` v edits).
+3. `-test fall` na tomhle scanu selhává - u otvoru (prvního v `holes`) blokuje paprsek ve všech 4 směrech nějaká zeď/stěna
+   (floor=True, clear=False). To je pravděpodobně přesně ten "výstupek" z popisu výše - najdi tu zeď (teď už se správnými
+   id to jde přes `novostavba.geometry.json` porovnáním sousedních místností) a oprav/smaž.
+4. Kam sahat v kódu: `XRModelFactory` (SnapToPerpendicular, EstimateWallThickness, otvory/díry), `DoorCatalog` (otevírání dveří),
    `Furniture.InstallCeilings` / střechy (RoofPart), `StairGeometry` + `StairFloorSnap`.
-3. Před commitem C#: `python3 Tools/OfflineTests/FullCompile/check.py --base <poslední revize, co PC přeložil>` (a `--player`).
+5. Před commitem C#: `python3 Tools/OfflineTests/FullCompile/check.py --base <poslední revize, co PC přeložil>` (a `--player`).
 
 ## Navíc
 Uživatel nemá nic proti dalším logům, pokud pomohou najít zbytečná volání a zrychlit (GetValidRooms, přestavby pohledů).

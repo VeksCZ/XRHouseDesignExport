@@ -37,6 +37,16 @@ def to_world(p, q, v):
 def r3(v): return [round(float(c), 4) for c in v]
 def xz(v): return [round(float(v[0]), 4), round(float(v[2]), 4)]
 
+def guid_fix(u):
+    """The scan file's uuid fields are byte-reversed in their first three groups against the System.Guid Unity reads
+    at runtime (MRUKRoom/anchor uuids, roomUuid in 93_Data_Edits.json, DoorCatalog.RoomId): group 1 (4 bytes), group 2
+    (2 bytes) and group 3 (2 bytes) each need their own bytes reversed; groups 4/5 are already the same both ways."""
+    if not u: return u
+    parts = str(u).split('-')
+    if len(parts) != 5: return u
+    for i in range(3): parts[i] = bytes.fromhex(parts[i])[::-1].hex()
+    return '-'.join(parts)
+
 def hull(points):
     pts = sorted(set((round(x, 4), round(z, 4)) for x, z in points))
     if len(pts) < 3: return [list(p) for p in pts]
@@ -66,7 +76,7 @@ def v2_room(ent, uuid):
     rp, rq = pose(ent.get('locatableMETA'))
     mesh = ent['roomMeshMETA']
     vs = b64f(mesh.get('vertices')); verts = [(vs[i], vs[i+1], vs[i+2]) for i in range(0, len(vs) - 2, 3)]
-    out = {'id': uuid, 'format': 'V2', 'walls': [], 'doors': [], 'windows': [], 'floor': [], 'ceilingY': None}
+    out = {'id': guid_fix(uuid), 'format': 'V2', 'walls': [], 'doors': [], 'windows': [], 'floor': [], 'ceilingY': None}
     floor_pts, ceil_y = [], []
     for f in mesh.get('faces', []):
         label = f.get('semanticLabel', '')
@@ -75,11 +85,11 @@ def v2_room(ent, uuid):
         ws = [to_world(rp, rq, verts[i]) for i in sorted(set(idx))]
         if label in ('WALL_FACE', 'INNER_WALL_FACE', 'INVISIBLE_WALL_FACE'):
             w = wall_from_points(ws)
-            if w: w['id'] = f.get('uuid'); w['label'] = label; out['walls'].append(w)
+            if w: w['id'] = guid_fix(f.get('uuid')); w['label'] = label; out['walls'].append(w)
         elif label in LABELS_DOOR + LABELS_WINDOW:
             lo = [min(p[k] for p in ws) for k in range(3)]; hi = [max(p[k] for p in ws) for k in range(3)]
             w = wall_from_points(ws)
-            item = {'id': f.get('uuid'), 'parent': f.get('parentUuid'), 'label': label, 'center': r3([(lo[k]+hi[k])/2 for k in range(3)]),
+            item = {'id': guid_fix(f.get('uuid')), 'parent': guid_fix(f.get('parentUuid')), 'label': label, 'center': r3([(lo[k]+hi[k])/2 for k in range(3)]),
                     'width': w['length'] if w else 0, 'height': round(hi[1]-lo[1], 4), 'sill': round(lo[1], 4)}
             if w: item['a'], item['b'] = w['a'], w['b']
             (out['doors'] if label in LABELS_DOOR else out['windows']).append(item)
@@ -91,7 +101,7 @@ def v2_room(ent, uuid):
 
 def v1_room(ent, uuid, by_id):
     layout = ent['roomLayoutMETA']
-    out = {'id': uuid, 'format': 'V1', 'walls': [], 'doors': [], 'windows': [], 'floor': [], 'ceilingY': None}
+    out = {'id': guid_fix(uuid), 'format': 'V1', 'walls': [], 'doors': [], 'windows': [], 'floor': [], 'ceilingY': None}
     def rect(e):
         p, q = pose(e.get('locatableMETA')); b = e.get('bounded2DMETA') or {}
         o = b.get('offset', {}); x = b.get('extent', {})
@@ -103,7 +113,7 @@ def v1_room(ent, uuid, by_id):
         p, q, ox, oy, w, h = rect(e)
         a = to_world(p, q, (ox, oy, 0)); b = to_world(p, q, (ox + w, oy, 0)); t = to_world(p, q, (ox, oy + h, 0))
         n = qrot(q, (0, 0, 1))
-        out['walls'].append({'id': e['uuid'], 'label': 'WALL_FACE', 'a': xz(a), 'b': xz(b), 'bottom': round(min(a[1], b[1]), 4), 'top': round(max(t[1], a[1] + h), 4), 'length': round(w, 4), 'normal': [round(n[0], 4), round(n[2], 4)]})
+        out['walls'].append({'id': guid_fix(e['uuid']), 'label': 'WALL_FACE', 'a': xz(a), 'b': xz(b), 'bottom': round(min(a[1], b[1]), 4), 'top': round(max(t[1], a[1] + h), 4), 'length': round(w, 4), 'normal': [round(n[0], 4), round(n[2], 4)]})
     fid = (layout.get('floorUuid') or '').lower(); cid = (layout.get('ceilingUuid') or '').lower()
     if fid in by_id:
         fe = by_id[fid]; p, q = pose(fe.get('locatableMETA')); vs = b64f((fe.get('boundary2DMETA') or {}).get('vertices'))
@@ -117,7 +127,7 @@ def v1_room(ent, uuid, by_id):
         if label not in LABELS_DOOR + LABELS_WINDOW: continue
         p, q, ox, oy, w, h = rect(e)
         c = to_world(p, q, (ox + w / 2, oy + h / 2, 0)); n = qrot(q, (0, 0, 1))
-        item = {'id': e['uuid'], 'label': label, 'center': r3(c), 'width': round(w, 4), 'height': round(h, 4), 'sill': round(c[1] - h / 2, 4), 'normal': [round(n[0], 4), round(n[2], 4)]}
+        item = {'id': guid_fix(e['uuid']), 'label': label, 'center': r3(c), 'width': round(w, 4), 'height': round(h, 4), 'sill': round(c[1] - h / 2, 4), 'normal': [round(n[0], 4), round(n[2], 4)]}
         (out['doors'] if label in LABELS_DOOR else out['windows']).append(item)
     return out
 
