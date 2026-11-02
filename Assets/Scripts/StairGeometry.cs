@@ -250,6 +250,7 @@ public static class StairGeometry
             r.topY += XRModelFactory.Buildup(r.topY);
         }
         var risers = s.risers != null && s.risers.Count == pts.Count - 1 ? s.risers : DefaultRisers(pts, r.width, r.topY - r.bottomY, tread);
+        risers = risers.Select(x => Mathf.Max(0, x)).ToList();   // stairs saved by an older version could hold a negative flight
         int total = Mathf.Max(1, risers.Sum());
         r.rise = (r.topY - r.bottomY) / total;
 
