@@ -9,6 +9,12 @@ public class XRPerfLog : MonoBehaviour
     int frames, gcBase;
     float lastHitch = -10f;
 
+    // counters other systems bump; each PERF line reports the change since the last one (only the non-zero ones), so
+    // repeated work - a cache that keeps missing, views rebuilt too often - shows up next to the frame times
+    public static int RoomsHit, RoomsMiss, RoomsUncached, OverlayRebuilds;
+    public static float RoomsMs;
+    int lastHit, lastMiss, lastUncached, lastRebuilds; float lastRoomsMs;
+
     [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
     static void Create()
     {
@@ -34,6 +40,12 @@ public class XRPerfLog : MonoBehaviour
         int renderers = 0;
         foreach (var r in FindObjectsByType<Renderer>(FindObjectsSortMode.None)) if (r.enabled && r.gameObject.activeInHierarchy) renderers++;
         Debug.Log($"PERF fps={frames / elapsed:0.0} avg={sumFrame / frames * 1000f:0.0}ms max={maxFrame * 1000f:0}ms gc={gc - gcBase} mem={System.GC.GetTotalMemory(false) / 1048576}MB renderers={renderers} scanTex={WallScan.TextureMB:0}MB");
+        string extra = "";
+        if (RoomsHit != lastHit || RoomsMiss != lastMiss || RoomsUncached != lastUncached)
+            extra += $" validRooms(hit/miss/loading)={RoomsHit - lastHit}/{RoomsMiss - lastMiss}/{RoomsUncached - lastUncached} computeMs={RoomsMs - lastRoomsMs:0}";
+        if (OverlayRebuilds != lastRebuilds) extra += $" overlayRebuilds={OverlayRebuilds - lastRebuilds}";
+        if (extra.Length > 0) Debug.Log("PERF calls:" + extra);
+        lastHit = RoomsHit; lastMiss = RoomsMiss; lastUncached = RoomsUncached; lastRebuilds = OverlayRebuilds; lastRoomsMs = RoomsMs;
         elapsed = sumFrame = maxFrame = 0f; frames = 0; gcBase = gc;
     }
 }

@@ -187,13 +187,22 @@ var mrukAnchor = room.GetComponent<MRUKAnchor>();
     public static List<MRUKRoom> GetValidRooms(MRUK mruk)
     {
         if (mruk == null) return new List<MRUKRoom>();
-        if (MRUKExporter.Loading) return ComputeValidRooms(mruk);   // halfway through a load the rooms may be incomplete: never kept
+        if (MRUKExporter.Loading) { XRPerfLog.RoomsUncached++; return TimedCompute(mruk); }   // halfway through a load the rooms may be incomplete: never kept
         long key = MRUKExporter.SceneVersion * 1000003L + mruk.Rooms.Count;
         foreach (var r in mruk.Rooms) if (r != null) key = key * 31 + r.GetInstanceID();
-        if (cachedValid != null && key == cachedKey && cachedValid.All(r => r != null)) return new List<MRUKRoom>(cachedValid);
-        var rooms = ComputeValidRooms(mruk);
+        if (cachedValid != null && key == cachedKey && cachedValid.All(r => r != null)) { XRPerfLog.RoomsHit++; return new List<MRUKRoom>(cachedValid); }
+        XRPerfLog.RoomsMiss++;
+        var rooms = TimedCompute(mruk);
         cachedValid = rooms; cachedKey = key;
         return new List<MRUKRoom>(rooms);   // a copy: callers may sort / filter it
+    }
+
+    static List<MRUKRoom> TimedCompute(MRUK mruk)
+    {
+        float t0 = UnityEngine.Time.realtimeSinceStartup;
+        var r = ComputeValidRooms(mruk);
+        XRPerfLog.RoomsMs += (UnityEngine.Time.realtimeSinceStartup - t0) * 1000f;
+        return r;
     }
 
     static List<MRUKRoom> ComputeValidRooms(MRUK mruk)

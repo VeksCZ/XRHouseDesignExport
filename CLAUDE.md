@@ -127,7 +127,8 @@ and exports 3D models, floor plans and reports from the scan.
 - **Storage**: the 3D scan / photo tool checks free space every 20 s (`FreeSpace.Bytes`: warns below 2 GB, stops recording below 400 MB).
 - **Per-frame cost** (Quest): no string building / LINQ / allocation in `Update` paths (overlay `Stamp` struct, `LastBlocker`
   on demand, menu sync ~10x/s); `MRUKDataProcessor.GetValidRooms` is cached per loaded scene - don't add callers that need
-  fresh results mid-load (it is not cached while `MRUKExporter.Loading`).
+  fresh results mid-load (it is not cached while `MRUKExporter.Loading`). The PERF log adds a `PERF calls:` line (when non-zero):
+  `validRooms(hit/miss/loading)` + compute ms and `overlayRebuilds` per interval (`XRPerfLog` counters) - many misses or rebuilds = repeated work to remove.
 - **Niches** (furniture spec item `"type": "niche"`): cut into the walls by `XRModelFactory` (`Niches`, installed with the
   spec's ceilings by `Furniture.InstallCeilings`); `furnish.py` only marks them on the wall face.
 - **Scan sources**: the selected scan never changes by itself (only a tap in the scan list; taps are debounced, loads

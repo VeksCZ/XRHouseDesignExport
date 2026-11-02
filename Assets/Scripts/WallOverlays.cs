@@ -223,6 +223,7 @@ public class WallOverlays : MonoBehaviour
         var stamp = new Stamp(root ? root.GetInstanceID() : 0, yaw, center, sceneSig, RouteStore.Version, photoVersion, WallScan.Version, toggleVersion, flags);
         if (ctx.go != null && stamp.Equals(ctx.stamp)) return;
         Clear(ctx);
+        XRPerfLog.OverlayRebuilds++;
         float t0 = Time.realtimeSinceStartup;
         ctx.stamp = stamp; ctx.root = root; ctx.yaw = yaw; ctx.center = center;
         ctx.go = new GameObject("Overlays_" + ctx.name);
