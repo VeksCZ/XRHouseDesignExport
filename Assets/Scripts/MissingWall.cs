@@ -12,8 +12,10 @@ using UnityEngine;
 /// </summary>
 public static class MissingWall
 {
-    const float JoinDist = 0.25f;           // two wall ends closer than this are one corner
-    const float MinLen = 0.3f, MaxLen = 8f; // a gap shorter / longer than this is not a wall
+    // JoinDist only needs to cover genuine same-room corner noise (a few cm) - the old 0.25/0.3 m thresholds would
+    // also swallow a real missed wall narrower than that as "already joined" and never offer to close it.
+    const float JoinDist = 0.08f;           // two wall ends closer than this are one corner
+    const float MinLen = 0.15f, MaxLen = 8f; // a gap shorter / longer than this is not a wall
     const float MaxAim = 2.5f;              // how far (m) from the pointing ray the gap may be
 
     struct End { public int wall; public Vector3 pt; public float top; }

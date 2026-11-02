@@ -6,8 +6,14 @@ Nástroje: `Tools/analyze_scan_geometry.py`, `Tools/simulate_wall_slabs.py` (pů
 ## Scan sám je čistý
 - Všechny zdi do 1,6 deg od pravého úhlu (3 zdi nad 1,5 deg); model je stejně srovnává `SnapToPerpendicular`.
 - Půdorysy podlah se nepřekrývají (jediný průnik 0,11 m2, místnosti 6df884 / 3bf3e3 v horním patře).
-- **Jediná díra v rohu:** místnost b3293e15, zdi 3ff743b7 a a1ff496a, konce (-4.31, -4.12) a (-4.11, -4.10), mezera 20 cm.
-  Nástroj "Missing wall" (SceneJsonEdit.AddWall) ji uzavře na kopii scanu.
+- **Jediná díra v rohu - OPRAVA (2026-11-02, PC):** místnost b3293e15, zdi 3ff743b7 a a1ff496a, konce (-4.31, -4.12) a
+  (-4.11, -4.10), mezera 20 cm dle `analyze_scan_geometry.py` - ale ve skutečnosti **není díra**: MRUK má v té místnosti
+  ještě třetí WALL_FACE anchor (316bd95f, přesně 20 cm, spojuje oba konce), takže runtime smyčka zdí je už uzavřená.
+  `analyze_scan_geometry.py` tenhle krátký segment při čtení JSONu nejspíš přeskočí/sloučí - false positive v analýze,
+  ne chyba scanu. Ověřeno na `Scan_Novostavba Osove_clean` přes nový desktop test `-test addwall -room <prefix> -walls
+  <uuid1,uuid2>` (DesktopWalkTests.cs): `MissingWall.Find` nenašel žádnou díru nikde v místnosti (loose ends prázdné).
+  Při té příležitosti oprava obecného nástroje: `MissingWall.JoinDist` (0.25 m) a `MinLen` (0.3 m) byly tak vysoké, že by
+  stejně tak spolkly i SKUTEČNOU chybějící zeď užší než to - snížено na 0.08 m / 0.15 m (WallTest dál zelený).
 - Dveře jsou u konce zdi do 15 cm téměř všude (0-13 cm): běžný stav u dveří v rohu, ne chyba scanu. Dveře do rohu = kandidát na
   "dveře dětského pokoje se zavírají do zdi" - tam je třeba hlídat směr otevírání (hinge / opensInto), ne geometrii scanu.
 

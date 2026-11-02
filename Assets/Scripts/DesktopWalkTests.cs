@@ -57,6 +57,7 @@ public partial class DesktopWalkApp
                     "walls" => !ExportWallDrawings(false, outDir).Contains("failed"),
                     "detect" => !DetectRoutes().Contains("failed") && ExportWallDrawings(false, outDir) != null,
                     "adddoor" => await TestAddDoor(),
+                    "addwall" => await TestAddWall(Arg("-room"), Arg("-walls")),
                     "menu" => await TestMenu(outDir),
                     "niches" => await TestNiches(outDir),
                     _ => false,
@@ -137,6 +138,58 @@ public partial class DesktopWalkApp
         var bar = GameObject.Find("EditToolbar");
         if (bar != null) { Put(bar.transform, 0.45f, 0f); await Shot(Path.Combine(outDir, "toolbar.png")); }
         return true;
+    }
+
+    /// <summary>addwall -room &lt;uuid prefix&gt; -walls &lt;wallUuidPrefix1,wallUuidPrefix2&gt;: closes the gap at the loose
+    /// ends of those two walls with MissingWall.Find + SceneJsonEdit.AddWall (run on a copy of a scan!), reloads and
+    /// checks the gap is gone. Aims at each wall's own corners rather than a hand-picked world point, since a wall
+    /// anchor's own PlaneRect is already in the runtime scan frame MissingWall uses (no JSON-vs-Unity axis guessing).</summary>
+    async Task<bool> TestAddWall(string roomPrefix, string wallsArg)
+    {
+#if META_XR_SDK_INSTALLED
+        string scan = HouseEditsStore.CurrentScan;
+        var rooms = MRUKDataProcessor.GetValidRooms(MRUK.Instance);
+        var room = rooms.FirstOrDefault(r => roomPrefix == null || DoorCatalog.RoomId(r).StartsWith(roomPrefix));
+        if (room == null) { Debug.Log($"TEST addwall: room {roomPrefix} not found"); return false; }
+        var wallIds = (wallsArg ?? "").Split(',');
+        var walls = room.WallAnchors.Where(w => w != null && w.PlaneRect.HasValue && wallIds.Any(id => w.Anchor.Uuid.ToString("N").StartsWith(id))).ToList();
+        if (walls.Count == 0) { Debug.Log($"TEST addwall: none of the walls {wallsArg} found in room {roomPrefix}"); return false; }
+        var corners = new List<Vector3>();
+        foreach (var w in walls)
+        {
+            var rc = w.PlaneRect.Value; var t = w.transform;
+            corners.Add(t.TransformPoint(new Vector3(rc.xMin, rc.yMin, 0f)));
+            corners.Add(t.TransformPoint(new Vector3(rc.xMax, rc.yMin, 0f)));
+        }
+        // Approach from 2 m "behind" each corner along +Z: MissingWall.AimDistance only counts a gap in front of the ray
+        // (along >= 0), and a ray planted exactly on the corner can land on the wrong side of that by a hair.
+        MRUKRoom gapRoom = null; Vector3 gp = default, gq = default; float height = 0f; bool found = false; Ray ray = default;
+        foreach (var c in corners)
+        {
+            ray = new Ray(c - Vector3.forward * 2f, Vector3.forward);
+            if (MissingWall.Find(rooms, ray, out gapRoom, out gp, out gq, out height)) { found = true; break; }
+        }
+        if (!found)
+        {
+            Debug.Log($"TEST addwall: no gap found near the corners of walls {wallsArg}: {string.Join(" | ", corners)}");
+            return false;
+        }
+        string roomId = DoorCatalog.RoomId(gapRoom);
+        if (roomPrefix != null && !roomId.StartsWith(roomPrefix)) { Debug.Log($"TEST addwall: gap found in room {roomId}, expected {roomPrefix}"); return false; }
+        string err = SceneJsonEdit.AddWall(scan, gapRoom, gp, gq, height);
+        if (err != null) { Debug.Log("TEST addwall: " + err); return false; }
+        walk.Exit();
+        if (!await MRUKSceneCache.LoadCachedScene(MRUK.Instance, scan)) { Debug.Log("TEST addwall: reload failed"); return false; }
+        await Frames(2);
+        var room2 = MRUK.Instance.Rooms.FirstOrDefault(r => DoorCatalog.RoomId(r) == roomId);
+        if (room2 == null) { Debug.Log("TEST addwall: room gone after reload"); return false; }
+        bool stillGap = MissingWall.Find(new List<MRUKRoom> { room2 }, ray, out _, out _, out _, out _);
+        Debug.Log($"TEST addwall: closed a {Vector3.Distance(gp, gq) * 100:0.0} cm gap, height {height * 100:0.0} cm, room {roomId}; gap still found after reload: {stillGap}");
+        return !stillGap;
+#else
+        await Task.Yield();
+        return false;
+#endif
     }
 
     /// <summary>adddoor: adds an 80 cm door to the longest wall of the room with most walls in the scan's JSON (run it
