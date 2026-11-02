@@ -13,7 +13,8 @@ Když něco nevyjde, napište mi (nebo PC session) číslo bodu a log (`Logs/Que
 5. Namiřte na místo neskenované stěny (šatna u obýváku), spusťte trigger → „Missing wall instead“ (nebo trigger přímo do mezery) →
    náhled žlutého obdélníku mezi dvěma volnými konci zdí → „Add wall“. Zeď se objeví v modelu i v půdorysech.
    Když je otočená špatně (dovnitř/ven), nebo se nenajde mezera, pošlete mi `Logs` a scan.
-6. Po přidání: v adresáři scanu jsou `*.bak_doors` a `*.bak_last`.
+6. Po přidání: v adresáři scanu jsou `*.bak_doors` a `*.bak_last`. V panelu přidání dveří / zdi je tlačítko **Undo last scan edit**
+   (vrátí scan na stav před poslední úpravou a načte ho znovu).
 
 ## Schody a otvory
 7. **Novostavba, schody jinde**: otevřete nástroj Stairs, vyberte schody. V logu „put back on the floor“ znamená automatickou

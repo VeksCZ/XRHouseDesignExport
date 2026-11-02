@@ -60,6 +60,29 @@ public static class SceneJsonEdit
         return null;
     }
 
+    /// <summary>True when the scan has an edit (new doorway / wall) that UndoLast can take back.</summary>
+    public static bool CanUndo(string scanName)
+    {
+        if (string.IsNullOrEmpty(scanName)) return false;
+        return File.Exists(MRUKSceneCache.ScanPath(scanName) + ".bak_last");
+    }
+
+    /// <summary>Takes back the latest new doorway / wall: the scan file goes back to what it was before (*.bak_last). The file as it
+    /// was just before is kept as *.bak_redo. Null when done, else why not. Only one step - older ones: *.bak_doors.</summary>
+    public static string UndoLast(string scanName)
+    {
+        if (!CanUndo(scanName)) return "nothing to undo";
+        string path = MRUKSceneCache.ScanPath(scanName), last = path + ".bak_last";
+        try
+        {
+            File.Copy(path, path + ".bak_redo", true);
+            File.Copy(last, path, true);
+            File.Delete(last);
+            return null;
+        }
+        catch (Exception e) { return "can't restore the scan: " + e.Message; }
+    }
+
     /// <summary>Writes the edited scan. Two backups: *.bak_doors = the scan as it was before its first edit (made once), and
     /// *.bak_last = the scan as it was before this edit (overwritten each time) - one step back is always possible.</summary>
     static void WriteWithBackups(string path, JObject json)

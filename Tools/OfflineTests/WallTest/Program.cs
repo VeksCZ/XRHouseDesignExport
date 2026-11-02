@@ -116,6 +116,14 @@ class T {
       string newId = (string)added["uuid"];
       Check(order.Count == 4 && order.IndexOf(newId) == 2, $"V1 wall list order: new wall between east and west (index {order.IndexOf(newId)} of {order.Count})");
       Check(File.Exists(MRUKSceneCache.ScanPath(scan) + ".bak_doors"), "V1 backup written");
+      // undo: the scan goes back to the bytes before the edit, once
+      Check(SceneJsonEdit.CanUndo(scan), "V1 an undo is available after the edit");
+      string original = json.ToString();
+      string afterEdit = File.ReadAllText(MRUKSceneCache.ScanPath(scan));
+      Check(SceneJsonEdit.UndoLast(scan) == null, "V1 undo works");
+      Check(JObject.Parse(File.ReadAllText(MRUKSceneCache.ScanPath(scan))).ToString() == JObject.Parse(original).ToString(), "V1 undo restores the scan as it was before the edit");
+      Check(File.ReadAllText(MRUKSceneCache.ScanPath(scan) + ".bak_redo") == afterEdit, "V1 the edited file is kept as .bak_redo");
+      Check(!SceneJsonEdit.CanUndo(scan) && SceneJsonEdit.UndoLast(scan) != null, "V1 a second undo says there is nothing to undo");
     }
 
     // ---- V2 (room pose not identity) ----

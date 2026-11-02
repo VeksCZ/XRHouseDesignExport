@@ -245,7 +245,8 @@ public class DoorEditTool : MonoBehaviour
     {
         ClosePanel();
         newDoorRoom = room; newDoorPoint = point; newDoorNormal = normal; addPanelOpen = true;
-        const float ph = 372f;
+        bool canUndo = SceneJsonEdit.CanUndo(HouseEditsStore.CurrentScan);
+        float ph = 372f + (canUndo ? 72f : 0f);
         panel = XRUi.CreateWorldCanvas("NewDoorPanel", new Vector2(PW, ph), PScale);
         var t = panel.transform;
         if (userPlaced) t.SetPositionAndRotation(userPos, userRot);
@@ -276,6 +277,11 @@ public class DoorEditTool : MonoBehaviour
         y += rowH + gap;
         var wallBtn = XRUi.CreateButton(t, "Missing wall instead", x0, y, PW - 40, rowH, ShowMissingWall, 22);
         if (onLive) XRUi.SetTint(wallBtn, XRUi.ButtonDisabled);
+        if (canUndo)
+        {
+            y += rowH + gap;
+            XRUi.CreateButton(t, "Undo last scan edit", x0, y, PW - 40, rowH, UndoScanEdit, 22);
+        }
         RefreshAddPanel();
     }
 
@@ -299,7 +305,8 @@ public class DoorEditTool : MonoBehaviour
     {
         ClosePanel();
         gapRoom = room; gapP = p; gapQ = q; gapH = h; wallPanelOpen = true;
-        const float ph = 232f;
+        bool canUndo = SceneJsonEdit.CanUndo(HouseEditsStore.CurrentScan);
+        float ph = 232f + (canUndo ? 72f : 0f);
         panel = XRUi.CreateWorldCanvas("NewWallPanel", new Vector2(PW, ph), PScale);
         var t = panel.transform;
         if (userPlaced) t.SetPositionAndRotation(userPos, userRot);
@@ -319,6 +326,26 @@ public class DoorEditTool : MonoBehaviour
         var add = XRUi.CreateButton(t, "Add wall", 20, y, (PW - 40 - gap) / 2f, rowH, AddMissingWall, 22);
         XRUi.SetTint(add, XRUi.ButtonOnColor);
         XRUi.CreateButton(t, "Cancel", 20 + (PW - 40 - gap) / 2f + gap, y, (PW - 40 - gap) / 2f, rowH, ClosePanel, 22);
+        if (canUndo) XRUi.CreateButton(t, "Undo last scan edit", 20, y + rowH + gap, PW - 40, rowH, UndoScanEdit, 22);
+    }
+
+    /// <summary>Takes back the latest new doorway / wall of the saved scan (the scan file goes back to *.bak_last) and reloads it.</summary>
+    async void UndoScanEdit()
+    {
+        if (adding) return;
+        adding = true;
+        try
+        {
+            string scan = HouseEditsStore.CurrentScan;
+            string err = SceneJsonEdit.UndoLast(scan);
+            if (err != null) { uiLog?.AddLog($"<color=orange>Undo: {err}.</color>"); return; }
+            ClosePanel();
+            uiLog?.AddLog($"<color=green>Last doorway / wall taken back on '{scan}' - reloading the scan...</color>");
+            PendingChanges.Mark("edits");
+            if (uiLog != null) await uiLog.ReloadAfterScanEdit();
+            frameRoot = null;
+        }
+        finally { adding = false; }
     }
 
     async void AddMissingWall()
