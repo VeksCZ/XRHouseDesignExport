@@ -289,6 +289,24 @@ public static class DoorCatalog
         return runR < runL - 0.05f ? HingeSide.Right : HingeSide.Left;
     }
 
+    /// <summary>How many of the sample points of the opened leaf's quarter circle (closed -> 90 degrees) fall outside the
+    /// room it opens into - i.e. the leaf would swing through a wall.</summary>
+    static int ArcBlocked(DoorInfo d, string intoId, HingeSide hinge, List<MRUKRoom> rooms)
+    {
+        var into = rooms.FirstOrDefault(r => RoomId(r) == intoId);
+        if (into == null) return 0;
+        var tmp = new DoorEdit { opensIntoRoomUuid = intoId, hinge = hinge };
+        Swing(d, tmp, out var h, out var swing, out var toOther);
+        int bad = 0;
+        for (int deg = 15; deg <= 90; deg += 15)
+        {
+            float a = deg * Mathf.Deg2Rad;
+            Vector3 p = h + (toOther * Mathf.Cos(a) + swing * Mathf.Sin(a)) * (d.width * 0.95f) + Vector3.up * 0.5f;
+            if (FindRoomAt(rooms, p) != into) bad++;
+        }
+        return bad;
+    }
+
     static SectionEdit Part(DoorKind k, HingeSide h = HingeSide.Left) => new SectionEdit { kind = k, hinge = h };
 
     /// <summary>
@@ -311,6 +329,26 @@ public static class DoorCatalog
         {
             e.kind = exterior && w >= 2.0f ? DoorKind.Garage : w >= 1.4f ? DoorKind.Double : DoorKind.Single;
             e.hinge = GuessHinge(d, e, rooms);
+            if (!exterior && e.kind == DoorKind.Single)
+            {
+                // the leaf must not swing through a wall: when the first choice does, try the other hinge side, then the other room
+                int bad = ArcBlocked(d, e.opensIntoRoomUuid, e.hinge, rooms);
+                if (bad > 0)
+                {
+                    string other = e.opensIntoRoomUuid == front ? back : front;
+                    var cand = new List<(string room, HingeSide hinge)>
+                    {
+                        (e.opensIntoRoomUuid, e.hinge == HingeSide.Left ? HingeSide.Right : HingeSide.Left),
+                        (other, GuessHinge(d, new DoorEdit { opensIntoRoomUuid = other }, rooms)),
+                        (other, GuessHinge(d, new DoorEdit { opensIntoRoomUuid = other }, rooms) == HingeSide.Left ? HingeSide.Right : HingeSide.Left),
+                    };
+                    foreach (var c in cand)
+                    {
+                        int b = ArcBlocked(d, c.room, c.hinge, rooms);
+                        if (b < bad) { bad = b; e.opensIntoRoomUuid = c.room; e.hinge = c.hinge; if (b == 0) break; }
+                    }
+                }
+            }
             return;
         }
 

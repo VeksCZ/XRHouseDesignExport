@@ -127,7 +127,8 @@ and exports 3D models, floor plans and reports from the scan.
 - **Storage**: the 3D scan / photo tool checks free space every 20 s (`FreeSpace.Bytes`: warns below 2 GB, stops recording below 400 MB).
 - **Per-frame cost** (Quest): no string building / LINQ / allocation in `Update` paths (overlay `Stamp` struct, `LastBlocker`
   on demand, menu sync ~10x/s); `MRUKDataProcessor.GetValidRooms` is cached per loaded scene - don't add callers that need
-  fresh results mid-load (it is not cached while `MRUKExporter.Loading`).
+  fresh results mid-load (it is not cached while `MRUKExporter.Loading`). The PERF log adds a `PERF calls:` line (when non-zero):
+  `validRooms(hit/miss/loading)` + compute ms and `overlayRebuilds` per interval (`XRPerfLog` counters) - many misses or rebuilds = repeated work to remove.
 - **Niches** (furniture spec item `"type": "niche"`): cut into the walls by `XRModelFactory` (`Niches`, installed with the
   spec's ceilings by `Furniture.InstallCeilings`); `furnish.py` only marks them on the wall face.
 - **Scan sources**: the selected scan never changes by itself (only a tap in the scan list; taps are debounced, loads
@@ -198,6 +199,9 @@ and exports 3D models, floor plans and reports from the scan.
 - **Branding**: store art in `Store/` on the PC (icon 512, covers, hero, mini); the Quest system splash is
   `Assets/Branding/XRHouseSplash.png` (stereo side-by-side, 2x 1600x1000, set in `OculusProjectConfig`, passthrough
   background) - the OS shows it instantly instead of the loading dots. Unity's own splash is off.
+- **Scan geometry reports**: `Tools/extract_scan_geometry.py <92_Data_Scan.scene.json>` pulls walls / doors / floors out of a saved scan into a small JSON;
+  `Tools/analyze_scan_geometry.py <that json>` lists walls off a right angle, loose wall ends (holes), protrusions (a wall deep inside another room) and doors
+  at a wall end (exit code 2 = issues). Checked on synthetic data only so far; tolerance `--tol` degrees (default 1.5).
 - **Do not add packages that spawn helper processes** (`com.unity.ai.assistant`'s `relay_win.exe` inherited the MCP
   bridge's listening socket on Windows and made the bridge unable to rebind after a domain reload).
 - Tests: `Assets/Tests/EditMode` (plan geometry, room names, `GeometryTests`: frame culling, stair floor snap, textured GLB structure - these also compile and pass as plain NUnit against the offline stand-ins) and `Assets/Tests/PlayMode` (whole export pipeline on
