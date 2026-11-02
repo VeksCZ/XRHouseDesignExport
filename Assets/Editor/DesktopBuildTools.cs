@@ -17,7 +17,7 @@ using Meta.XR.MRUtilityKit;
 ///
 /// The build never runs in this project's Library: switching this editor between Android and Windows reimports
 /// every texture/shader for the other platform each way, so the next Quest build after a Windows build was slow.
-/// Instead it runs in a "shadow" project next to this one (../XRHouseDesignExport_WinBuild) whose Assets, Packages
+/// Instead it runs in a "shadow" project next to this one (../XRHouseDesignExportWindows) whose Assets, Packages
 /// and ProjectSettings are junctions to this project's - same sources, its own Library that stays on Windows.
 /// This editor stays on Android; the shadow build runs in the background (log: Logs/desktop_build.log). Its first
 /// build imports everything once (minutes); after that both Libraries stay warm.
@@ -29,7 +29,7 @@ public static class DesktopBuildTools
     public const string ScenePath = "Assets/Scenes/DesktopWalkScene.unity";
     const string ExeRelPath = "Builds/Windows/XRHouseWalk.exe";
     const string LogRelPath = "Logs/desktop_build.log";
-    const string ShadowSuffix = "_WinBuild";
+    const string ShadowSuffix = "Windows";
 
     static string ProjectRoot => Directory.GetCurrentDirectory();
     static string ShadowRoot => Path.Combine(Path.GetDirectoryName(ProjectRoot), Path.GetFileName(ProjectRoot) + ShadowSuffix);
@@ -90,7 +90,7 @@ public static class DesktopBuildTools
         Process.Start(new ProcessStartInfo(ExePath) { WorkingDirectory = Path.GetDirectoryName(ExePath) });
     }
 
-    /// <summary>Creates ../&lt;project&gt;_WinBuild with junctions to this project's Assets, Packages and
+    /// <summary>Creates ../&lt;project&gt;Windows with junctions to this project's Assets, Packages and
     /// ProjectSettings (junctions need no admin rights). Its Library, Temp and Logs are its own.</summary>
     static bool EnsureShadowProject()
     {

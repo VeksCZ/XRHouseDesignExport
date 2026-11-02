@@ -1,9 +1,9 @@
 param([string]$Out = 'WindowsTest')
-# Windows app build in the shadow project (XRHouseDesignExport_WinBuild: junctions to Assets/Packages/ProjectSettings,
+# Windows app build in the shadow project (XRHouseDesignExportWindows: junctions to Assets/Packages/ProjectSettings,
 # its own Library), so the main project's Android Library is never reimported. -Out WindowsTest (scripted tests) or
 # Windows (the app you use). Prints BUILD OK / BUILD FAILED.
 $m = (Resolve-Path "$PSScriptRoot\..\..").Path
-$s = "$m`_WinBuild"
+$s = "$m" + "Windows"
 $u = 'C:\Program Files\Unity\Hub\Editor\6000.3.9f1\Editor\Unity.exe'
 if (Get-Process Unity -ErrorAction SilentlyContinue) { "BUILD FAILED (Unity is running)"; exit 1 }
 if ($Out -eq 'Windows') {

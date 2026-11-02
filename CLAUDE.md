@@ -162,7 +162,7 @@ and exports 3D models, floor plans and reports from the scan.
   -buildTarget Android -executeMethod BuildQuest.BuildAndRun` (exit code 0 = built, installed, started).
 - **Windows desktop app** (`DesktopWalkScene`: `DesktopWalkApp` + `DesktopWalkRig` driving the shared
   `WalkThroughMode` with keyboard/mouse; reads `Exports/RoomData` via `DataFolder.txt` next to the exe). Build it with
-  menu MRUK > Desktop > Build (background) - it runs in the shadow project `../XRHouseDesignExport_WinBuild`
+  menu MRUK > Desktop > Build (background) - it runs in the shadow project `../XRHouseDesignExportWindows`
   (junctions to Assets/Packages/ProjectSettings, own Library on Windows), so this project never switches off Android.
   Never build Windows in this project's Library, and never run the Windows and Quest builds at the same time: they
   share Assets (the Windows build briefly saves the Standalone XR auto-start off; AR Foundation moves XR Simulation
