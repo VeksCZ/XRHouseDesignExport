@@ -13,3 +13,6 @@ Core 207: FOV simulace v OVRManager / Immersive Debugger, experimentální Devic
 (Window > Meta > Meta XR SDK) - netýká se kódu.
 
 Doporučení: upgrade dělat na samostatné větvi, po něm spustit `-test views|doors|stairs` a načíst jeden V1 a jeden V2 scan; do té doby zůstat na 205.
+
+Seznam uložených scanů podle formátu (spustit na PC): `python3 Tools/list_scan_formats.py` (čte `Exports/RoomData`, po "Pull" i scany z headsetu).
+Každý V2 / MIXED scan je třeba před přechodem na 207 zkusmo načíst.
