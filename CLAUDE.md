@@ -117,6 +117,9 @@ and exports 3D models, floor plans and reports from the scan.
   unlit, alpha-masked quad per photographed plane with its PNG embedded, same frame as the other models (open both in a viewer
   to see pipes and cables on the bare walls). The writer is validated with the Khronos glTF validator (0 issues) and tested in
   `Tools/OfflineTests/WallTest`; to re-validate: `npm i gltf-validator`, run it on the `photo_test.glb` the test writes.
+- **User data files** (edits, routes, room names, saved scans, furniture spec) are written with `SafeFile.WriteAllText` (path.tmp, then an
+  atomic swap; the previous version stays as `path.bak`) and read with `ReadAllTextOrBackup` where it matters (edits, routes) - a kill
+  during a save (headset sleep) never leaves half a file. Use it for any new file the user can't recreate.
 - **Per-frame cost** (Quest): no string building / LINQ / allocation in `Update` paths (overlay `Stamp` struct, `LastBlocker`
   on demand, menu sync ~10x/s); `MRUKDataProcessor.GetValidRooms` is cached per loaded scene - don't add callers that need
   fresh results mid-load (it is not cached while `MRUKExporter.Loading`).

@@ -188,8 +188,9 @@ public static class RouteStore
     {
         try
         {
-            if (!File.Exists(path)) return null;
-            var f = JsonUtility.FromJson<PipeRouteFile>(File.ReadAllText(path));
+            string text = SafeFile.ReadAllTextOrBackup(path, t => JsonUtility.FromJson<PipeRouteFile>(t) != null, w => Debug.LogWarning("[Routes] " + w));
+            if (text == null) return null;
+            var f = JsonUtility.FromJson<PipeRouteFile>(text);
             if (f == null) return null;
             f.routes ??= new List<PipeRoute>();
             f.markers ??= new List<RouteMarker>();
@@ -241,7 +242,7 @@ public static class RouteStore
         try
         {
             Directory.CreateDirectory(Path.GetDirectoryName(FilePath));
-            File.WriteAllText(FilePath, JsonUtility.ToJson(current, true));
+            SafeFile.WriteAllText(FilePath, JsonUtility.ToJson(current, true));
         }
         catch (Exception e) { Debug.LogException(e); }
         Version++;

@@ -616,7 +616,7 @@ public static class Furniture
     {
         string path = MRUKSceneCache.FurniturePath(scanName);
         if (string.IsNullOrEmpty(path) || spec == null) return false;
-        try { File.WriteAllText(path, spec.ToString(Newtonsoft.Json.Formatting.Indented)); return true; }
+        try { SafeFile.WriteAllText(path, spec.ToString(Newtonsoft.Json.Formatting.Indented)); return true; }
         catch (Exception ex) { Debug.LogWarning($"[Furniture] save {path}: {ex.Message}"); return false; }
     }
 

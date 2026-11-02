@@ -98,3 +98,7 @@ namespace UnityEngine {
   public class Canvas : Behaviour { }
   public class Camera : Behaviour { public static Camera main; public float nearClipPlane; }
 }
+
+namespace UnityEngine {
+  public static class JsonUtility { public static T FromJson<T>(string json) => default; public static string ToJson(object o) => ""; public static string ToJson(object o, bool pretty) => ""; public static void FromJsonOverwrite(string json, object o) {} }
+}

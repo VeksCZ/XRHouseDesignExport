@@ -237,7 +237,7 @@ public static class MRUKSceneCache
         if (FolderMode && !name.StartsWith(ScanFolderPrefix)) name = ScanFolderPrefix + name;
         string path = ScanPath(name);
         Directory.CreateDirectory(Path.GetDirectoryName(path));
-        File.WriteAllText(path, json);
+        SafeFile.WriteAllText(path, json);
         return name;
     }
 

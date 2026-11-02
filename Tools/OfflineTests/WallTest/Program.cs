@@ -172,6 +172,27 @@ class T {
       Check(!FrameCulling.SeesPlane(id, 1f, 1f, .5f, .5f, new Vector3(-2, 4, 3), new Vector3(4, 0, 0), new Vector3(0, 2, 0)), "a wall above the view is not");
     }
 
+    // ---- SafeFile: user data survives a kill halfway through a save ----
+    {
+      string dir = Path.Combine(Path.GetTempPath(), "safefile_test_" + Guid.NewGuid().ToString("N")); Directory.CreateDirectory(dir);
+      string f = Path.Combine(dir, "edits.json");
+      SafeFile.WriteAllText(f, "{\"v\":1}");
+      Check(File.ReadAllText(f) == "{\"v\":1}" && !File.Exists(f + ".tmp") && !File.Exists(f + ".bak"), "first write: file there, no .tmp, no .bak yet");
+      SafeFile.WriteAllText(f, "{\"v\":2}");
+      Check(File.ReadAllText(f) == "{\"v\":2}" && File.ReadAllText(f + ".bak") == "{\"v\":1}" && !File.Exists(f + ".tmp"), "second write: new content, the previous one kept as .bak, .tmp gone");
+      // the app was killed while writing the next one: a half .tmp is left, the real file is untouched
+      File.WriteAllText(f + ".tmp", "{\"v\":3,\"half");
+      Check(SafeFile.ReadAllTextOrBackup(f, t => t.EndsWith("}")) == "{\"v\":2}", "a half-written .tmp never replaces the file");
+      // the file itself got corrupted (older bug, disk): the backup is used
+      File.WriteAllText(f, "{\"v\":2,\"hal");
+      string warned = null;
+      Check(SafeFile.ReadAllTextOrBackup(f, t => t.EndsWith("}"), w => warned = w) == "{\"v\":1}" && warned != null && warned.Contains(".bak"), "an unreadable file falls back to the .bak (and says so)");
+      File.Delete(f);
+      Check(SafeFile.ReadAllTextOrBackup(f, t => true) == "{\"v\":1}", "a missing file falls back to the .bak");
+      Check(SafeFile.ReadAllTextOrBackup(Path.Combine(dir, "nothing.json"), t => true) == null, "nothing there: null");
+      Directory.Delete(dir, true);
+    }
+
     // ---- routes: merging the headset's and the PC's file ----
     {
       PipeRoute R(string id, string modified, int points = 2) => new PipeRoute { id = id, modified = modified, localPoints = Enumerable.Range(0, points).Select(i => new Vector3Data()).ToList() };

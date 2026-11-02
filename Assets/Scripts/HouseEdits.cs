@@ -182,7 +182,7 @@ public static class HouseEditsStore
         try
         {
             Directory.CreateDirectory(Path.GetDirectoryName(target));
-            File.WriteAllText(target, JsonUtility.ToJson(dst, true));
+            SafeFile.WriteAllText(target, JsonUtility.ToJson(dst, true));
             if (File.Exists(livePath)) File.Delete(livePath);
         }
         catch (Exception ex) { Debug.LogException(ex); return false; }
@@ -197,20 +197,19 @@ public static class HouseEditsStore
 
     static HouseEdits Load(string scanName, string path)
     {
-        if (File.Exists(path))
+        try
         {
-            try
-            {
-                var e = JsonUtility.FromJson<HouseEdits>(File.ReadAllText(path));
-                if (e != null) { e.doors ??= new List<DoorEdit>(); e.stairs ??= new List<StairEdit>(); e.holes ??= new List<HoleEdit>(); return e; }
-            }
-            catch (Exception ex)
-            {
-                // Never silently overwrite a file we couldn't read - keep a copy of it before starting fresh.
-                Debug.LogException(ex);
-                try { File.Copy(path, path + ".broken", true); } catch { }
-            }
+            // the file, or - if it is missing / half-written (the app was killed while saving) - its .bak (SafeFile)
+            string text = SafeFile.ReadAllTextOrBackup(path, t => JsonUtility.FromJson<HouseEdits>(t) != null, w => Debug.LogWarning("[Edits] " + w));
+            var e = text != null ? JsonUtility.FromJson<HouseEdits>(text) : null;
+            if (e != null) { e.doors ??= new List<DoorEdit>(); e.stairs ??= new List<StairEdit>(); e.holes ??= new List<HoleEdit>(); return e; }
         }
+        catch (Exception ex)
+        {
+            Debug.LogException(ex);
+        }
+        // Never silently overwrite a file we couldn't read - keep a copy of it before starting fresh.
+        if (File.Exists(path)) { try { File.Copy(path, path + ".broken", true); } catch { } }
         return new HouseEdits { scanName = scanName };
     }
 
@@ -256,7 +255,7 @@ public static class HouseEditsStore
         {
             string path = currentPath ?? PathFor(CurrentScan);
             Directory.CreateDirectory(Path.GetDirectoryName(path));
-            File.WriteAllText(path, JsonUtility.ToJson(Current, true));
+            SafeFile.WriteAllText(path, JsonUtility.ToJson(Current, true));
         }
         catch (Exception ex) { Debug.LogException(ex); }
         PendingChanges.Mark("edits");

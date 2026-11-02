@@ -226,7 +226,7 @@ public static class MRUKEditorTools {
         if (quest == null && pc == null) return;
         var merged = RouteStore.Merge(pc, quest);
         Directory.CreateDirectory(Path.GetDirectoryName(local));
-        File.WriteAllText(local, JsonUtility.ToJson(merged, true));
+        SafeFile.WriteAllText(local, JsonUtility.ToJson(merged, true));
         RunAdb($"shell mkdir -p \"{RemoteAppFiles}/{RouteStore.Folder}\"");
         RunAdb($"push \"{local}\" \"{remote}\"");
         Debug.Log($"<color=green>Routes: {merged.routes.Count} (Quest {quest?.routes.Count ?? 0}, PC {pc?.routes.Count ?? 0}) - merged into {local} and back to the Quest.</color>");
