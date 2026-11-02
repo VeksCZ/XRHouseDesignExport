@@ -605,11 +605,18 @@ public class WallPhotoCapture : MonoBehaviour
     }
 
     /// <summary>"  -  walls 63 %": how much of this room's walls the 3D scan has seen so far (empty until the room has planes).</summary>
+    float coverageAt; string coverageShown = "";
     string CoverageText()
     {
 #if META_XR_SDK_INSTALLED
-        float c = currentRoomUuid != null ? WallScan.CoverageOf(currentRoomUuid) : -1f;
-        return c >= 0f ? $"  -  walls {Mathf.RoundToInt(c * 100f)} %" : "";
+        // worked out ~4 times a second, not every frame (it walks every plane of the scan and builds a string)
+        if (Time.unscaledTime >= coverageAt)
+        {
+            coverageAt = Time.unscaledTime + 0.25f;
+            float c = currentRoomUuid != null ? WallScan.CoverageOf(currentRoomUuid) : -1f;
+            coverageShown = c >= 0f ? $"  -  walls {Mathf.RoundToInt(c * 100f)} %" : "";
+        }
+        return coverageShown;
 #else
         return "";
 #endif

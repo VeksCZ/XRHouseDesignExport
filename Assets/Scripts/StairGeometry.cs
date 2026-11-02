@@ -87,7 +87,7 @@ public static class StairGeometry
         // The first step stands on a floor. When it is clearly off every floor under it (a room that was re-scanned moved
         // by a storey, the stairs came along room-local), the whole stair is put back on the nearest floor - and, on a
         // saved scan, stored that way so it stays.
-        float dy = pts.Count > 0 ? StairFloorSnap.Offset(pts[0], ScannedFloors(rooms)) : 0f;
+        float dy = pts.Count > 0 ? SnapOffset(s.id, pts[0], rooms) : 0f;
         if (dy != 0f)
         {
             for (int i = 0; i < pts.Count; i++) pts[i] += Vector3.up * dy;
@@ -99,6 +99,20 @@ public static class StairGeometry
             }
         }
         return pts;
+    }
+
+    // WorldPoints runs several times per frame while the stair panel is open; the floors are only looked at again when the stair's
+    // first point or the loaded scene changed
+    static readonly Dictionary<string, (int scene, Vector3 p0, float dy)> snapCache = new Dictionary<string, (int, Vector3, float)>();
+
+    static float SnapOffset(string id, Vector3 p0, List<MRUKRoom> rooms)
+    {
+        id ??= "";
+        int scene = MRUKExporter.SceneVersion;
+        if (snapCache.TryGetValue(id, out var c) && c.scene == scene && (c.p0 - p0).sqrMagnitude < 1e-8f) return c.dy;
+        float dy = StairFloorSnap.Offset(p0, ScannedFloors(rooms));
+        snapCache[id] = (scene, p0, dy);
+        return dy;
     }
 
     /// <summary>Every scanned floor as its outline in the scan's world frame and its height.</summary>
