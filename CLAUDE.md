@@ -124,6 +124,7 @@ and exports 3D models, floor plans and reports from the scan.
 - **User data files** (edits, routes, room names, saved scans, furniture spec) are written with `SafeFile.WriteAllText` (path.tmp, then an
   atomic swap; the previous version stays as `path.bak`) and read with `ReadAllTextOrBackup` where it matters (edits, routes) - a kill
   during a save (headset sleep) never leaves half a file. Use it for any new file the user can't recreate.
+- **Storage**: the 3D scan / photo tool checks free space every 20 s (`FreeSpace.Bytes`: warns below 2 GB, stops recording below 400 MB).
 - **Per-frame cost** (Quest): no string building / LINQ / allocation in `Update` paths (overlay `Stamp` struct, `LastBlocker`
   on demand, menu sync ~10x/s); `MRUKDataProcessor.GetValidRooms` is cached per loaded scene - don't add callers that need
   fresh results mid-load (it is not cached while `MRUKExporter.Loading`).
@@ -185,7 +186,7 @@ and exports 3D models, floor plans and reports from the scan.
   `Tools/OfflineTests/FullCompile` (`python3 check.py [--base REV]`, ~30 s) compiles all scripts against generated stand-ins and
   prints only the errors NEW since a known-good revision (the stand-ins make ~1400 errors of noise): it catches what the
   syntax check can't - scope clashes (CS0136), unassigned locals, `Action` passed where `UnityAction` is wanted, wrong
-  argument types between project APIs (a NEW "does not contain a definition" on a Unity / Meta type is stand-in noise - check the member exists). **Run it before every commit of C# code** (base = the last revision the PC compiled).
+  argument types between project APIs (a NEW "does not contain a definition" on a Unity / Meta type is stand-in noise - check the member exists). **Run it before every commit of C# code** (base = the last revision the PC compiled). `--player` compiles with the Android player's defines (no `UNITY_EDITOR`) - run it too after touching `#if UNITY_ANDROID`/`!UNITY_EDITOR` code.
 - **Built-in modules**: unused ones (cloth, terrain, tilemap, wind, video...) are out of `manifest.json`;
   Meta's SDK needs `assetbundle`, `physics2d`, `particlesystem` and (Android) `director` without declaring them - keep
   those. `com.unity.xr.meta-openxr` (+ AR Foundation, XR Simulation assets) was removed - nothing used it; Meta XR Core

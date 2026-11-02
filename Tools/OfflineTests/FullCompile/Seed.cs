@@ -102,3 +102,14 @@ namespace UnityEngine {
 namespace UnityEngine {
   public static class JsonUtility { public static T FromJson<T>(string json) => default; public static string ToJson(object o) => ""; public static string ToJson(object o, bool pretty) => ""; public static void FromJsonOverwrite(string json, object o) {} }
 }
+
+namespace UnityEngine {
+  public class AndroidJavaObject : IDisposable { public AndroidJavaObject(string cls, params object[] args) {} public T Call<T>(string m, params object[] a) => default; public void Call(string m, params object[] a) {} public T Get<T>(string f) => default; public void Dispose() {} }
+  public class AndroidJavaClass : AndroidJavaObject { public AndroidJavaClass(string c) : base(c) {} public T CallStatic<T>(string m, params object[] a) => default; public void CallStatic(string m, params object[] a) {} public T GetStatic<T>(string f) => default; }
+}
+
+namespace UnityEngine {
+  public enum RuntimePlatform { WindowsEditor, WindowsPlayer, Android, LinuxPlayer, OSXPlayer }
+  public static class Application { public static string persistentDataPath, dataPath, streamingAssetsPath, temporaryCachePath; public static bool isEditor, isPlaying, isBatchMode; public static RuntimePlatform platform; public static int targetFrameRate; public static void Quit() {} }
+  public static class Time { public static float time, unscaledTime, deltaTime, unscaledDeltaTime, realtimeSinceStartup, timeScale, fixedDeltaTime; public static int frameCount; }
+}

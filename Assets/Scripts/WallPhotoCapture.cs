@@ -181,6 +181,7 @@ public class WallPhotoCapture : MonoBehaviour
             return;
         }
         wasActive = true;
+        CheckStorage();
         // while the 3D scan records, the walls show what it has painted so far
         WallOverlays.ForceScan = dense;
         if (!started && !preparing && Time.time >= retryAt) Begin();
@@ -192,8 +193,8 @@ public class WallPhotoCapture : MonoBehaviour
         view = View.Unknown;
         if (!shotRequested && !capturing)
         {
-            if (dense) { if (pendingWrites < MaxPendingWrites && DenseDue()) shotRequested = requestDense = true; }
-            else if (auto)
+            if (dense) { if (!storageFull && pendingWrites < MaxPendingWrites && DenseDue()) shotRequested = requestDense = true; }
+            else if (auto && !storageFull)
             {
                 view = ClassifyView();
                 if (view == View.Settling && stillFor >= StillTime && Time.time - lastShotTime >= MinInterval)
@@ -211,6 +212,25 @@ public class WallPhotoCapture : MonoBehaviour
     {
         FollowHand();
         PlaceHud();
+    }
+
+    // ---------- storage ----------
+
+    const long LowStorage = 2L << 30, FullStorage = 400L << 20;   // warn below 2 GB, stop recording below 400 MB
+    float nextStorageCheck; bool storageFull, storageWarned;
+
+    /// <summary>Every 20 s: recording stops before the headset's storage is full (it made half-written photos) and says so.</summary>
+    void CheckStorage()
+    {
+        if (Time.unscaledTime < nextStorageCheck) return;
+        nextStorageCheck = Time.unscaledTime + 20f;
+        long free = FreeSpace.Bytes(Application.persistentDataPath);
+        if (free < 0) { storageFull = false; return; }
+        bool wasFull = storageFull;
+        storageFull = free < FullStorage;
+        if (storageFull && !wasFull) uiLog?.AddLog($"<color=red>Storage almost full ({free / 1048576} MB free) - recording stopped. Free space: Data > Delete exports.</color>");
+        else if (!storageFull && free < LowStorage && !storageWarned) { storageWarned = true; uiLog?.AddLog($"<color=orange>Only {free / 1073741824f:0.0} GB of storage left - a house scan takes several GB.</color>"); }
+        else if (!storageFull && wasFull) uiLog?.AddLog("Storage freed - recording continues.");
     }
 
     // ---------- session ----------
@@ -1278,6 +1298,7 @@ public class WallPhotoCapture : MonoBehaviour
             return;
         }
         if (now < flashUntil && flashText != null) { SetHud(flashText); return; }
+        if (storageFull) { SetHud("<color=#ff5050>Storage almost full - recording stopped</color> <size=26>- free space in the Data tab</size>"); return; }
 #if META_XR_SDK_INSTALLED
         if (cam == null || !cam.IsPlaying) { SetHud("Camera starting..."); return; }
         if (dense)
