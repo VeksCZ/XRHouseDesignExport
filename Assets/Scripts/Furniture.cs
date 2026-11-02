@@ -19,12 +19,25 @@ using Meta.XR.MRUtilityKit;
 public static class Furniture
 {
     /// <summary>The spec for a saved scan, or null if it has none (or it can't be read).</summary>
+    static string cachedPath; static DateTime cachedTime; static long cachedLength; static JObject cachedSpec;
+
+    /// <summary>Parsed once per file version: a build asks for the spec ~5 times (walls, ceilings, furniture, site...) and a big
+    /// house's spec is hundreds of KB. Callers get their own copy (items are moved / turned in it before being saved).</summary>
     public static JObject Load(string scanName)
     {
         string path = MRUKSceneCache.FurniturePath(scanName);
         if (string.IsNullOrEmpty(path) || !File.Exists(path)) return null;
-        try { return JObject.Parse(File.ReadAllText(path)); }
-        catch (Exception ex) { Debug.LogWarning($"[Furniture] {path}: {ex.Message}"); return null; }
+        try
+        {
+            var info = new FileInfo(path);
+            if (cachedSpec == null || cachedPath != path || cachedTime != info.LastWriteTimeUtc || cachedLength != info.Length)
+            {
+                cachedSpec = JObject.Parse(File.ReadAllText(path));
+                cachedPath = path; cachedTime = info.LastWriteTimeUtc; cachedLength = info.Length;
+            }
+            return (JObject)cachedSpec.DeepClone();
+        }
+        catch (Exception ex) { cachedSpec = null; Debug.LogWarning($"[Furniture] {path}: {ex.Message}"); return null; }
     }
 
     static readonly Dictionary<string, Color> Materials = new Dictionary<string, Color>
