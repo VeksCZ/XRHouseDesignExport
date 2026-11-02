@@ -187,20 +187,8 @@ public static class StairGeometry
 
     /// <summary>Riser counts for a new stair: floor-to-floor / ~17.5 cm in total, each flight as many steps as fit
     /// its leg at the standard tread, the longest flight taking up the difference.</summary>
-    public static List<int> DefaultRisers(List<Vector3> pts, float width, float rise, float tread = DefaultTread)
-    {
-        var lens = FlightLengths(pts, width);
-        int total = TotalRisers(rise);
-        var n = lens.Select(l => Mathf.Max(0, Mathf.FloorToInt(l / tread + 0.25f))).ToList();
-        int diff = total - n.Sum();
-        if (n.Count > 0)
-        {
-            int longest = lens.IndexOf(lens.Max());
-            n[longest] = Mathf.Max(0, n[longest] + diff);
-            if (n.Sum() != total) n[0] += total - n.Sum(); // the longest couldn't give enough back
-        }
-        return n;
-    }
+    public static List<int> DefaultRisers(List<Vector3> pts, float width, float rise, float tread = DefaultTread) =>
+        StairMath.DistributeRisers(FlightLengths(pts, width), TotalRisers(rise), tread);
 
     /// <summary>A U-shaped stair from the bottom step's middle p0 running along dir: first flight, landing,
     /// turn (side -1 left / +1 right), middle flight, landing, the same turn again, last flight. The middle flight

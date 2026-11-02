@@ -155,6 +155,29 @@ class T {
     closed.WallAnchors.Add(an);
     Check(!MissingWall.Find(new List<MRUKRoom> { closed }, new Ray(new Vector3(2, 1.5f, 1.5f), new Vector3(0, 0, 1)), out _, out _, out _, out _), "a closed outline reports no missing wall");
 
+    // ---- stair riser distribution ----
+    {
+      const float T = 0.27f;
+      int Sum(List<int> l) => l.Sum();
+      var one = StairMath.DistributeRisers(new List<float> { 6f }, 16, T);
+      Check(one.Count == 1 && one[0] == 16, "one long flight takes all the steps");
+      var shortOnes = StairMath.DistributeRisers(new List<float> { 2.2f, 0.8f, 0.8f }, 17, T);
+      Check(Sum(shortOnes) == 17 && shortOnes[0] > shortOnes[1] && shortOnes.All(x => x >= 0), "missing steps go to the longest flight");
+      var over = StairMath.DistributeRisers(new List<float> { 2.7f, 0.5f, 0.5f }, 8, T);
+      Check(Sum(over) == 8 && over.All(x => x >= 0), "too many steps: reduced to the total, never negative");
+      var allLong = StairMath.DistributeRisers(new List<float> { 2.7f, 2.7f, 2.7f }, 16, T);   // used to end with a negative flight
+      Check(Sum(allLong) == 16 && allLong.All(x => x >= 0) && allLong.Max() - allLong.Min() <= 1, $"all legs longer than needed: balanced [{string.Join(",", allLong)}]");
+      var tiny = StairMath.DistributeRisers(new List<float> { 1.0f, 0f }, 16, T);
+      Check(Sum(tiny) == 16 && tiny[1] == 0, "a flat leg stays flat");
+      Check(StairMath.DistributeRisers(new List<float>(), 16, T).Count == 0, "no flights: nothing");
+      for (int total = 1; total <= 40; total++)
+        foreach (var lens in new[] { new[] { 5f, 1f }, new[] { 1f, 1f, 1f }, new[] { 4f, 4f, 4f, 4f }, new[] { 0f, 0f } })
+        {
+          var r = StairMath.DistributeRisers(lens, total, T);
+          if (Sum(r) != total || r.Any(x => x < 0)) { Check(false, $"sum / sign off for total {total}, lens {string.Join(",", lens)} -> [{string.Join(",", r)}]"); total = 99; break; }
+        }
+    }
+
     // ---- stairs snap back onto the floor ----
     {
       var sq = new List<Vector3> { new Vector3(0, 0, 0), new Vector3(4, 0, 0), new Vector3(4, 0, 3), new Vector3(0, 0, 3) };

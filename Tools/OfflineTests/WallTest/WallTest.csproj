@@ -18,6 +18,7 @@
     <Compile Include="../../../Assets/Scripts/CoverageGrid.cs" />
     <Compile Include="../../../Assets/Scripts/PipeRouteData.cs" />
     <Compile Include="../../../Assets/Scripts/SafeFile.cs" />
+    <Compile Include="../../../Assets/Scripts/StairMath.cs" />
     <Compile Include="../../../Assets/Scripts/PhotoModelGlb.cs" />
     <PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
   </ItemGroup>
