@@ -30,6 +30,11 @@ tam, kde s ní sousedí).
 - **P2 a P3 leží mimo půdorys chodby** (o 0,54 a 0,65 m za západní zdí 291071). Severní část chodby je široká jen ~3,7 m
   (x 0,15 .. 3,89), schody potřebují ~4,8 m (11 stupňů x 0,27 = 2,97 m + dvě podesty 0,9) -> nevejdou se. Buď kratší rameno
   (např. 2 / 8 / 2 stupně nebo menší podesty), nebo jiné místo. Zadání: "vlevo u dveří ze vstupní chodby".
+- `Tools/stairs_fit.py novostavba.geometry.json 162b8c39 --risers 3,11,3` (zkouší všechny polohy / otočení / zrcadlení U-schodiště): **nevejde se do
+  naskenované chodby vůbec** - ani [2,8,2] (3,96 x 1,44 m), ani bez ohledu na dveře (`--door-clear 0`). Chodba je v severní části široká 3,7 m.
+  Schodiště tedy fyzicky zasahuje mimo naskenovaný půdorys (schodiště / jeho šachta nejsou součástí žádné naskenované místnosti) a body P2 / P3
+  mimo chodbu mohou být správně; kdo to posoudí, je uživatel (kde schodiště skutečně stojí). Spec navíc zmiňuje `Pracovna_dole`
+  ("dole za schody, dvere z chodby") jako neskenovanou místnost.
 - Který z dveří je vstupní? Chodba má dveře: 0e7188 (1,76; -2,09), ebcca3 (4,13; -1,21), bd3274 (3,89; -4,51), 831a9c (4,31; -2,84),
   043b44 (0,07; -2,27), 73c163 (-0,63; -1,18). Bez odpovědi uživatele schody nepřesouvám.
 
