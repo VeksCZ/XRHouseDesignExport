@@ -199,6 +199,9 @@ and exports 3D models, floor plans and reports from the scan.
 - **Branding**: store art in `Store/` on the PC (icon 512, covers, hero, mini); the Quest system splash is
   `Assets/Branding/XRHouseSplash.png` (stereo side-by-side, 2x 1600x1000, set in `OculusProjectConfig`, passthrough
   background) - the OS shows it instantly instead of the loading dots. Unity's own splash is off.
+- **Scan geometry reports**: `Tools/extract_scan_geometry.py <92_Data_Scan.scene.json>` pulls walls / doors / floors out of a saved scan into a small JSON;
+  `Tools/analyze_scan_geometry.py <that json>` lists walls off a right angle, loose wall ends (holes), protrusions (a wall deep inside another room) and doors
+  at a wall end (exit code 2 = issues). Checked on synthetic data only so far; tolerance `--tol` degrees (default 1.5).
 - **Do not add packages that spawn helper processes** (`com.unity.ai.assistant`'s `relay_win.exe` inherited the MCP
   bridge's listening socket on Windows and made the bridge unable to rebind after a domain reload).
 - Tests: `Assets/Tests/EditMode` (plan geometry, room names, `GeometryTests`: frame culling, stair floor snap, textured GLB structure - these also compile and pass as plain NUnit against the offline stand-ins) and `Assets/Tests/PlayMode` (whole export pipeline on
