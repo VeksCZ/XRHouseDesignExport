@@ -436,6 +436,12 @@ public class WalkThroughMode : MonoBehaviour
     public static WalkThroughMode Active { get; private set; }
     public bool IsOn => isOn;
 
+    /// <summary>Set by CarDrive while you're driving the car: the normal walk/teleport/floor-follow stop (the car
+    /// positions the model itself instead), everything else (doors fading, the UI log) keeps working.</summary>
+    public bool DrivingCar { get; set; }
+    /// <summary>Your real head transform (world space) - CarDrive uses it the same way Place() does.</summary>
+    public Transform HeadTransform => head;
+
     /// <summary>World Y the model's floor under you should sit at: the real floor (FloorLevel tracking origin),
     /// or lower by seatedLift in seated mode so your eyes end up at seatedEyeHeight above the model's floor.</summary>
     float TargetFloorY => trackingSpace.position.y - seatedLift;
@@ -591,7 +597,7 @@ public class WalkThroughMode : MonoBehaviour
     {
         if (!isOn && !root) return;
         buildGen++;
-        isOn = false; aiming = false;
+        isOn = false; aiming = false; DrivingCar = false;
         sun.SetOn(false); measure.Clear();
         if (Active == this) Active = null;
         stairs.Dispose();
@@ -827,13 +833,16 @@ public class WalkThroughMode : MonoBehaviour
         if (!isOn) return;
         if (!root || !head || !trackingSpace) { Exit(); return; }
         float dt = Time.deltaTime;
-        HandleTeleport();
-        HandleSnapTurn();
-        HandleMove(dt);
-        FollowFloor(dt);
-        HandleFurnitureGrab();
-        HandleMeasure();
-        HandleSun();
+        if (!DrivingCar)
+        {
+            HandleTeleport();
+            HandleSnapTurn();
+            HandleMove(dt);
+            FollowFloor(dt);
+            HandleFurnitureGrab();
+            HandleMeasure();
+            HandleSun();
+        }
         if (walkVisual && walkDoors.Tick(walkVisual.transform.InverseTransformPoint(head.position), dt, EditModeController.AnyOn)) Physics.SyncTransforms();
         UpdateDoors();
         UpdateFade(dt);

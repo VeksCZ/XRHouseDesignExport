@@ -22,7 +22,7 @@ public static class SiteModel
         { "hedge", new Color(0.21f, 0.38f, 0.19f) }, { "crown", new Color(0.33f, 0.53f, 0.26f) },
         { "trunk", new Color(0.42f, 0.32f, 0.22f) }, { "fence", new Color(0.22f, 0.28f, 0.24f) },
         { "barn", new Color(0.78f, 0.73f, 0.64f) }, { "tiles", new Color(0.55f, 0.28f, 0.20f) },
-        { "wood", new Color(0.62f, 0.48f, 0.34f) },
+        { "wood", new Color(0.62f, 0.48f, 0.34f) }, { "water", new Color(0.18f, 0.45f, 0.58f) },
     };
 
     static Color Col(string name, string fallback)
