@@ -14,9 +14,16 @@ Nástroje: `Tools/analyze_scan_geometry.py`, `Tools/simulate_wall_slabs.py` (pů
 ## Sousední zdi
 29 dvojic rovnoběžných zdí sousedních místností (mezera 2-30 cm; většinou 2-17 cm). Mezera >0,5 m se nepáruje (použije se 25 cm).
 17 zdí nemá sousedku (venkovní zdi = fallback 25 cm). Simulace desek: jen 3 průniky do sousední místnosti (6 cm2 / 3 cm2 / 3 cm2),
-takže "výstupek" nevzniká v půdorysu. Podezřelé zbývá **výška**: velké místnosti 34b261d2 a 2e5efb11 (dolní patro, 44 a 47 m2)
-mají strop na y = +0,76 / +0,67 (4 m nad podlahou -3,24), tj. jejich zdi procházejí horním patrem (podlaha y ~ 0). To je
-nejpravděpodobnější "výstupek" na zdech horního patra - ověř v render pohledu (`-test views`) zdi těchto dvou místností.
+takže "výstupek" nevzniká v půdorysu.
+
+**Oprava dřívějšího odhadu (zdi přes patro):** místnosti 34b261d2 a 2e5efb11 mají strop na y +0,76 / +0,67 (4 m nad podlahou), ale jejich
+půdorys se s žádnou místností horního patra NEPŘEKRÝVÁ (průnik 0 m2) - zdi tedy neprocházejí podlahou horního patra. Jde o křídlo domu
+s vysokým stropem vedle horního bloku: jejich dlouhé zdi (da4cac 8,71 m a ff59ed 7,54 m) vedou podél hranic horních pokojů (1,3 - 5 m u
+6df884, 93ee51, 1c9c52, 3bf3e3, e040fd, 6590e5) a nad y 0 (do 0,76) leží vedle zdí horních pokojů - desky obou zdí se tam překrývají
+(z-fighting), ne vyčnívají do pokoje. Zdi už končí na stropu své místnosti (anchor top = ceilingY; spec `ceilings` "z_meshe" je navíc
+sklání podle sítě), takže ořez na "skutečnou výšku" nic nezmění. Co zkontrolovat v render pohledu (`-test views`): zda zeď da4cac / ff59ed
+nad y 0 není vidět zevnitř horního pokoje jako lišta u stropu/podlahy (pak ořezat desku zdi nižšího křídla na y podlahy horní místnosti
+tam, kde s ní sousedí).
 
 ## Schody (edit d84267ab, místnost 162b8c39 = chodba dole)
 - Dráha (room-local): P0 (3,61; 0,75), P1 (3,47; -0,51), P2 (-0,33; -0,10), P3 (-0,19; 1,16), šířka 0,9, risers [3, 11, 3].
