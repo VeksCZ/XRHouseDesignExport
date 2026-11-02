@@ -1,0 +1,965 @@
+{
+  "floor_buildup": [0.23, 0.12],
+  "suspended_ceilings": [{"rooms": ["3BF3", "93EE", "Satna"], "h": 2.5, "note": "podhled v koupelne, WC a satne nahore, 2.5 m nad hotovou podlahou; jinde nahore sikmy strop"}],
+  "floor_buildup_note": "skladba podlahy nad hrubou podlahou (scan = hruba stavba): prizemi ~23 cm, patro ~12 cm",
+  "note": "Koupelna + WC v patre podle vizualizace koupelny (koupelny.cz). Mira v metrech; along = od rohu s mensi souradnici (od horni steny pro -x/+x, od leve steny pro -z/+z v pohledu shora). Kuchyn v obyvaku (34B2) podle nahledu: L-linka s drezem pod oknem, vitrina, trouba+mikrovlnka, lednice, varna deska vlevo, ostruvek. Sprchovy kout: vstup zepredu, posuvne dvere. Komin podle meshe (volne stojici ~0.4 m od steny), rohovy krb vlevo od nej u steny. Sprchovy kout: vstup zepredu, posuvne dvere. Komin podle meshe (volne stojici ~0.4 m od steny), rohovy krb vlevo od nej u steny. extra_rooms: neskenovane mistnosti (satna nahore, mistnost dole) - podlaha, strop a jen vnejsi zdi. Obyvak: TV vpravo od krbu, rohova sedacka v protejsim rohu, jidelni stul se 6 zidlemi. Loznice B329/6DF8 dvojpostel, detske pokoje E040/1C9C postel u steny se dvermi a psaci stul pod oknem. WC dole v BA36 (vlevo pri vychodu z obyvaku). Niky v koupelne 3BF3 (hruby otvor ve zdivu, vysky od hrube podlahy): ve sprse 3x 30x30 na stene se dvermi 20 cm od rohu u sprchy, spodni hrany +75/+120/+165; pod oknem 194,3x30 v liciti s ostenim, spodni hrana +105; hloubka 10 cm (predpoklad).",
+  "rooms": [
+    {
+      "room": "3BF3",
+      "items": [
+        {
+          "type": "bathtub",
+          "name": "Vana",
+          "wall": "-z",
+          "along": 0.0,
+          "w": 1.8,
+          "d": 0.8,
+          "h": 0.6
+        },
+        {
+          "type": "radiator",
+          "name": "Radiator",
+          "wall": "-x",
+          "along": 0.95,
+          "w": 0.5,
+          "d": 0.1,
+          "h": 1.2,
+          "y": 0.6
+        },
+        {
+          "type": "shower",
+          "name": "Sprchovy_kout",
+          "wall": "+z",
+          "along": 0.0,
+          "w": 1.58,
+          "d": 1.11,
+          "glass": [
+            "right",
+            {
+              "side": "front",
+              "sliding": true
+            }
+          ]
+        },
+        {
+          "type": "washbasin",
+          "name": "Dvojumyvadlo",
+          "wall": "+x",
+          "along": 0.66,
+          "w": 1.6,
+          "d": 0.5,
+          "h": 0.85,
+          "cabinet_from": 0.4,
+          "basins": 2,
+          "vessel": true,
+          "mirror": true,
+          "mirror_w": 1.4,
+          "mirror_y": 1.15,
+          "mirror_h": 0.7,
+          "mirror_off": 0.1
+        },
+        {
+          "type": "box",
+          "name": "Vysoka_skrinka",
+          "wall": "+x",
+          "along": 0.2,
+          "w": 0.35,
+          "d": 0.35,
+          "h": 1.75,
+          "y": 0.1,
+          "color": "wood"
+        },
+        {
+          "type": "niche",
+          "name": "Nika_sprcha_1",
+          "wall": "+z",
+          "along": 0.2,
+          "w": 0.3,
+          "h": 0.3,
+          "y": 0.75,
+          "d": 0.1
+        },
+        {
+          "type": "niche",
+          "name": "Nika_sprcha_2",
+          "wall": "+z",
+          "along": 0.2,
+          "w": 0.3,
+          "h": 0.3,
+          "y": 1.2,
+          "d": 0.1
+        },
+        {
+          "type": "niche",
+          "name": "Nika_sprcha_3",
+          "wall": "+z",
+          "along": 0.2,
+          "w": 0.3,
+          "h": 0.3,
+          "y": 1.65,
+          "d": 0.1
+        },
+        {
+          "type": "niche",
+          "name": "Nika_pod_oknem",
+          "wall": "-z",
+          "along": 0.465,
+          "w": 1.943,
+          "h": 0.3,
+          "y": 1.05,
+          "d": 0.1
+        }
+      ]
+    },
+    {
+      "room": "93EE",
+      "items": [
+        {
+          "type": "box",
+          "name": "Predstena",
+          "wall": "-z",
+          "along": 0.43,
+          "w": 0.8,
+          "d": 0.2,
+          "h": 1.15,
+          "color": "#5f8a92"
+        },
+        {
+          "type": "box",
+          "name": "Policka",
+          "wall": "-z",
+          "along": 0.25,
+          "w": 0.18,
+          "d": 0.2,
+          "h": 1.15,
+          "color": "wood"
+        },
+        {
+          "type": "wc",
+          "name": "WC",
+          "wall": "-z",
+          "along": 0.64,
+          "w": 0.38,
+          "gap": 0.2,
+          "prewall": 0
+        },
+        {
+          "type": "box",
+          "name": "Deska_umyvadla",
+          "wall": "-x",
+          "along": 0.8,
+          "w": 0.6,
+          "d": 0.3,
+          "h": 0.04,
+          "y": 0.8,
+          "color": "wood"
+        },
+        {
+          "type": "box",
+          "name": "Spodni_police",
+          "wall": "-x",
+          "along": 0.8,
+          "w": 0.6,
+          "d": 0.3,
+          "h": 0.04,
+          "y": 0.4,
+          "color": "wood"
+        },
+        {
+          "type": "box",
+          "name": "Umyvadlo",
+          "wall": "-x",
+          "along": 0.875,
+          "w": 0.45,
+          "d": 0.26,
+          "h": 0.12,
+          "y": 0.84,
+          "color": "ceramic"
+        }
+      ]
+    },
+    {
+      "room": "34B2",
+      "items": [
+        {
+          "type": "kitchen_base",
+          "name": "Linka_okno",
+          "wall": "+x",
+          "along": 0.0,
+          "w": 2.95,
+          "sink": [
+            1.4,
+            2.2
+          ],
+          "dishwasher": [
+            2.3,
+            2.9
+          ]
+        },
+        {
+          "type": "kitchen_base",
+          "name": "Linka_vitrina",
+          "wall": "+x",
+          "along": 2.95,
+          "w": 0.6
+        },
+        {
+          "type": "kitchen_wall",
+          "name": "Vitrina",
+          "wall": "+x",
+          "along": 2.95,
+          "w": 0.6,
+          "d": 0.35,
+          "y": 1.4,
+          "h": 0.75,
+          "glass": true
+        },
+        {
+          "type": "kitchen_tall",
+          "name": "Trouba_mikrovlnka",
+          "wall": "+x",
+          "along": 3.55,
+          "w": 0.6,
+          "oven": true,
+          "microwave": true
+        },
+        {
+          "type": "kitchen_tall",
+          "name": "Lednice",
+          "wall": "+x",
+          "along": 4.15,
+          "w": 0.7,
+          "fridge": true
+        },
+        {
+          "type": "kitchen_base",
+          "name": "Linka_varna",
+          "wall": "-z",
+          "along": 6.03,
+          "w": 2.1,
+          "hob": [
+            0.75,
+            1.35
+          ]
+        },
+        {
+          "type": "kitchen_wall",
+          "name": "Horni_skrinky",
+          "wall": "-z",
+          "along": 6.03,
+          "w": 2.7,
+          "d": 0.35,
+          "y": 1.45,
+          "h": 0.72
+        },
+        {
+          "type": "island",
+          "name": "Ostruvek",
+          "wall": "-z",
+          "x": 2.09,
+          "z": -5.95,
+          "w": 0.8,
+          "d": 1.3
+        },
+        {
+          "type": "box",
+          "name": "Komin",
+          "wall": "+z",
+          "x": -0.65,
+          "z": -2.75,
+          "w": 0.4,
+          "d": 0.45,
+          "h": "ceiling",
+          "h_fallback": 2.9,
+          "color": "plaster"
+        },
+        {
+          "type": "fireplace",
+          "name": "Krb",
+          "wall": "+z",
+          "w": 0.9,
+          "d": 0.6,
+          "h": "ceiling",
+          "h_fallback": 2.9,
+          "glass_side": "left",
+          "x": -1.55,
+          "z": -2.6
+        },
+        {
+          "type": "tv",
+          "name": "TV",
+          "wall": "+z",
+          "along": 1.02,
+          "w": 1.45,
+          "d": 0.05,
+          "h": 0.84,
+          "y": 0.85
+        },
+        {
+          "type": "sofa_corner",
+          "name": "Sedacka",
+          "wall": "-z",
+          "along": 0.0,
+          "w": 2.9,
+          "d": 0.95,
+          "l": 1.6,
+          "corner": "start"
+        },
+        {
+          "type": "dining_table",
+          "name": "Jidelni_stul",
+          "wall": "-x",
+          "x": -0.45,
+          "z": -5.8,
+          "w": 1.8,
+          "d": 0.9,
+          "chairs": 6
+        }
+      ]
+    },
+    {
+      "room": "B329",
+      "items": [
+        {
+          "type": "bed",
+          "name": "Postel",
+          "wall": "-z",
+          "along": 0.84,
+          "w": 1.8,
+          "d": 2.1,
+          "nightstands": true
+        },
+        {
+          "type": "desk",
+          "name": "Psaci_stul_pracovna",
+          "wall": "-x",
+          "x": -7.2,
+          "z": 1.85,
+          "w": 1.4,
+          "d": 0.7
+        }
+      ]
+    },
+    {
+      "room": "6DF8",
+      "items": [
+        {
+          "type": "bed",
+          "name": "Postel",
+          "wall": "-z",
+          "along": 0.98,
+          "w": 1.8,
+          "d": 2.1,
+          "nightstands": true
+        }
+      ]
+    },
+    {
+      "room": "E040",
+      "items": [
+        {
+          "type": "bed",
+          "name": "Postel_detska",
+          "wall": "-x",
+          "along": 1.72,
+          "w": 0.9,
+          "d": 2.0,
+          "headboard": 0.8
+        },
+        {
+          "type": "desk",
+          "name": "Psaci_stul",
+          "wall": "+x",
+          "along": 0.61,
+          "w": 1.2,
+          "d": 0.6
+        }
+      ]
+    },
+    {
+      "room": "1C9C",
+      "items": [
+        {
+          "type": "bed",
+          "name": "Postel_detska",
+          "wall": "-x",
+          "along": 0.0,
+          "w": 0.9,
+          "d": 2.0,
+          "headboard": 0.8
+        },
+        {
+          "type": "desk",
+          "name": "Psaci_stul",
+          "wall": "+x",
+          "along": 0.9,
+          "w": 1.2,
+          "d": 0.6
+        }
+      ]
+    },
+    {
+      "room": "BA36",
+      "items": [
+        {
+          "type": "wc",
+          "name": "WC_dole",
+          "wall": "-z",
+          "along": 0.415,
+          "w": 0.38,
+          "prewall": 0.2
+        },
+        {
+          "type": "washbasin",
+          "name": "Umyvadlo_dole",
+          "wall": "+x",
+          "along": 1.2,
+          "w": 0.5,
+          "d": 0.32,
+          "h": 0.85,
+          "cabinet_from": 0.55,
+          "basins": 1,
+          "mirror": true,
+          "mirror_w": 0.45,
+          "mirror_y": 1.15,
+          "mirror_h": 0.6
+        }
+      ]
+    },
+    {
+      "room": "49A5",
+      "items": [
+        {
+          "type": "shower",
+          "name": "Sprcha_dole",
+          "wall": "-x",
+          "along": 0.0,
+          "w": 0.9,
+          "d": 0.9,
+          "glass": [
+            {
+              "side": "front",
+              "sliding": true
+            }
+          ]
+        },
+        {
+          "type": "washbasin",
+          "name": "Umyvadlo_koupelna_dole",
+          "wall": "-x",
+          "along": 1.25,
+          "w": 0.6,
+          "d": 0.45,
+          "mirror_off": 0.05
+        }
+      ]
+    },
+    {
+      "room": "6461",
+      "items": [
+        {
+          "type": "box",
+          "name": "Shoz_pradla",
+          "wall": "+x",
+          "along": 0.0,
+          "w": 0.55,
+          "d": 0.6,
+          "h": 2.3,
+          "color": "#dcdcdc"
+        },
+        {
+          "type": "box",
+          "name": "Sokl_pracka",
+          "wall": "+x",
+          "along": 0.6,
+          "w": 1.25,
+          "d": 0.6,
+          "h": 0.3,
+          "color": "fronts"
+        },
+        {
+          "type": "washer",
+          "name": "Pracka",
+          "wall": "+x",
+          "along": 0.62,
+          "w": 0.6,
+          "y": 0.3
+        },
+        {
+          "type": "washer",
+          "name": "Susicka",
+          "wall": "+x",
+          "along": 1.23,
+          "w": 0.6,
+          "y": 0.3
+        },
+        {
+          "type": "box",
+          "name": "Skrin_nad_prackou",
+          "wall": "+x",
+          "along": 0.6,
+          "w": 1.25,
+          "d": 0.6,
+          "y": 1.2,
+          "h": 1.1,
+          "color": "fronts"
+        },
+        {
+          "type": "box",
+          "name": "Skrin_vysoka",
+          "wall": "+x",
+          "along": 1.9,
+          "w": 0.65,
+          "d": 0.6,
+          "h": 2.3,
+          "color": "fronts"
+        },
+        {
+          "type": "washbasin",
+          "name": "Drez",
+          "wall": "-x",
+          "along": 0.0,
+          "w": 0.6,
+          "d": 0.5
+        }
+      ]
+    }
+  ],
+  "extra_rooms": [
+    {
+      "name": "Satna",
+      "like": "6DF8",
+      "x0": -6.99,
+      "x1": -3.27,
+      "z0": 1.67,
+      "z1": 3.43,
+      "walls": [
+        "-x",
+        "+z"
+      ],
+      "h_fallback": 2.6,
+      "note": "satna nahore vedle loznice (6DF8), delka loznice, konci nad nosnou zdi u garaze",
+      "wall_t": 0.5
+    },
+    {
+      "name": "Pracovna_dole",
+      "like": "B329",
+      "x0": -7.2,
+      "x1": -2.26,
+      "z0": 1.66,
+      "z1": 3.43,
+      "walls": [
+        "-x",
+        {
+          "side": "+z",
+          "to": -3.21
+        }
+      ],
+      "h_fallback": 2.9,
+      "note": "pracovna (puvodne koupelna ve vykresu) - dole za schody, dvere z chodby",
+      "wall_t": 0.5,
+      "ceiling_x1": -3.3,
+      "low_ceilings": [
+        {
+          "x0": -3.3,
+          "x1": -2.26,
+          "z0": 1.66,
+          "z1": 3.43,
+          "h": 2.42
+        }
+      ]
+    }
+  ],
+  "ceilings": [
+    {
+      "name": "z_meshe",
+      "rooms": [
+        "6DF8",
+        "6590",
+        "E040",
+        "1C9C",
+        "3BF3",
+        "34B2",
+        "2E5E"
+      ],
+      "from": "mesh",
+      "note": "sklon stropu dopocitany ze skenovane site (CeilingFit) - jen kde je strop dost nasnimany"
+    },
+    {
+      "name": "odhad",
+      "rooms": [
+        "93EE",
+        "Satna"
+      ],
+      "plane": [
+        5.3355,
+        0,
+        -0.145
+      ],
+      "note": "WC (sit tam strop nema) a satna (neskenovana): pultova rovina horniho patra, GLB y = a + bx*x + bz*z"
+    }
+  ],
+  "roofs": [
+    {
+      "name": "Strecha_hlavni",
+      "x0": -7.89,
+      "x1": 6.91,
+      "z0": -3.04,
+      "z1": 4.33,
+      "plane": [
+        5.3655,
+        0,
+        -0.145
+      ],
+      "t": 0.3,
+      "walls": {
+        "x0": -7.49,
+        "x1": 6.51,
+        "z0": -2.64,
+        "z1": 3.93,
+        "drop": 0.6
+      }
+    },
+    {
+      "name": "Strecha_obyvak",
+      "x0": -5.24,
+      "x1": 5.29,
+      "z0": -8.27,
+      "z1": -2.3,
+      "plane": [
+        3.0885,
+        0,
+        0.05
+      ],
+      "t": 0.3,
+      "walls": {
+        "x0": -4.84,
+        "x1": 4.89,
+        "z0": -7.87,
+        "z1": -2.3,
+        "drop": 0.6
+      }
+    },
+    {
+      "name": "Strecha_garaz",
+      "x0": -4.11,
+      "x1": 5.34,
+      "z0": 3.43,
+      "z1": 10.66,
+      "plane": [
+        3.1215,
+        0,
+        -0.05
+      ],
+      "t": 0.3,
+      "walls": {
+        "x0": -3.71,
+        "x1": 4.94,
+        "z0": 3.43,
+        "z1": 10.26,
+        "drop": 0.6
+      }
+    },
+    {
+      "name": "Komin_venku",
+      "x0": -0.65,
+      "x1": -0.25,
+      "z0": -3.2,
+      "z1": -2.75,
+      "plane": [
+        2.9,
+        0,
+        0
+      ],
+      "t": 3.6,
+      "color": "plaster"
+    },
+    {
+      "name": "Strecha_terasa",
+      "x0": -8.1,
+      "x1": -4.84,
+      "z0": -8.27,
+      "z1": -2.64,
+      "plane": [
+        3.0885,
+        0,
+        0.05
+      ],
+      "t": 0.3
+    },
+    {
+      "name": "Sloup_terasa",
+      "x0": -7.8,
+      "x1": -7.65,
+      "z0": -8.15,
+      "z1": -8.0,
+      "plane": [
+        -1.35,
+        0,
+        0
+      ],
+      "t": 4.035,
+      "color": "wood"
+    }
+  ],
+  "site": {
+    "note": "RD Osove, parc. 442/3 - z koordinacni situace C.3; sever = GLB (0.342, 0.940), garaz na SSV",
+    "lat": 49.325,
+    "lon": 16.015,
+    "north": [
+      0.342,
+      0.94
+    ],
+    "ground_y": -1.47,
+    "ground": {
+      "size": 180,
+      "color": "grass"
+    },
+    "areas": [
+      {
+        "name": "pole_42_5",
+        "color": "field",
+        "y": -1.46,
+        "poly": [
+          [
+            -16.6,
+            14.7
+          ],
+          [
+            -80,
+            14.0
+          ],
+          [
+            -80,
+            -90
+          ],
+          [
+            -17.0,
+            -90
+          ]
+        ]
+      },
+      {
+        "name": "mez_42_7",
+        "color": "bank",
+        "poly": [
+          [
+            10.71,
+            -1.46,
+            13.62
+          ],
+          [
+            -15.97,
+            -1.46,
+            14.71
+          ],
+          [
+            -16.6,
+            1.1300000000000001,
+            32
+          ],
+          [
+            11.0,
+            1.1300000000000001,
+            32
+          ]
+        ]
+      },
+      {
+        "name": "cesta_15_5",
+        "color": "gravel",
+        "y": -1.44,
+        "poly": [
+          [
+            8.9,
+            -2.6
+          ],
+          [
+            11.5,
+            -3.0
+          ],
+          [
+            14.6,
+            34
+          ],
+          [
+            12.0,
+            34
+          ]
+        ]
+      },
+      {
+        "name": "zamkova_dlazba",
+        "color": "paving",
+        "y": -1.4,
+        "poly": [
+          [
+            10.82,
+            9.92
+          ],
+          [
+            4.94,
+            10.3
+          ],
+          [
+            4.94,
+            1.4
+          ],
+          [
+            10.02,
+            1.11
+          ]
+        ]
+      },
+      {
+        "name": "terasa",
+        "color": "concrete",
+        "y": -1.35,
+        "poly": [
+          [
+            -7.8,
+            -8.2
+          ],
+          [
+            -4.84,
+            -8.2
+          ],
+          [
+            -4.84,
+            -2.64
+          ],
+          [
+            -7.8,
+            -2.64
+          ]
+        ]
+      }
+    ],
+    "fences": [
+      {
+        "line": [
+          [
+            10.71,
+            13.62
+          ],
+          [
+            10.7819134,
+            9.2
+          ]
+        ],
+        "h": 1.8
+      },
+      {
+        "line": [
+          [
+            10.8583824,
+            4.5
+          ],
+          [
+            11.789026400000001,
+            -52.7
+          ]
+        ],
+        "h": 1.8
+      }
+    ],
+    "hedges": [
+      {
+        "line": [
+          [
+            -16.05,
+            -6.0
+          ],
+          [
+            -16.35,
+            -53.0
+          ]
+        ],
+        "w": 1.6,
+        "h": 2.6
+      }
+    ],
+    "trees": [
+      {
+        "at": [
+          -11,
+          -27.0
+        ],
+        "h": 4.2,
+        "r": 1.6
+      },
+      {
+        "at": [
+          -5,
+          -27.0
+        ],
+        "h": 4.2,
+        "r": 1.6
+      },
+      {
+        "at": [
+          1,
+          -27.0
+        ],
+        "h": 4.2,
+        "r": 1.6
+      },
+      {
+        "at": [
+          7,
+          -27.0
+        ],
+        "h": 4.2,
+        "r": 1.6
+      },
+      {
+        "at": [
+          -8,
+          -35.0
+        ],
+        "h": 4.0,
+        "r": 1.5
+      },
+      {
+        "at": [
+          -2,
+          -35.0
+        ],
+        "h": 4.0,
+        "r": 1.5
+      },
+      {
+        "at": [
+          4,
+          -35.0
+        ],
+        "h": 4.0,
+        "r": 1.5
+      }
+    ],
+    "buildings": [
+      {
+        "name": "stodola_19_1",
+        "x0": 21.7,
+        "x1": 30.6,
+        "z0": -6.5,
+        "z1": 6.4,
+        "eave": 3.5,
+        "ridge": 7.0
+      },
+      {
+        "name": "stodola_19_2",
+        "x0": 22.8,
+        "x1": 31.8,
+        "z0": -18.0,
+        "z1": -11.9,
+        "eave": 3.2,
+        "ridge": 6.2
+      }
+    ]
+  },
+  "walls": {
+    "exterior": 0.5,
+    "note": "obvodove zdi 50 cm (cihla 50 s presahem pres zakladovku), pricky ~15 cm (dopocitane ze skenu)"
+  }
+}
