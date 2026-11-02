@@ -295,7 +295,7 @@ public static class Furniture
         }
         if (spec?["ceilings"] is not JArray && suspended.Count == 0) return;
         Vector3 center = DollHouseVisualizer.CalculateCenter(rooms);
-        Quaternion g = Quaternion.Euler(0, FloorPlanBuilder.CorrectionYaw(MRUKPlanExtractor.Extract(rooms)), 0);
+        Quaternion g = Quaternion.Euler(0, MRUKPlanExtractor.HouseYaw(rooms), 0);
         var planes = new List<(MRUKRoom room, (float a, float bx, float bz) p)>();
         CeilingFit.ResetCache();
         foreach (var r in rooms)
@@ -406,7 +406,7 @@ public static class Furniture
         var list = new List<XRModelFactory.WallNiche>();
         if (spec?["rooms"] is not JArray specRooms || rooms == null || rooms.Count == 0) return list;
         Vector3 center = DollHouseVisualizer.CalculateCenter(rooms);
-        Quaternion g = Quaternion.Euler(0, FloorPlanBuilder.CorrectionYaw(MRUKPlanExtractor.Extract(rooms)), 0);
+        Quaternion g = Quaternion.Euler(0, MRUKPlanExtractor.HouseYaw(rooms), 0);
         Quaternion gi = Quaternion.Inverse(g);
         Vector3 World(float x, float y, float z) => gi * new Vector3(x, y, -z) + center;   // GLB axes -> world
         foreach (var rs in specRooms.OfType<JObject>())
@@ -447,7 +447,7 @@ public static class Furniture
                 .Where(i => i["x"] == null && i["z"] == null && (string)i["type"] != NicheType).Select(i => i.DeepClone()));
             if (items.Count > 0) ((JArray)only["rooms"]).Add(new JObject { ["room"] = rs["room"], ["items"] = items });
         }
-        float yaw = FloorPlanBuilder.CorrectionYaw(MRUKPlanExtractor.Extract(rooms));
+        float yaw = MRUKPlanExtractor.HouseYaw(rooms);
         Vector3 center = DollHouseVisualizer.CalculateCenter(rooms);
         var model = Build(only, rooms, yaw, center);
         Quaternion gi = Quaternion.Inverse(Quaternion.Euler(0, yaw, 0));

@@ -79,7 +79,7 @@ public static class WallDrawings
     static string Build(List<MRUKRoom> rooms, string title, RouteKind[] kinds, string trade, List<PhotoAt> photos)
     {
         rooms = rooms.Where(r => r != null && r.FloorAnchors.Count > 0).ToList();
-        float yaw = rooms.Count > 0 ? FloorPlanBuilder.CorrectionYaw(MRUKPlanExtractor.Extract(rooms)) : 0f;
+        float yaw = rooms.Count > 0 ? MRUKPlanExtractor.HouseYaw(rooms) : 0f;
         Vector3 center = rooms.Count > 0 ? DollHouseVisualizer.CalculateCenter(rooms) : Vector3.zero;
         Quaternion g = Quaternion.Euler(0, yaw, 0);
 

@@ -62,10 +62,10 @@ public enum FontStyles { Normal = 0, Bold = 1, Italic = 2, Underline = 4 }
 namespace UnityEngine { public enum RuntimeInitializeLoadType { AfterSceneLoad, BeforeSceneLoad, AfterAssembliesLoaded, BeforeSplashScreen, SubsystemRegistration } }
 namespace Meta.XR.MRUtilityKit {
   public class AnchorRef { public Guid Uuid; }
-  public class MRUKAnchor { [Flags] public enum SceneLabels { FLOOR = 1, CEILING = 2, WALL_FACE = 4, DOOR_FRAME = 8, INNER_WALL_FACE = 16, INVISIBLE_WALL_FACE = 32 }
-    public UnityEngine.Transform transform; public UnityEngine.Rect? PlaneRect; public AnchorRef Anchor; public SceneLabels Label; public List<UnityEngine.Vector2> PlaneBoundary2D;
+  public class MRUKAnchor : UnityEngine.MonoBehaviour { [Flags] public enum SceneLabels { FLOOR = 1, CEILING = 2, WALL_FACE = 4, DOOR_FRAME = 8, INNER_WALL_FACE = 16, INVISIBLE_WALL_FACE = 32 }
+    public UnityEngine.Rect? PlaneRect; public AnchorRef Anchor; public SceneLabels Label; public List<UnityEngine.Vector2> PlaneBoundary2D;
     public bool HasAnyLabel(SceneLabels l) => false; }
-  public class MRUKRoom { public AnchorRef Anchor; public UnityEngine.Transform transform; public List<MRUKAnchor> Anchors, WallAnchors, FloorAnchors, CeilingAnchors; public bool IsPositionInRoom(UnityEngine.Vector3 p, bool b) => false; }
+  public class MRUKRoom : UnityEngine.MonoBehaviour { public AnchorRef Anchor; public List<MRUKAnchor> Anchors, WallAnchors, FloorAnchors, CeilingAnchors; public bool IsPositionInRoom(UnityEngine.Vector3 p, bool b) => false; }
 }
 namespace UnityEngine.UI {
   public class VertexHelper {}

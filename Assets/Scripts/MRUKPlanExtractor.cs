@@ -9,6 +9,22 @@ using Meta.XR.MRUtilityKit;
 public static class MRUKPlanExtractor
 {
 #if META_XR_SDK_INSTALLED
+    static long yawKey = long.MinValue; static float yawValue;
+
+    /// <summary>The house's correction yaw (FloorPlanBuilder.CorrectionYaw of all outlines) - the walk-through, the Dollhouse, the minimap,
+    /// the furniture (three times per build) and the drawings all ask for it, and re-extracting every room's outline each time costs
+    /// hundreds of ms in a big house. Kept per set of rooms of the loaded scene; never kept halfway through a load.</summary>
+    public static float HouseYaw(List<MRUKRoom> rooms)
+    {
+        if (MRUKExporter.Loading) return FloorPlanBuilder.CorrectionYaw(Extract(rooms));
+        long key = MRUKExporter.SceneVersion * 1000003L + rooms.Count;
+        foreach (var r in rooms) if (r != null) key = key * 31 + r.GetInstanceID();
+        if (key == yawKey) return yawValue;
+        yawValue = FloorPlanBuilder.CorrectionYaw(Extract(rooms));
+        yawKey = key;
+        return yawValue;
+    }
+
     public static List<RoomOutline> Extract(List<MRUKRoom> rooms)
     {
         var result = new List<RoomOutline>();
