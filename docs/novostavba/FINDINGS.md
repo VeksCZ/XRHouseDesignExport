@@ -25,18 +25,16 @@ sklání podle sítě), takže ořez na "skutečnou výšku" nic nezmění. Co z
 nad y 0 není vidět zevnitř horního pokoje jako lišta u stropu/podlahy (pak ořezat desku zdi nižšího křídla na y podlahy horní místnosti
 tam, kde s ní sousedí).
 
-## Schody (edit d84267ab, místnost 162b8c39 = chodba dole)
+## Schody (edit d84267ab, místnost 162b8c39 = chodba dole) - UZAVŘENO, nic nepřesouvat
+Uživatel (2026-11-02): schody stojí jen v dolní chodbě a končí v horní chodbě; horní podesta a horní tři schody zasahují nad strop
+neskenované pracovny (`Pracovna_dole`) a nahoře je o to kratší šatna (neskenovaná `Satna`), její stěna je posunutá oproti pracovně.
 - Dráha (room-local): P0 (3,61; 0,75), P1 (3,47; -0,51), P2 (-0,33; -0,10), P3 (-0,19; 1,16), šířka 0,9, risers [3, 11, 3].
-- **P2 a P3 leží mimo půdorys chodby** (o 0,54 a 0,65 m za západní zdí 291071). Severní část chodby je široká jen ~3,7 m
-  (x 0,15 .. 3,89), schody potřebují ~4,8 m (11 stupňů x 0,27 = 2,97 m + dvě podesty 0,9) -> nevejdou se. Buď kratší rameno
-  (např. 2 / 8 / 2 stupně nebo menší podesty), nebo jiné místo. Zadání: "vlevo u dveří ze vstupní chodby".
-- `Tools/stairs_fit.py novostavba.geometry.json 162b8c39 --risers 3,11,3` (zkouší všechny polohy / otočení / zrcadlení U-schodiště): **nevejde se do
-  naskenované chodby vůbec** - ani [2,8,2] (3,96 x 1,44 m), ani bez ohledu na dveře (`--door-clear 0`). Chodba je v severní části široká 3,7 m.
-  Schodiště tedy fyzicky zasahuje mimo naskenovaný půdorys (schodiště / jeho šachta nejsou součástí žádné naskenované místnosti) a body P2 / P3
-  mimo chodbu mohou být správně; kdo to posoudí, je uživatel (kde schodiště skutečně stojí). Spec navíc zmiňuje `Pracovna_dole`
-  ("dole za schody, dvere z chodby") jako neskenovanou místnost.
-- Který z dveří je vstupní? Chodba má dveře: 0e7188 (1,76; -2,09), ebcca3 (4,13; -1,21), bd3274 (3,89; -4,51), 831a9c (4,31; -2,84),
-  043b44 (0,07; -2,27), 73c163 (-0,63; -1,18). Bez odpovědi uživatele schody nepřesouvám.
+- Pásmo schodů (5,7 m2): 4,0 m2 leží v dolní chodbě 162b8c39, 5,2 m2 v horní chodbě 6590e5f3, 1,15 m2 mimo dolní chodbu nad horní chodbou
+  (= nad pracovnou) a jen 0,5 m2 (konec horního ramene) mimo obě naskenované chodby - to je prostor `Satna` (neskenovaná, v spec jako
+  `extra_rooms`); otvor `holes` č. 2 (z 0,30 .. 1,21) je nakreslen přesně tam. Spec to už odráží: `Satna` má x1 = -3,27 oproti
+  `Pracovna_dole` x1 = -2,26 a pracovna má snížený strop 2,42 m pod horním ramenem (`low_ceilings`).
+- Takže P2 / P3 "mimo chodbu" jsou správně a `Tools/stairs_fit.py` (U-schodiště se do SKENOVANÉ chodby nevejde) to jen potvrzuje: schody
+  zasahují do neskenovaných částí domu. Další zásah není potřeba.
 
 ## Střecha (95_Data_Furniture.json -> roofs)
 - `Strecha_obyvak` končí na z1 = -2,30 (zasahuje do budovy), `Strecha_terasa` na z1 = -2,64 = přesně čára zdí hlavní střechy
