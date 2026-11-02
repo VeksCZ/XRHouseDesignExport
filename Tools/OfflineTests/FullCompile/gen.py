@@ -48,7 +48,7 @@ def emit():
         if ns: out.append('}')
     open('Auto.cs','w').write('\n'.join(out)+'\n')
 def build():
-    r=subprocess.run(['dotnet','build','FullCompile.csproj','-c','Release','--no-restore','-nologo','-v','q','-p:ScriptsDir='+SRC],capture_output=True,text=True)
+    r=subprocess.run(['dotnet','build','FullCompile.csproj','-c','Release','--no-restore','-nologo','-v','q','-p:ScriptsDir='+SRC] + (['-p:DefineConstants=UNITY_ANDROID%3BMETA_XR_SDK_INSTALLED'] if os.environ.get('PLAYER') else []),capture_output=True,text=True)
     return r.stdout+r.stderr
 for it in range(40):
     emit()

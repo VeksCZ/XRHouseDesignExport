@@ -2,7 +2,7 @@ using System; using System.Collections.Generic; using System.Linq;
 namespace UnityEngine {
   public static class Mathf { public const float Rad2Deg = 57.29578f, Deg2Rad = 0.0174532924f;
     public static float Min(float a, float b) => a < b ? a : b; public static float Max(float a, float b) => a > b ? a : b;
-    public static float Abs(float a) => Math.Abs(a); public static int CeilToInt(float a) => (int)Math.Ceiling(a); public static int Clamp(int v, int a, int b) => v < a ? a : v > b ? b : v; public static int Abs(int a) => Math.Abs(a); public static int Max(int a, int b) => a > b ? a : b; public static int Min(int a, int b) => a < b ? a : b; public static float Clamp(float v, float a, float b) => v < a ? a : v > b ? b : v;
+    public static float Abs(float a) => Math.Abs(a); public static int CeilToInt(float a) => (int)Math.Ceiling(a); public static int RoundToInt(float a) => (int)Math.Round(a); public static int FloorToInt(float a) => (int)Math.Floor(a); public static int Clamp(int v, int a, int b) => v < a ? a : v > b ? b : v; public static int Abs(int a) => Math.Abs(a); public static int Max(int a, int b) => a > b ? a : b; public static int Min(int a, int b) => a < b ? a : b; public static float Clamp(float v, float a, float b) => v < a ? a : v > b ? b : v;
     public static float Sqrt(float a) => (float)Math.Sqrt(a); public static float Atan2(float y, float x) => (float)Math.Atan2(y, x);
     public static float Sin(float a) => (float)Math.Sin(a); public static float Cos(float a) => (float)Math.Cos(a); public static float Acos(float a) => (float)Math.Acos(a); }
   public struct Vector3 { public float x, y, z;
@@ -62,10 +62,10 @@ public enum FontStyles { Normal = 0, Bold = 1, Italic = 2, Underline = 4 }
 namespace UnityEngine { public enum RuntimeInitializeLoadType { AfterSceneLoad, BeforeSceneLoad, AfterAssembliesLoaded, BeforeSplashScreen, SubsystemRegistration } }
 namespace Meta.XR.MRUtilityKit {
   public class AnchorRef { public Guid Uuid; }
-  public class MRUKAnchor { [Flags] public enum SceneLabels { FLOOR = 1, CEILING = 2, WALL_FACE = 4, DOOR_FRAME = 8, INNER_WALL_FACE = 16, INVISIBLE_WALL_FACE = 32 }
-    public UnityEngine.Transform transform; public UnityEngine.Rect? PlaneRect; public AnchorRef Anchor; public SceneLabels Label; public List<UnityEngine.Vector2> PlaneBoundary2D;
+  public class MRUKAnchor : UnityEngine.MonoBehaviour { [Flags] public enum SceneLabels { FLOOR = 1, CEILING = 2, WALL_FACE = 4, DOOR_FRAME = 8, INNER_WALL_FACE = 16, INVISIBLE_WALL_FACE = 32 }
+    public UnityEngine.Rect? PlaneRect; public AnchorRef Anchor; public SceneLabels Label; public List<UnityEngine.Vector2> PlaneBoundary2D;
     public bool HasAnyLabel(SceneLabels l) => false; }
-  public class MRUKRoom { public AnchorRef Anchor; public UnityEngine.Transform transform; public List<MRUKAnchor> Anchors, WallAnchors, FloorAnchors, CeilingAnchors; public bool IsPositionInRoom(UnityEngine.Vector3 p, bool b) => false; }
+  public class MRUKRoom : UnityEngine.MonoBehaviour { public AnchorRef Anchor; public List<MRUKAnchor> Anchors, WallAnchors, FloorAnchors, CeilingAnchors; public bool IsPositionInRoom(UnityEngine.Vector3 p, bool b) => false; }
 }
 namespace UnityEngine.UI {
   public class VertexHelper {}
@@ -77,7 +77,7 @@ namespace UnityEngine {
   public class Object { public string name; public int GetInstanceID() => 0; public static implicit operator bool(Object o) => !ReferenceEquals(o, null);
     public static void Destroy(Object o) {} public static void Destroy(Object o, float t) {} public static void DestroyImmediate(Object o) {}
     public static T Instantiate<T>(T o) where T : Object => o; public static T FindFirstObjectByType<T>() where T : Object => default; public static T FindAnyObjectByType<T>() where T : Object => default;
-    public static T[] FindObjectsByType<T>(FindObjectsInactive i, FindObjectsSortMode m) where T : Object => null; public static void DontDestroyOnLoad(Object o) {} }
+    public static T[] FindObjectsByType<T>(FindObjectsInactive i, FindObjectsSortMode m) where T : Object => null; public static T[] FindObjectsByType<T>(FindObjectsSortMode m) where T : Object => null; public static void DontDestroyOnLoad(Object o) {} }
   public enum FindObjectsInactive { Exclude, Include } public enum FindObjectsSortMode { None, InstanceID }
   public class Component : Object { public Transform transform; public GameObject gameObject;
     public T GetComponent<T>() => default; public T GetComponentInChildren<T>() => default; public T GetComponentInParent<T>() => default; public T[] GetComponentsInChildren<T>() => null; public T[] GetComponentsInChildren<T>(bool inactive) => null;
@@ -90,7 +90,7 @@ namespace UnityEngine {
     public Vector3 TransformDirection(Vector3 d) => rotation * d; public Vector3 InverseTransformDirection(Vector3 d) => Quaternion.Inverse(rotation) * d; public Vector3 TransformVector(Vector3 d) => rotation * d;
     public void SetParent(Transform p) {} public void SetParent(Transform p, bool worldPositionStays) {} public void SetPositionAndRotation(Vector3 p, Quaternion r) {} public void SetLocalPositionAndRotation(Vector3 p, Quaternion r) {}
     public Transform GetChild(int i) => null; public Transform Find(string n) => null; public bool IsChildOf(Transform t) => false; public void Rotate(Vector3 e) {} public void RotateAround(Vector3 p, Vector3 a, float ang) {} public void Translate(Vector3 t) {} }
-  public class GameObject : Object { public Transform transform; public int layer; public bool activeSelf; public GameObject() {} public GameObject(string n) {} public GameObject(string n, params System.Type[] c) {}
+  public class GameObject : Object { public Transform transform; public int layer; public bool activeSelf, activeInHierarchy; public GameObject() {} public GameObject(string n) {} public GameObject(string n, params System.Type[] c) {}
     public void SetActive(bool b) {} public T AddComponent<T>() where T : Component => default; public T GetComponent<T>() => default; public T GetComponentInChildren<T>() => default; public T[] GetComponentsInChildren<T>() => null; public T[] GetComponentsInChildren<T>(bool inactive) => null;
     public bool TryGetComponent<T>(out T c) { c = default; return false; } public static GameObject CreatePrimitive(PrimitiveType t) => null; }
   public enum PrimitiveType { Sphere, Capsule, Cylinder, Cube, Plane, Quad }
@@ -98,3 +98,20 @@ namespace UnityEngine {
   public class Canvas : Behaviour { }
   public class Camera : Behaviour { public static Camera main; public float nearClipPlane; }
 }
+
+namespace UnityEngine {
+  public static class JsonUtility { public static T FromJson<T>(string json) => default; public static string ToJson(object o) => ""; public static string ToJson(object o, bool pretty) => ""; public static void FromJsonOverwrite(string json, object o) {} }
+}
+
+namespace UnityEngine {
+  public class AndroidJavaObject : IDisposable { public AndroidJavaObject(string cls, params object[] args) {} public T Call<T>(string m, params object[] a) => default; public void Call(string m, params object[] a) {} public T Get<T>(string f) => default; public void Dispose() {} }
+  public class AndroidJavaClass : AndroidJavaObject { public AndroidJavaClass(string c) : base(c) {} public T CallStatic<T>(string m, params object[] a) => default; public void CallStatic(string m, params object[] a) {} public T GetStatic<T>(string f) => default; }
+}
+
+namespace UnityEngine {
+  public enum RuntimePlatform { WindowsEditor, WindowsPlayer, Android, LinuxPlayer, OSXPlayer }
+  public static class Application { public static string persistentDataPath, dataPath, streamingAssetsPath, temporaryCachePath; public static bool isEditor, isPlaying, isBatchMode; public static RuntimePlatform platform; public static int targetFrameRate; public static void Quit() {} }
+  public static class Time { public static float time, unscaledTime, deltaTime, unscaledDeltaTime, realtimeSinceStartup, timeScale, fixedDeltaTime; public static int frameCount; }
+}
+
+namespace UnityEngine { public class Renderer : Component { public bool enabled; } }

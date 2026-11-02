@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 """Offline semantic check: compiles Assets/Scripts against generated stand-ins and prints only the errors that are new
-compared with a known-good revision (default HEAD). See FullCompile.csproj."""
+compared with a known-good revision (default HEAD). --player compiles with the Android player's defines (no UNITY_EDITOR). See FullCompile.csproj."""
 import os, re, subprocess, sys, tempfile, shutil, collections
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.abspath(os.path.join(HERE, '..', '..', '..'))
 base = 'HEAD'
+if '--player' in sys.argv: os.environ['PLAYER'] = '1'   # compile like the Android player build: no UNITY_EDITOR
 if '--base' in sys.argv: base = sys.argv[sys.argv.index('--base') + 1]
 
 def signatures(scripts_dir):

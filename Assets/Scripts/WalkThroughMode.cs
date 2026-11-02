@@ -467,7 +467,7 @@ public class WalkThroughMode : MonoBehaviour
 
         Furniture.InstallCeilings(rooms, HouseEditsStore.CurrentScan); // the real (sloped) ceilings from the spec
         center = DollHouseVisualizer.CalculateCenter(rooms);
-        yaw = FloorPlanBuilder.CorrectionYaw(MRUKPlanExtractor.Extract(rooms));
+        yaw = MRUKPlanExtractor.HouseYaw(rooms);
         walkRooms = rooms;
         walledUp = DoorCatalog.WalledUpSignature(HouseEditsStore.Current);
 

@@ -19,12 +19,25 @@ using Meta.XR.MRUtilityKit;
 public static class Furniture
 {
     /// <summary>The spec for a saved scan, or null if it has none (or it can't be read).</summary>
+    static string cachedPath; static DateTime cachedTime; static long cachedLength; static JObject cachedSpec;
+
+    /// <summary>Parsed once per file version: a build asks for the spec ~5 times (walls, ceilings, furniture, site...) and a big
+    /// house's spec is hundreds of KB. Callers get their own copy (items are moved / turned in it before being saved).</summary>
     public static JObject Load(string scanName)
     {
         string path = MRUKSceneCache.FurniturePath(scanName);
         if (string.IsNullOrEmpty(path) || !File.Exists(path)) return null;
-        try { return JObject.Parse(File.ReadAllText(path)); }
-        catch (Exception ex) { Debug.LogWarning($"[Furniture] {path}: {ex.Message}"); return null; }
+        try
+        {
+            var info = new FileInfo(path);
+            if (cachedSpec == null || cachedPath != path || cachedTime != info.LastWriteTimeUtc || cachedLength != info.Length)
+            {
+                cachedSpec = JObject.Parse(File.ReadAllText(path));
+                cachedPath = path; cachedTime = info.LastWriteTimeUtc; cachedLength = info.Length;
+            }
+            return (JObject)cachedSpec.DeepClone();
+        }
+        catch (Exception ex) { cachedSpec = null; Debug.LogWarning($"[Furniture] {path}: {ex.Message}"); return null; }
     }
 
     static readonly Dictionary<string, Color> Materials = new Dictionary<string, Color>
@@ -295,7 +308,7 @@ public static class Furniture
         }
         if (spec?["ceilings"] is not JArray && suspended.Count == 0) return;
         Vector3 center = DollHouseVisualizer.CalculateCenter(rooms);
-        Quaternion g = Quaternion.Euler(0, FloorPlanBuilder.CorrectionYaw(MRUKPlanExtractor.Extract(rooms)), 0);
+        Quaternion g = Quaternion.Euler(0, MRUKPlanExtractor.HouseYaw(rooms), 0);
         var planes = new List<(MRUKRoom room, (float a, float bx, float bz) p)>();
         CeilingFit.ResetCache();
         foreach (var r in rooms)
@@ -406,7 +419,7 @@ public static class Furniture
         var list = new List<XRModelFactory.WallNiche>();
         if (spec?["rooms"] is not JArray specRooms || rooms == null || rooms.Count == 0) return list;
         Vector3 center = DollHouseVisualizer.CalculateCenter(rooms);
-        Quaternion g = Quaternion.Euler(0, FloorPlanBuilder.CorrectionYaw(MRUKPlanExtractor.Extract(rooms)), 0);
+        Quaternion g = Quaternion.Euler(0, MRUKPlanExtractor.HouseYaw(rooms), 0);
         Quaternion gi = Quaternion.Inverse(g);
         Vector3 World(float x, float y, float z) => gi * new Vector3(x, y, -z) + center;   // GLB axes -> world
         foreach (var rs in specRooms.OfType<JObject>())
@@ -447,7 +460,7 @@ public static class Furniture
                 .Where(i => i["x"] == null && i["z"] == null && (string)i["type"] != NicheType).Select(i => i.DeepClone()));
             if (items.Count > 0) ((JArray)only["rooms"]).Add(new JObject { ["room"] = rs["room"], ["items"] = items });
         }
-        float yaw = FloorPlanBuilder.CorrectionYaw(MRUKPlanExtractor.Extract(rooms));
+        float yaw = MRUKPlanExtractor.HouseYaw(rooms);
         Vector3 center = DollHouseVisualizer.CalculateCenter(rooms);
         var model = Build(only, rooms, yaw, center);
         Quaternion gi = Quaternion.Inverse(Quaternion.Euler(0, yaw, 0));
@@ -616,7 +629,7 @@ public static class Furniture
     {
         string path = MRUKSceneCache.FurniturePath(scanName);
         if (string.IsNullOrEmpty(path) || spec == null) return false;
-        try { File.WriteAllText(path, spec.ToString(Newtonsoft.Json.Formatting.Indented)); return true; }
+        try { SafeFile.WriteAllText(path, spec.ToString(Newtonsoft.Json.Formatting.Indented)); return true; }
         catch (Exception ex) { Debug.LogWarning($"[Furniture] save {path}: {ex.Message}"); return false; }
     }
 

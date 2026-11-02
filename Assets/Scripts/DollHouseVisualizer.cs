@@ -233,7 +233,7 @@ public class DollHouseVisualizer : MonoBehaviour
         Furniture.InstallCeilings(rooms, HouseEditsStore.CurrentScan); // real (sloped) ceilings from the spec
         Vector3 c = CalculateCenter(rooms);
         // Same wall alignment as the export, so the preview is oriented like the exported model.
-        float yaw = FloorPlanBuilder.CorrectionYaw(MRUKPlanExtractor.Extract(rooms));
+        float yaw = MRUKPlanExtractor.HouseYaw(rooms);
         modelYaw = yaw; modelCenter = c;
         XRHouseModel m = null;
 

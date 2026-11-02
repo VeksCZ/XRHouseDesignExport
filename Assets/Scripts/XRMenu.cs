@@ -229,6 +229,7 @@ public class XRMenu : MonoBehaviour
         XRUi.CreateCaption(data, "Clean up", Pad, d1 - cap, ContentW);
         var deleteExportsButton = XRUi.CreateButton(data, "Delete exports\n<size=72%><color=#9aa6b8>frees space on the headset</color></size>", X2(0), d1, w2, h, OnDeleteExports, 22);
         XRUi.SetTint(deleteExportsButton, XRUi.ButtonDangerColor);
+        XRUi.CreateButton(data, "Restore last deleted scan\n<size=72%><color=#9aa6b8>deleted scans wait in the trash - the last 10</color></size>", Pad, d1 + h + gap, ContentW, h, OnRestoreScan, 22);
         XRUi.CreateText(data, "ScansHint", "Scans: tap the name at the top. Each row has a bin; an old copy is one a newer scan already covers.", 17, TextAlignmentOptions.MidlineLeft, X2(1) + 6, d1, w2 - 6, h, XRUi.MutedText);
 
         foreach (var b in new[] { walkButton, dollhouseButton, plansButton, miniMapButton, showRoutesButton, showPhotosButton, fittingsButton, scanOverlayButton, zonesButton, wallScanButton, photoMarkersButton })
@@ -419,6 +420,17 @@ public class XRMenu : MonoBehaviour
         }
         scanInfos = await MRUKSceneCache.DescribeAsync();
         if (scanList.activeSelf) FillScanList();
+    }
+
+    /// <summary>Data tab: puts the scan you deleted last (bin or "Remove old copies") back - it appears in the scan list again.</summary>
+    async void OnRestoreScan()
+    {
+        string name = MRUKSceneCache.RestoreLastDeleted();
+        if (name == null) { AddLog("Nothing to restore - the trash is empty."); return; }
+        AddLog($"<color=green>Restored '{name}' from the trash.</color>");
+        scanInfos = await MRUKSceneCache.DescribeAsync();
+        if (scanList != null && scanList.activeSelf) FillScanList();
+        RefreshScanLabel();
     }
 
     /// <summary>Old copies (a newer saved scan has all their rooms, they hold nothing of their own): press, press again.</summary>

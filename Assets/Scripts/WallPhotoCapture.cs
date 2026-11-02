@@ -181,6 +181,7 @@ public class WallPhotoCapture : MonoBehaviour
             return;
         }
         wasActive = true;
+        CheckStorage();
         // while the 3D scan records, the walls show what it has painted so far
         WallOverlays.ForceScan = dense;
         if (!started && !preparing && Time.time >= retryAt) Begin();
@@ -192,8 +193,8 @@ public class WallPhotoCapture : MonoBehaviour
         view = View.Unknown;
         if (!shotRequested && !capturing)
         {
-            if (dense) { if (pendingWrites < MaxPendingWrites && DenseDue()) shotRequested = requestDense = true; }
-            else if (auto)
+            if (dense) { if (!storageFull && pendingWrites < MaxPendingWrites && DenseDue()) shotRequested = requestDense = true; }
+            else if (auto && !storageFull)
             {
                 view = ClassifyView();
                 if (view == View.Settling && stillFor >= StillTime && Time.time - lastShotTime >= MinInterval)
@@ -211,6 +212,25 @@ public class WallPhotoCapture : MonoBehaviour
     {
         FollowHand();
         PlaceHud();
+    }
+
+    // ---------- storage ----------
+
+    const long LowStorage = 2L << 30, FullStorage = 400L << 20;   // warn below 2 GB, stop recording below 400 MB
+    float nextStorageCheck; bool storageFull, storageWarned;
+
+    /// <summary>Every 20 s: recording stops before the headset's storage is full (it made half-written photos) and says so.</summary>
+    void CheckStorage()
+    {
+        if (Time.unscaledTime < nextStorageCheck) return;
+        nextStorageCheck = Time.unscaledTime + 20f;
+        long free = FreeSpace.Bytes(Application.persistentDataPath);
+        if (free < 0) { storageFull = false; return; }
+        bool wasFull = storageFull;
+        storageFull = free < FullStorage;
+        if (storageFull && !wasFull) uiLog?.AddLog($"<color=red>Storage almost full ({free / 1048576} MB free) - recording stopped. Free space: Data > Delete exports.</color>");
+        else if (!storageFull && free < LowStorage && !storageWarned) { storageWarned = true; uiLog?.AddLog($"<color=orange>Only {free / 1073741824f:0.0} GB of storage left - a house scan takes several GB.</color>"); }
+        else if (!storageFull && wasFull) uiLog?.AddLog("Storage freed - recording continues.");
     }
 
     // ---------- session ----------
@@ -526,6 +546,8 @@ public class WallPhotoCapture : MonoBehaviour
                 Count(denseByRoom, meta.roomUuid);
                 Click(0.12f);
                 flashUntil = Time.time + 0.12f; flashText = null;
+                string roomDone = RoomDoneText(meta.roomUuid);
+                if (roomDone != null) { flashUntil = Time.time + 2.5f; flashText = roomDone; Haptic(); Click(0.6f); }
                 if (denseCount % 5 == 0) RefreshPanel();
                 if (denseCount % 25 == 0) Debug.Log($"[WallPhotos] 3D frames: {denseCount} saved, {blurryDropped} blurry dropped, coverage cells {coverage.Count}, pending writes {pendingWrites}");
                 return;
@@ -567,6 +589,38 @@ public class WallPhotoCapture : MonoBehaviour
         catch (Exception e) { Debug.LogWarning($"[WallPhotos] live wall scan: {e.Message}"); }
     }
 #endif
+
+    readonly HashSet<string> roomsAnnounced = new HashSet<string>();
+    /// <summary>Once per room and session: at least 90 % of its walls are covered - a message, a click and a buzz, so you know to move on.</summary>
+    string RoomDoneText(string roomUuid)
+    {
+#if META_XR_SDK_INSTALLED
+        if (string.IsNullOrEmpty(roomUuid) || roomsAnnounced.Contains(roomUuid)) return null;
+        if (WallScan.CoverageOf(roomUuid) < 0.9f) return null;
+        roomsAnnounced.Add(roomUuid);
+        return "<color=#7dff9a>Walls of this room are done</color> <size=26>- on to the next room</size>";
+#else
+        return null;
+#endif
+    }
+
+    /// <summary>"  -  walls 63 %": how much of this room's walls the 3D scan has seen so far (empty until the room has planes).</summary>
+    float coverageAt; string coverageShown = "";
+    string CoverageText()
+    {
+#if META_XR_SDK_INSTALLED
+        // worked out ~4 times a second, not every frame (it walks every plane of the scan and builds a string)
+        if (Time.unscaledTime >= coverageAt)
+        {
+            coverageAt = Time.unscaledTime + 0.25f;
+            float c = currentRoomUuid != null ? WallScan.CoverageOf(currentRoomUuid) : -1f;
+            coverageShown = c >= 0f ? $"  -  walls {Mathf.RoundToInt(c * 100f)} %" : "";
+        }
+        return coverageShown;
+#else
+        return "";
+#endif
+    }
 
     /// <summary>Mean luminance gradient over a sparse grid (every 4th pixel, 2 px steps) - drops with motion blur and
     /// defocus. Absolute values depend on the surface (bare brick >> smooth plaster), so frames are compared with the
@@ -1251,6 +1305,7 @@ public class WallPhotoCapture : MonoBehaviour
             return;
         }
         if (now < flashUntil && flashText != null) { SetHud(flashText); return; }
+        if (storageFull) { SetHud("<color=#ff5050>Storage almost full - recording stopped</color> <size=26>- free space in the Data tab</size>"); return; }
 #if META_XR_SDK_INSTALLED
         if (cam == null || !cam.IsPlaying) { SetHud("Camera starting..."); return; }
         if (dense)
@@ -1258,7 +1313,7 @@ public class WallPhotoCapture : MonoBehaviour
             bool tooFast = headDegPerSec > DenseMaxDegPerSec || headMetersPerSec > DenseMaxMetersPerSec;
             SetHud(tooFast ? "<color=#ffb347>Slower - the images get blurry</color>"
                            : (currentRoomUuid != null && denseByRoom.TryGetValue(currentRoomUuid, out int inRoom)
-                               ? $"<color=#ff5050>\u25CF</color> 3D scan  -  {inRoom} frames in this room" + (blurryDropped > 0 ? $"<size=24>  ({blurryDropped} blurry dropped)</size>" : "")
+                               ? $"<color=#ff5050>\u25CF</color> 3D scan  -  {inRoom} frames in this room" + CoverageText() + (blurryDropped > 0 ? $"<size=24>  ({blurryDropped} blurry dropped)</size>" : "")
                                : $"<color=#ff5050>\u25CF</color> 3D scan  -  starting..."));
             return;
         }

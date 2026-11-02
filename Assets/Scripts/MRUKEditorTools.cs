@@ -189,7 +189,7 @@ public static class MRUKEditorTools {
                 Directory.CreateDirectory(dir);
                 File.Copy(scan, Path.Combine(dir, MRUKPathUtility.DATA_SCENE), true);
                 string edits = Path.Combine(tmp, name + HouseEditsStore.EXTENSION);
-                if (File.Exists(edits)) File.Copy(edits, Path.Combine(dir, MRUKPathUtility.DATA_EDITS), true);
+                if (File.Exists(edits)) PullEdits(edits, Path.Combine(dir, MRUKPathUtility.DATA_EDITS), name);
                 if (File.Exists(names)) File.Copy(names, Path.Combine(dir, MRUKPathUtility.DATA_ROOM_NAMES), true);
                 n++;
             }
@@ -197,6 +197,25 @@ public static class MRUKEditorTools {
         } finally {
             try { Directory.Delete(tmp, true); } catch { }
         }
+    }
+
+    /// <summary>The headset's edits of a scan onto the PC's copy - but never over newer ones: edits made on the PC (desktop app) after
+    /// the headset's last change are kept; otherwise the PC file is replaced and the old one stays as *.before_pull.</summary>
+    static void PullEdits(string questEdits, string pcEdits, string scanName) {
+        if (!File.Exists(pcEdits)) { File.Copy(questEdits, pcEdits); return; }
+        string pcText = File.ReadAllText(pcEdits), questText = File.ReadAllText(questEdits);
+        if (pcText == questText) return;
+        string pcMod = EditsModified(pcText), questMod = EditsModified(questText);
+        if (string.CompareOrdinal(pcMod, questMod) > 0) {
+            Debug.LogWarning($"[Pull] '{scanName}': the edits on the PC ({pcMod}) are newer than the Quest's ({questMod}) - kept, not overwritten.");
+            return;
+        }
+        File.Copy(pcEdits, pcEdits + ".before_pull", true);
+        File.Copy(questEdits, pcEdits, true);
+    }
+
+    static string EditsModified(string json) {
+        try { return JsonUtility.FromJson<HouseEdits>(json)?.modified ?? ""; } catch (Exception) { return ""; }
     }
 
     /// <summary>Wall photo sessions (WallPhotoCapture: persistentDataPath/WallPhotos/Photos_yyyyMMdd with JPGs, their
@@ -226,7 +245,7 @@ public static class MRUKEditorTools {
         if (quest == null && pc == null) return;
         var merged = RouteStore.Merge(pc, quest);
         Directory.CreateDirectory(Path.GetDirectoryName(local));
-        File.WriteAllText(local, JsonUtility.ToJson(merged, true));
+        SafeFile.WriteAllText(local, JsonUtility.ToJson(merged, true));
         RunAdb($"shell mkdir -p \"{RemoteAppFiles}/{RouteStore.Folder}\"");
         RunAdb($"push \"{local}\" \"{remote}\"");
         Debug.Log($"<color=green>Routes: {merged.routes.Count} (Quest {quest?.routes.Count ?? 0}, PC {pc?.routes.Count ?? 0}) - merged into {local} and back to the Quest.</color>");

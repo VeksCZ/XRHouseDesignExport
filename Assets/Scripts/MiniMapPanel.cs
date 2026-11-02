@@ -81,7 +81,7 @@ public class MiniMapPanel : MonoBehaviour
         modelCenter = floorAnchors.Count > 0
             ? floorAnchors.Aggregate(Vector3.zero, (s, f) => s + f.transform.position) / floorAnchors.Count
             : rooms[0].transform.position;
-        modelYaw = FloorPlanBuilder.CorrectionYaw(MRUKPlanExtractor.Extract(rooms));
+        modelYaw = MRUKPlanExtractor.HouseYaw(rooms);
 
         var model = XRModelFactory.CreateAnchorAnalytical(rooms, modelYaw, modelCenter);
         var visual = UnityModelLoader.LoadToScene(model);

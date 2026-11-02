@@ -7,64 +7,6 @@ using UnityEngine;
 using Meta.XR.MRUtilityKit;
 #endif
 
-/// <summary>What runs in a route. Stored as a number - only ever append.</summary>
-public enum RouteKind { Electric, ColdWater, HotWater, Waste, Heating, Other }
-
-/// <summary>
-/// One installation route traced in the house (edit-mode tool "Routes"): a cable chase, a water or waste pipe, a
-/// heating pipe - as a polyline along its centre. Points are room-local to roomUuid (the room of its first point), like
-/// HouseEdits, so it lands in place in any loaded copy of the scan that has that room.
-/// </summary>
-[Serializable]
-public class PipeRoute
-{
-    public string id;
-    public RouteKind kind;
-    /// <summary>Outer diameter in metres (0 = the kind's default).</summary>
-    public float diameter;
-    public string roomUuid;
-    public List<Vector3Data> localPoints = new List<Vector3Data>();
-    /// <summary>What the ends connect to ("Sink", "WC", "Floor drain"...), empty = nothing said.</summary>
-    public string startLabel, endLabel;
-    public string created;
-    /// <summary>Found in the wall photos by RouteDetector, not confirmed yet (drawn faint/dashed until accepted).</summary>
-    public bool proposed;
-    /// <summary>Proposals: how sure the detector was (0..1) and where it came from.</summary>
-    public float confidence;
-    public string source;
-    /// <summary>What it is made of ("CYKY 3x2,5", "PPR 20", "HT 110"...), the circuit / breaker it belongs to ("5"),
-    /// a free note (PC) - shown when you point at it and in the drawings.</summary>
-    public string spec, circuit, note;
-    /// <summary>Last change (ISO) - "Pull" keeps the newer copy of a route/box edited on both sides.</summary>
-    public string modified;
-}
-
-/// <summary>A point item on a route or on its own: an electrical box, socket, switch, a water/waste outlet, a floor
-/// drain... - position on the surface (room-local, like routes) and the surface's normal there.</summary>
-[Serializable]
-public class RouteMarker
-{
-    public string id;
-    public RouteKind kind;
-    public string type;
-    public string roomUuid;
-    public Vector3Data localPos, localNormal;
-    public string label;
-    public string created;
-    /// <summary>Circuit / breaker of an electrical box ("5"), as for routes.</summary>
-    public string circuit;
-    public string modified;
-}
-
-[Serializable]
-public class PipeRouteFile
-{
-    public string schemaVersion = "1";
-    public string modified;
-    public List<PipeRoute> routes = new List<PipeRoute>();
-    public List<RouteMarker> markers = new List<RouteMarker>();
-}
-
 /// <summary>Colours, names and sizes of the route kinds.</summary>
 public static class RouteStyle
 {
@@ -246,11 +188,13 @@ public static class RouteStore
     {
         try
         {
-            if (!File.Exists(path)) return null;
-            var f = JsonUtility.FromJson<PipeRouteFile>(File.ReadAllText(path));
+            string text = SafeFile.ReadAllTextOrBackup(path, t => JsonUtility.FromJson<PipeRouteFile>(t) != null, w => Debug.LogWarning("[Routes] " + w));
+            if (text == null) return null;
+            var f = JsonUtility.FromJson<PipeRouteFile>(text);
             if (f == null) return null;
             f.routes ??= new List<PipeRoute>();
             f.markers ??= new List<RouteMarker>();
+            f.deleted ??= new List<DeletedItem>();
             foreach (var r in f.routes) r.localPoints ??= new List<Vector3Data>();
             return f;
         }
@@ -270,6 +214,8 @@ public static class RouteStore
         string now = Now;
         foreach (var r in Current.routes) if (r.id == null || !before.TryGetValue(r.id, out var b) || b != Stamp(r)) r.modified = now;
         foreach (var m in Current.markers) if (m.id == null || !before.TryGetValue(m.id, out var b) || b != Stamp(m)) m.modified = now;
+        // a route / box that is gone now was deleted: remembered, so "Pull" doesn't bring it back from the other side
+        RouteMerge.NoteDeletions(Current, before.Keys, now);
         Save();
         PendingChanges.Mark("routes");
     }
@@ -280,8 +226,11 @@ public static class RouteStore
     public static bool Undo()
     {
         if (undo.Count == 0) return false;
+        var idsBefore = Current.routes.Where(r => r.id != null).Select(r => r.id).Concat(Current.markers.Where(m => m.id != null).Select(m => m.id)).ToList();
         current = JsonUtility.FromJson<PipeRouteFile>(undo[undo.Count - 1]) ?? new PipeRouteFile();
+        current.routes ??= new List<PipeRoute>(); current.markers ??= new List<RouteMarker>(); current.deleted ??= new List<DeletedItem>();
         undo.RemoveAt(undo.Count - 1);
+        RouteMerge.NoteDeletions(current, idsBefore, Now);   // undoing an addition removes it: remembered like any deletion
         Save();
         PendingChanges.Mark("routes");
         return true;
@@ -293,38 +242,15 @@ public static class RouteStore
         try
         {
             Directory.CreateDirectory(Path.GetDirectoryName(FilePath));
-            File.WriteAllText(FilePath, JsonUtility.ToJson(current, true));
+            SafeFile.WriteAllText(FilePath, JsonUtility.ToJson(current, true));
         }
         catch (Exception e) { Debug.LogException(e); }
         Version++;
         Changed?.Invoke();
     }
 
-    /// <summary>Routes and boxes of 'b' added to 'a' (same id: the newer edit wins).</summary>
-    public static PipeRouteFile Merge(PipeRouteFile a, PipeRouteFile b)
-    {
-        var res = new PipeRouteFile
-        {
-            routes = new List<PipeRoute>(a?.routes ?? new List<PipeRoute>()),
-            markers = new List<RouteMarker>(a?.markers ?? new List<RouteMarker>()),
-        };
-        foreach (var m in b?.markers ?? new List<RouteMarker>())
-        {
-            int i = res.markers.FindIndex(x => x.id == m.id);
-            if (i < 0) res.markers.Add(m);
-            else if (string.CompareOrdinal(m.modified ?? "", res.markers[i].modified ?? "") > 0) res.markers[i] = m;
-        }
-        foreach (var r in b?.routes ?? new List<PipeRoute>())
-        {
-            int i = res.routes.FindIndex(x => x.id == r.id);
-            if (i < 0) { res.routes.Add(r); continue; }
-            // the newer edit wins; without dates (older files) the longer one - routes only grow while drawn
-            int c = string.CompareOrdinal(r.modified ?? "", res.routes[i].modified ?? "");
-            if (c > 0 || (c == 0 && r.localPoints.Count > res.routes[i].localPoints.Count)) res.routes[i] = r;
-        }
-        res.modified = DateTime.Now.ToString("s");
-        return res;
-    }
+    /// <summary>Routes and boxes of 'b' added to 'a' (same id: the newer edit wins; a deletion newer than the last edit wins too).</summary>
+    public static PipeRouteFile Merge(PipeRouteFile a, PipeRouteFile b) => RouteMerge.Merge(a, b);
 
 #if META_XR_SDK_INSTALLED
     /// <summary>The route's centre line in the current scan's world frame, or false if its room isn't loaded.</summary>

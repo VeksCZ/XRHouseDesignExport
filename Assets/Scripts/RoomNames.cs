@@ -54,7 +54,7 @@ public static class RoomNames
         {
             var store = new Store();
             foreach (var kv in map) { store.keys.Add(kv.Key); store.values.Add(kv.Value); }
-            File.WriteAllText(FilePath, JsonUtility.ToJson(store, true));
+            SafeFile.WriteAllText(FilePath, JsonUtility.ToJson(store, true));
             PendingChanges.Mark("room names");
         }
         catch (Exception ex) { Debug.LogWarning("[RoomNames] Could not save: " + ex.Message); }
@@ -70,7 +70,7 @@ public static class RoomNames
         foreach (var kv in map)
             if (keys == null || keys.Contains(kv.Key)) { store.keys.Add(kv.Key); store.values.Add(kv.Value); }
         if (store.keys.Count == 0) return false;
-        File.WriteAllText(file, JsonUtility.ToJson(store, true));
+        SafeFile.WriteAllText(file, JsonUtility.ToJson(store, true));
         return true;
     }
 

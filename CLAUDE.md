@@ -79,13 +79,18 @@ and exports 3D models, floor plans and reports from the scan.
   `97_Wall_Photos/`, referenced by wall anchor UUID; mirrored against the inside view; check box "Fotka stěny").
   Desktop tests: `-routes <file>` (never the real file) `-addroutes "kind:x,y,z;...|..."` (GLB frame), `-test walls`.
   Routes/boxes carry `spec` (material preset per kind), `circuit`, `note` and a per-item `modified` (RouteStore.Apply
-  stamps what a change touched; Merge keeps the newer copy). Tool panel: Pick... selects a route/box for Spec / Circuit
+  stamps what a change touched; Merge keeps the newer copy; deletions are kept as `deleted` marks (id + time, `RouteMerge`) so
+  "Pull" doesn't bring a deleted route back from the other side). Tool panel: Pick... selects a route/box for Spec / Circuit
   / Leads to; points snap onto boxes, plumb above/below boxes and to other routes' levels. Pointing at a route / box /
   photo icon shows a label (WallOverlays.UpdateAim; a photo pops up after a short dwell). "No-drill zones" (Layers tab,
   `WallOverlays.ShowZones`): bands of route width + 10 cm per side on the surface. Export also writes trade sheets
   `98_Elektro.html` / `98_Voda_Odpad_Topeni.html` (material totals, route/box lists, only walls with that work, A4
   landscape print). Desktop: `-overlays routes,zones`, `-test views -views routes` (one shot per route; give `-out`
   as an absolute path).
+- **Deleting a scan** (bin / "Remove old copies") moves it - with its edits, furniture spec and doorway backups - to `ScanCache/_trash/`
+  (PC: `Exports/RoomData/_trash/<time>_<name>/`), the 10 latest removals stay; restore = Data tab > "Restore last deleted scan" (`MRUKSceneCache.RestoreLastDeleted`). "Pull" never
+  overwrites newer edits on the PC with the Quest's (`MRUKEditorTools.PullEdits`; the replaced file stays as `*.before_pull`), and an
+  old-copy check treats an unreadable edits file as "has edits".
 - **Scan list** (menu top row: name + state lined-up / not saved / not exported; tap opens the list): rows from
   `MRUKSceneCache.DescribeAsync` (rooms, date, furniture/edits/doorway), tap = select + load, bin = delete (press twice).
   "Old copy" = a saved scan whose rooms are all in a newer one and that has no furniture, edits or added doorway
@@ -110,10 +115,16 @@ and exports 3D models, floor plans and reports from the scan.
   frame (`Plane.acc` allocates lazily, `HasData`; cover mode allocates all), has mips + aniso (`GenerateMips` after every
   paint), and a frame is only painted onto planes it sees (`FrameCulling.SeesPlane`). `WallScanShow` fills gaps of a few cm
   from mip 2 (`_FillLod`); big holes stay holes. Views rebuild at most every 1.5 s while the background build adds planes.
+  The 3D-scan HUD shows "walls 63 %" for the room you are in: `CoverageGrid` (10 cm cells per plane, switched on by frames that
+  see them well - `Splat` marks them, a loaded cache texture seeds them from its alpha) summed by area in `WallScan.CoverageOf`.
   Export writes `16_Model_Wall_Photos.glb` (`MRUKExporter.ExportPhotoModel` -> `WallScan.ExportQuads` -> `PhotoModelGlb`): one
   unlit, alpha-masked quad per photographed plane with its PNG embedded, same frame as the other models (open both in a viewer
   to see pipes and cables on the bare walls). The writer is validated with the Khronos glTF validator (0 issues) and tested in
   `Tools/OfflineTests/WallTest`; to re-validate: `npm i gltf-validator`, run it on the `photo_test.glb` the test writes.
+- **User data files** (edits, routes, room names, saved scans, furniture spec) are written with `SafeFile.WriteAllText` (path.tmp, then an
+  atomic swap; the previous version stays as `path.bak`) and read with `ReadAllTextOrBackup` where it matters (edits, routes) - a kill
+  during a save (headset sleep) never leaves half a file. Use it for any new file the user can't recreate.
+- **Storage**: the 3D scan / photo tool checks free space every 20 s (`FreeSpace.Bytes`: warns below 2 GB, stops recording below 400 MB).
 - **Per-frame cost** (Quest): no string building / LINQ / allocation in `Update` paths (overlay `Stamp` struct, `LastBlocker`
   on demand, menu sync ~10x/s); `MRUKDataProcessor.GetValidRooms` is cached per loaded scene - don't add callers that need
   fresh results mid-load (it is not cached while `MRUKExporter.Loading`).
@@ -133,7 +144,7 @@ and exports 3D models, floor plans and reports from the scan.
   the floor and cables above the ceiling.
 - **New doorway** (Doors tool: trigger on a bare wall): `SceneJsonEdit.AddDoor` writes a DOOR_FRAME into the saved
   scan's own JSON (V1 entity or V2 room-mesh face; JSON/Unity axis flip calibrated from the walls; backup
-  `*.bak_doors` = before the first edit, `*.bak_last` = before the latest one). Desktop test `-test adddoor` (run it on a copy of a scan).
+  `*.bak_doors` = before the first edit, `*.bak_last` = before the latest one; button "Undo last scan edit" = `SceneJsonEdit.UndoLast`). Desktop test `-test adddoor` (run it on a copy of a scan).
   Not on the live scan (save it first, then pick the saved scan). **Missing wall** (button in the add panel): `MissingWall.Find` takes the
   loose wall ends of a room's outline nearest to where you pointed, `SceneJsonEdit.AddWall` joins them with a WALL_FACE
   (V2 face / V1 entity inserted in `wallUuids`); the walk-through keeps your spot over a reload (`TryGetFeetInRoom`, room + room-local point).
@@ -175,7 +186,7 @@ and exports 3D models, floor plans and reports from the scan.
   `Tools/OfflineTests/FullCompile` (`python3 check.py [--base REV]`, ~30 s) compiles all scripts against generated stand-ins and
   prints only the errors NEW since a known-good revision (the stand-ins make ~1400 errors of noise): it catches what the
   syntax check can't - scope clashes (CS0136), unassigned locals, `Action` passed where `UnityAction` is wanted, wrong
-  argument types between project APIs. **Run it before every commit of C# code** (base = the last revision the PC compiled).
+  argument types between project APIs (a NEW "does not contain a definition" on a Unity / Meta type is stand-in noise - check the member exists). **Run it before every commit of C# code** (base = the last revision the PC compiled). `--player` compiles with the Android player's defines (no `UNITY_EDITOR`) - run it too after touching `#if UNITY_ANDROID`/`!UNITY_EDITOR` code.
 - **Built-in modules**: unused ones (cloth, terrain, tilemap, wind, video...) are out of `manifest.json`;
   Meta's SDK needs `assetbundle`, `physics2d`, `particlesystem` and (Android) `director` without declaring them - keep
   those. `com.unity.xr.meta-openxr` (+ AR Foundation, XR Simulation assets) was removed - nothing used it; Meta XR Core

@@ -116,6 +116,14 @@ class T {
       string newId = (string)added["uuid"];
       Check(order.Count == 4 && order.IndexOf(newId) == 2, $"V1 wall list order: new wall between east and west (index {order.IndexOf(newId)} of {order.Count})");
       Check(File.Exists(MRUKSceneCache.ScanPath(scan) + ".bak_doors"), "V1 backup written");
+      // undo: the scan goes back to the bytes before the edit, once
+      Check(SceneJsonEdit.CanUndo(scan), "V1 an undo is available after the edit");
+      string original = json.ToString();
+      string afterEdit = File.ReadAllText(MRUKSceneCache.ScanPath(scan));
+      Check(SceneJsonEdit.UndoLast(scan) == null, "V1 undo works");
+      Check(JObject.Parse(File.ReadAllText(MRUKSceneCache.ScanPath(scan))).ToString() == JObject.Parse(original).ToString(), "V1 undo restores the scan as it was before the edit");
+      Check(File.ReadAllText(MRUKSceneCache.ScanPath(scan) + ".bak_redo") == afterEdit, "V1 the edited file is kept as .bak_redo");
+      Check(!SceneJsonEdit.CanUndo(scan) && SceneJsonEdit.UndoLast(scan) != null, "V1 a second undo says there is nothing to undo");
     }
 
     // ---- V2 (room pose not identity) ----
@@ -147,6 +155,29 @@ class T {
     closed.WallAnchors.Add(an);
     Check(!MissingWall.Find(new List<MRUKRoom> { closed }, new Ray(new Vector3(2, 1.5f, 1.5f), new Vector3(0, 0, 1)), out _, out _, out _, out _), "a closed outline reports no missing wall");
 
+    // ---- stair riser distribution ----
+    {
+      const float T = 0.27f;
+      int Sum(List<int> l) => l.Sum();
+      var one = StairMath.DistributeRisers(new List<float> { 6f }, 16, T);
+      Check(one.Count == 1 && one[0] == 16, "one long flight takes all the steps");
+      var shortOnes = StairMath.DistributeRisers(new List<float> { 2.2f, 0.8f, 0.8f }, 17, T);
+      Check(Sum(shortOnes) == 17 && shortOnes[0] > shortOnes[1] && shortOnes.All(x => x >= 0), "missing steps go to the longest flight");
+      var over = StairMath.DistributeRisers(new List<float> { 2.7f, 0.5f, 0.5f }, 8, T);
+      Check(Sum(over) == 8 && over.All(x => x >= 0), "too many steps: reduced to the total, never negative");
+      var allLong = StairMath.DistributeRisers(new List<float> { 2.7f, 2.7f, 2.7f }, 16, T);   // used to end with a negative flight
+      Check(Sum(allLong) == 16 && allLong.All(x => x >= 0) && allLong.Max() - allLong.Min() <= 1, $"all legs longer than needed: balanced [{string.Join(",", allLong)}]");
+      var tiny = StairMath.DistributeRisers(new List<float> { 1.0f, 0f }, 16, T);
+      Check(Sum(tiny) == 16 && tiny[1] == 0, "a flat leg stays flat");
+      Check(StairMath.DistributeRisers(new List<float>(), 16, T).Count == 0, "no flights: nothing");
+      for (int total = 1; total <= 40; total++)
+        foreach (var lens in new[] { new[] { 5f, 1f }, new[] { 1f, 1f, 1f }, new[] { 4f, 4f, 4f, 4f }, new[] { 0f, 0f } })
+        {
+          var r = StairMath.DistributeRisers(lens, total, T);
+          if (Sum(r) != total || r.Any(x => x < 0)) { Check(false, $"sum / sign off for total {total}, lens {string.Join(",", lens)} -> [{string.Join(",", r)}]"); total = 99; break; }
+        }
+    }
+
     // ---- stairs snap back onto the floor ----
     {
       var sq = new List<Vector3> { new Vector3(0, 0, 0), new Vector3(4, 0, 0), new Vector3(4, 0, 3), new Vector3(0, 0, 3) };
@@ -170,6 +201,89 @@ class T {
       Check(!FrameCulling.SeesPlane(id, 1f, 1f, .5f, .5f, new Vector3(-2, -1, -3), new Vector3(4, 0, 0), new Vector3(0, 2, 0)), "a wall behind the camera is not");
       Check(FrameCulling.SeesPlane(id, 1f, 1f, .5f, .5f, new Vector3(-30, -2, 4), new Vector3(60, 0, 0), new Vector3(0, 4, 0)), "a long wall of which only a slice is in view is seen");
       Check(!FrameCulling.SeesPlane(id, 1f, 1f, .5f, .5f, new Vector3(-2, 4, 3), new Vector3(4, 0, 0), new Vector3(0, 2, 0)), "a wall above the view is not");
+    }
+
+    // ---- SafeFile: user data survives a kill halfway through a save ----
+    {
+      string dir = Path.Combine(Path.GetTempPath(), "safefile_test_" + Guid.NewGuid().ToString("N")); Directory.CreateDirectory(dir);
+      string f = Path.Combine(dir, "edits.json");
+      SafeFile.WriteAllText(f, "{\"v\":1}");
+      Check(File.ReadAllText(f) == "{\"v\":1}" && !File.Exists(f + ".tmp") && !File.Exists(f + ".bak"), "first write: file there, no .tmp, no .bak yet");
+      SafeFile.WriteAllText(f, "{\"v\":2}");
+      Check(File.ReadAllText(f) == "{\"v\":2}" && File.ReadAllText(f + ".bak") == "{\"v\":1}" && !File.Exists(f + ".tmp"), "second write: new content, the previous one kept as .bak, .tmp gone");
+      // the app was killed while writing the next one: a half .tmp is left, the real file is untouched
+      File.WriteAllText(f + ".tmp", "{\"v\":3,\"half");
+      Check(SafeFile.ReadAllTextOrBackup(f, t => t.EndsWith("}")) == "{\"v\":2}", "a half-written .tmp never replaces the file");
+      // the file itself got corrupted (older bug, disk): the backup is used
+      File.WriteAllText(f, "{\"v\":2,\"hal");
+      string warned = null;
+      Check(SafeFile.ReadAllTextOrBackup(f, t => t.EndsWith("}"), w => warned = w) == "{\"v\":1}" && warned != null && warned.Contains(".bak"), "an unreadable file falls back to the .bak (and says so)");
+      File.Delete(f);
+      Check(SafeFile.ReadAllTextOrBackup(f, t => true) == "{\"v\":1}", "a missing file falls back to the .bak");
+      Check(SafeFile.ReadAllTextOrBackup(Path.Combine(dir, "nothing.json"), t => true) == null, "nothing there: null");
+      Directory.Delete(dir, true);
+    }
+
+    // ---- routes: merging the headset's and the PC's file ----
+    {
+      PipeRoute R(string id, string modified, int points = 2) => new PipeRoute { id = id, modified = modified, localPoints = Enumerable.Range(0, points).Select(i => new Vector3Data()).ToList() };
+      PipeRouteFile F(params PipeRoute[] r) => new PipeRouteFile { routes = r.ToList() };
+      var pc = F(R("a", "2026-10-01T10:00:00"), R("b", "2026-10-01T10:00:00"));
+      var quest = F(R("b", "2026-10-02T10:00:00"), R("c", "2026-10-02T09:00:00"));
+      var m = RouteMerge.Merge(pc, quest);
+      Check(m.routes.Count == 3 && m.routes.First(r => r.id == "b").modified == "2026-10-02T10:00:00", "merge: union, the newer edit of a shared route wins");
+
+      // a route deleted on the headset must not come back from the PC's older copy
+      var questAfterDelete = F(R("c", "2026-10-02T09:00:00")); questAfterDelete.deleted.Add(new DeletedItem { id = "a", at = "2026-10-03T08:00:00" });
+      var m2 = RouteMerge.Merge(pc, questAfterDelete);
+      Check(!m2.routes.Any(r => r.id == "a") && m2.routes.Any(r => r.id == "b") && m2.deleted.Any(d => d.id == "a"), "merge: a route deleted on one side stays deleted (not brought back by the other side)");
+      var m2b = RouteMerge.Merge(questAfterDelete, pc);
+      Check(!m2b.routes.Any(r => r.id == "a"), "merge: the same whichever side is first");
+
+      // edited after it was deleted: alive again, the mark is dropped
+      var pcEdited = F(R("a", "2026-10-04T10:00:00"));
+      var m3 = RouteMerge.Merge(pcEdited, questAfterDelete);
+      Check(m3.routes.Any(r => r.id == "a") && !m3.deleted.Any(d => d.id == "a"), "merge: an edit newer than the deletion keeps the route");
+
+      // an old file without dates: the deletion wins
+      var m4 = RouteMerge.Merge(F(R("x", null)), new PipeRouteFile { deleted = new List<DeletedItem> { new DeletedItem { id = "x", at = "2026-10-03T08:00:00" } } });
+      Check(m4.routes.Count == 0, "merge: an undated route that was deleted is dropped");
+
+      // boxes follow the same rule
+      var withBox = new PipeRouteFile { markers = new List<RouteMarker> { new RouteMarker { id = "m1", modified = "2026-10-01T10:00:00" } } };
+      var boxGone = new PipeRouteFile { deleted = new List<DeletedItem> { new DeletedItem { id = "m1", at = "2026-10-02T10:00:00" } } };
+      Check(RouteMerge.Merge(withBox, boxGone).markers.Count == 0, "merge: a deleted box is dropped too");
+
+      // NoteDeletions: what is gone gets marked, what is back loses its mark
+      var f = F(R("keep", "2026-10-05T10:00:00"));
+      RouteMerge.NoteDeletions(f, new[] { "keep", "gone" }, "2026-10-05T11:00:00");
+      Check(f.deleted.Count == 1 && f.deleted[0].id == "gone" && f.deleted[0].at == "2026-10-05T11:00:00", "NoteDeletions marks the route that is gone");
+      f.routes.Add(R("gone", "2026-10-05T12:00:00"));
+      RouteMerge.NoteDeletions(f, new[] { "keep" }, "2026-10-05T12:00:00");
+      Check(f.deleted.Count == 0, "NoteDeletions: a route that is back loses its mark (undo)");
+    }
+
+    // ---- coverage grid ----
+    {
+      Func<Vector3, Vector3> id = v => v;
+      Vector3 cam = Vector3.zero;
+      var full = new CoverageGrid(2f, 1f);
+      full.Mark(id, 1f, 1f, .5f, .5f, cam, new Vector3(-1, -0.5f, 3), new Vector3(2, 0, 0), new Vector3(0, 1, 0), new Vector3(0, 0, -1));
+      Check(full.Fraction > 0.99f, $"a plane in full view 3 m ahead is covered ({full.Fraction:0.00})");
+      var far = new CoverageGrid(2f, 1f);
+      far.Mark(id, 1f, 1f, .5f, .5f, cam, new Vector3(-1, -0.5f, 5), new Vector3(2, 0, 0), new Vector3(0, 1, 0), new Vector3(0, 0, -1));
+      Check(far.Fraction == 0f, "5 m away counts for nothing (max 3.5 m)");
+      var away = new CoverageGrid(2f, 1f);
+      away.Mark(id, 1f, 1f, .5f, .5f, cam, new Vector3(-1, -0.5f, 3), new Vector3(2, 0, 0), new Vector3(0, 1, 0), new Vector3(0, 0, 1));
+      Check(away.Fraction == 0f, "a plane facing away from the camera is not covered");
+      var part = new CoverageGrid(6f, 1f);
+      part.Mark(id, 1f, 1f, .5f, .5f, cam, new Vector3(0, -0.5f, 3), new Vector3(6, 0, 0), new Vector3(0, 1, 0), new Vector3(0, 0, -1));
+      Check(part.Fraction > 0.15f && part.Fraction < 0.3f, $"a long wall seen only in part: a fraction of it ({part.Fraction:0.00})");
+      float before = part.Fraction; part.Mark(id, 1f, 1f, .5f, .5f, cam, new Vector3(0, -0.5f, 3), new Vector3(6, 0, 0), new Vector3(0, 1, 0), new Vector3(0, 0, -1));
+      Check(part.Fraction == before, "the same frame twice adds nothing");
+      var tex = new CoverageGrid(4f, 2f); tex.MarkFromAlpha((u, v) => u < 0.5f ? 1f : 0f);
+      Check(Math.Abs(tex.Fraction - 0.5f) < 0.02f, $"from a saved texture: half covered ({tex.Fraction:0.00})");
+      tex.Clear(); Check(tex.Seen == 0, "clear");
     }
 
     // ---- textured GLB of the wall scan ----

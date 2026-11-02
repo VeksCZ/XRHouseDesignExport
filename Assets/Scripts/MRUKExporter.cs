@@ -566,6 +566,8 @@ public class MRUKExporter : MonoBehaviour
 
         File.WriteAllText(Path.Combine(session, MRUKPathUtility.MODEL_MTL), OBJWriter.GenerateMTL());
         ExportPhotoModel(session, rooms, angle, LastHouseCenter, ui);
+        try { File.WriteAllText(Path.Combine(session, "00_README.txt"), ExportReadme(), System.Text.Encoding.UTF8); }
+        catch (Exception ex) { Debug.LogWarning("[Export] README: " + ex.Message); }
 
         ui?.AddLog("<color=cyan>[6/6] Per-room exports...</color>");
         // Everything the whole-house export has (all 4 model tiers, the HTML report), but scoped to just this
@@ -612,6 +614,34 @@ public class MRUKExporter : MonoBehaviour
     /// <summary>Editor-only entry point, so tooling like the Unity MCP bridge can start the fast device build without a menu click.</summary>
     public void EditorFastBuildAndInstall() => MRUKEditorTools.BuildAPKFast();
 #endif
+
+    /// <summary>What the files of an export are - for whoever opens the folder (architect, electrician, plumber).</summary>
+    static string ExportReadme() => string.Join("\r\n", new[]
+    {
+        "XRHouseDesignExport - obsah exportu",
+        "",
+        "MODELY (3D)",
+        "  11_..15_*.glb a 21_..25_*.obj   Model domu v pěti variantách: kotvy (čisté kvádry), kotvy s kótami, mesh se stěnami, rekonstrukce, surový scan.",
+        "                                  GLB otevřete ve Windows 3D Viewer, Blenderu nebo online prohlížeči; OBJ + 00_Materials.mtl v jakémkoli CADu.",
+        "  16_Model_Wall_Photos.glb        Fotky holých stěn ze 3D scanu na rovinách stěn, podlah a stropů (stejné souřadnice jako ostatní modely).",
+        "                                  Otevřete spolu s 11_Model_Analytical_Anchors.glb - uvidíte potrubí a kabely na zdech.",
+        "",
+        "VÝKRESY A PŘEHLEDY (HTML - otevřít v prohlížeči, tisk A4 na šířku)",
+        "  99_Report_House.html            Půdorysy, místnosti, otvory, rozměry.",
+        "  97_Walls_Routes.html            Pohledy na stěny zevnitř s trasami, krabicemi a kótami v cm od levého rohu a od hrubé podlahy;",
+        "                                  pozadí = fotka stěny (složka 97_Wall_Photos musí ležet vedle souboru).",
+        "  98_Elektro.html, 98_Voda_Odpad_Topeni.html   Totéž jen pro jednu profesi + soupis materiálu.",
+        "",
+        "DATA",
+        "  90_Data_Rooms.json              Místnosti a jejich geometrie.",
+        "  92_Data_Scan.scene.json         Celý scan (pro znovunačtení v aplikaci).",
+        "  93_Data_Edits.json              Ruční úpravy: dveře, okna, schody, otvory.",
+        "  94_Data_RoomNames.json          Názvy místností.",
+        "  <místnost>_<id>/                Totéž pro každou místnost zvlášť.",
+        "",
+        "Souřadnice: metry, osa Y nahoru; modely jsou otočené podle hlavních stěn domu a vycentrované (v GLB je osa Z zrcadlená podle glTF).",
+        "Scan = holé zdivo před omítkou: kóty u tras jsou od hrubé podlahy, ne od finální.",
+    });
 
     /// <summary>16_Model_Wall_Photos.glb: the 3D wall scan (photos of the bare walls) as textured planes in the same frame as the
     /// other models, so the pipes and cables can be looked at on the PC in any glTF viewer next to the clean model.
