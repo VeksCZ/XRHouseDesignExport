@@ -88,7 +88,7 @@ and exports 3D models, floor plans and reports from the scan.
   landscape print). Desktop: `-overlays routes,zones`, `-test views -views routes` (one shot per route; give `-out`
   as an absolute path).
 - **Deleting a scan** (bin / "Remove old copies") moves it - with its edits, furniture spec and doorway backups - to `ScanCache/_trash/`
-  (PC: `Exports/RoomData/_trash/<time>_<name>/`), the 10 latest removals stay; restore = move the files back by hand. "Pull" never
+  (PC: `Exports/RoomData/_trash/<time>_<name>/`), the 10 latest removals stay; restore = Data tab > "Restore last deleted scan" (`MRUKSceneCache.RestoreLastDeleted`). "Pull" never
   overwrites newer edits on the PC with the Quest's (`MRUKEditorTools.PullEdits`; the replaced file stays as `*.before_pull`), and an
   old-copy check treats an unreadable edits file as "has edits".
 - **Scan list** (menu top row: name + state lined-up / not saved / not exported; tap opens the list): rows from

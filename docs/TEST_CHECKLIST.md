@@ -35,6 +35,7 @@ Když něco nevyjde, napište mi (nebo PC session) číslo bodu a log (`Logs/Que
 16. Trasy: smažte trasu na Questu, spusťte **Pull** → na PC se nevrátí. Upravte edity scanu na PC (desktopová appka) a zkuste **Pull**:
     novější PC edity zůstanou, starší se přepíšou a záloha je `93_Data_Edits.json.before_pull`.
 17. Smazání scanu (koš / „Remove old copies“): soubory jsou v `ScanCache/_trash/` (PC: `Exports/RoomData/_trash/`), ne pryč.
+    Záložka Data > **Restore last deleted scan** ho vrátí (se všemi edity) a objeví se v seznamu scanů.
 
 ## Ovládání a vzhled
 18. Ray: tenká čára, kroužek na konci; nad panelem/Dollhouse čtyři šipky, po stisknutí gripu vyplněný.

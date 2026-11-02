@@ -137,6 +137,43 @@ public static class MRUKSceneCache
         catch (Exception e) { Debug.LogWarning($"[Scans] could not remove '{name}': {e.Message}"); return false; }
     }
 
+    /// <summary>Puts the latest removed scan back (with its edits, furniture spec and backups). Returns its name, or null when the trash is
+    /// empty or it can't be restored. A scan of the same name that exists again is not overwritten: the restored one gets "_restored".</summary>
+    public static string RestoreLastDeleted()
+    {
+        try
+        {
+            string root = GetCacheRoot(), trash = Path.Combine(root, TrashFolder);
+            if (!Directory.Exists(trash)) return null;
+            var entries = Directory.GetFileSystemEntries(trash).Select(Path.GetFileName).Where(e => e.Length > 16).ToList();
+            if (entries.Count == 0) return null;
+            string stamp = entries.Select(e => e.Substring(0, 15)).OrderByDescending(x => x, StringComparer.Ordinal).First();
+            var mine = entries.Where(e => e.StartsWith(stamp + "_")).ToList();
+            string restored = null;
+            foreach (var e in mine)
+            {
+                string from = Path.Combine(trash, e), plain = e.Substring(16);
+                if (FolderMode)
+                {
+                    string target = Path.Combine(root, plain);
+                    if (Directory.Exists(target)) { plain += "_restored"; target = Path.Combine(root, plain); }
+                    Directory.Move(from, target);
+                    restored = plain;
+                }
+                else
+                {
+                    string target = Path.Combine(root, plain);
+                    if (File.Exists(target) && plain.EndsWith(EXTENSION)) { plain = plain.Substring(0, plain.Length - EXTENSION.Length) + "_restored" + EXTENSION; target = Path.Combine(root, plain); }
+                    if (File.Exists(target)) continue;   // a sidecar that exists again: the newer one stays
+                    File.Move(from, target);
+                    if (plain.EndsWith(EXTENSION)) restored = plain.Substring(0, plain.Length - EXTENSION.Length);
+                }
+            }
+            return restored;
+        }
+        catch (Exception e) { Debug.LogWarning($"[Scans] restore: {e.Message}"); return null; }
+    }
+
     /// <summary>Keeps the TrashKeep latest removals (entries are named yyyyMMdd_HHmmss_...).</summary>
     static void PruneTrash(string trash)
     {
