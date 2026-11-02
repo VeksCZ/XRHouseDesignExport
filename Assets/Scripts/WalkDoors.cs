@@ -28,6 +28,10 @@ public class WalkDoors
     internal static readonly Color GlassColor = new Color(0.70f, 0.85f, 1f, 0.35f);
     static readonly Color HandleColor = new Color(0.30f, 0.30f, 0.32f);
 
+    /// <summary>How far a hinged leaf swings open. Not a full 90: a door hinged a few cm from a corner would lie flat against
+    /// the side wall (the leaf's thickness and the wall slab overlap there); 86 leaves the free end ~6 cm off it.</summary>
+    const float SwingOpenDeg = 86f;
+
     enum Motion { Swing, Slide, Roll, Tilt }
 
     class Leaf
@@ -345,7 +349,7 @@ public class WalkDoors
                 if (!l.pivot) continue;
                 switch (l.motion)
                 {
-                    case Motion.Swing: l.pivot.localRotation = Quaternion.Euler(0f, l.sign * 90f * ease, 0f); break;
+                    case Motion.Swing: l.pivot.localRotation = Quaternion.Euler(0f, l.sign * SwingOpenDeg * ease, 0f); break;
                     case Motion.Slide: l.pivot.localPosition = l.closedPos + l.slideDir * (l.slide * ease); break;
                     case Motion.Roll: l.pivot.localScale = new Vector3(1f, Mathf.Lerp(1f, 0.04f, ease), 1f); break;
                     case Motion.Tilt: l.pivot.localRotation = Quaternion.AngleAxis(l.sign * TiltDeg * ease, l.axis); break;
