@@ -28,9 +28,11 @@ public class WalkDoors
     internal static readonly Color GlassColor = new Color(0.70f, 0.85f, 1f, 0.35f);
     static readonly Color HandleColor = new Color(0.30f, 0.30f, 0.32f);
 
-    /// <summary>How far a hinged leaf swings open. Not a full 90: a door hinged a few cm from a corner would lie flat against
-    /// the side wall (the leaf's thickness and the wall slab overlap there); 86 leaves the free end ~6 cm off it.</summary>
-    const float SwingOpenDeg = 86f;
+    /// <summary>Fallback opening angle of a hinged leaf when the sweep below can't tell (and for windows): not a full 90, so a
+    /// door hinged a few cm from a corner doesn't lie flat in the side wall.</summary>
+    const float DefaultSwingDeg = 86f;
+    /// <summary>A door opens as wide as it can without touching anything, up to this.</summary>
+    const float MaxSwingDeg = 120f;
 
     enum Motion { Swing, Slide, Roll, Tilt }
 
@@ -39,6 +41,7 @@ public class WalkDoors
         public Transform pivot;
         public Motion motion;
         public float sign;          // swing/tilt: which way round opens it
+        public float openDeg = DefaultSwingDeg; // swing: the angle it opens to (the free angle, see FreeSwing)
         public Vector3 axis;        // tilt: hinge axis (model space)
         public Vector3 closedPos;   // slide: pivot position when closed
         public Vector3 slideDir;    // slide: model-space direction it slides open
@@ -228,7 +231,35 @@ public class WalkDoors
         // points into the swing room, otherwise the other way round.
         float sign = Vector3.Dot(Vector3.Cross(Vector3.up, toOther), swing) >= 0f ? 1f : -1f;
         var style = door.isWindow ? LeafStyle.Window : LeafStyle.Door;
-        return new Leaf { motion = Motion.Swing, pivot = MakeLeaf(visual, layer, door, hinge, toOther, width, h, handleH, style), sign = sign };
+        float open = door.isWindow ? DefaultSwingDeg : FreeSwing(visual, layer, hinge, toOther, sign, width, h);
+        return new Leaf { motion = Motion.Swing, pivot = MakeLeaf(visual, layer, door, hinge, toOther, width, h, handleH, style), sign = sign, openDeg = open };
+    }
+
+    static readonly float[] SweepHeights = { 0.15f, 1.0f, 1.9f };
+
+    /// <summary>How far a leaf can swing open before it touches a wall (or anything else in the walk model): the leaf's line
+    /// (a 4 cm sphere swept from the hinge to the free end, at three heights) is turned in 2-degree steps up to
+    /// <see cref="MaxSwingDeg"/>; the first step that hits ends it (minus a 4-degree margin, never under 60). A hit right
+    /// at the start is more likely the frame or the jamb than a real obstacle - then the default angle is used.</summary>
+    float FreeSwing(GameObject visual, int layer, Vector3 hinge, Vector3 toOther, float sign, float width, float h)
+    {
+        var t = visual.transform;
+        Physics.SyncTransforms();
+        int mask = 1 << layer;
+        float len = Mathf.Max(0.1f, width - 0.07f);
+        for (int deg = 12; deg <= MaxSwingDeg; deg += 2)
+        {
+            Vector3 dir = t.TransformDirection(Quaternion.Euler(0f, sign * deg, 0f) * toOther).normalized;
+            foreach (float y in SweepHeights)
+            {
+                if (y > h) continue;
+                Vector3 o = t.TransformPoint(hinge + Vector3.up * y) + dir * 0.05f;
+                if (!Physics.SphereCast(o, 0.02f, dir, out _, len, mask, QueryTriggerInteraction.Ignore)) continue;
+                if (deg <= 12) return DefaultSwingDeg;
+                return Mathf.Clamp(deg - 4f, 60f, MaxSwingDeg);
+            }
+        }
+        return MaxSwingDeg;
     }
 
     /// <summary>A pivot at 'pos' (model space) with a leaf running along 'along' for 'width' (garage: hanging down
@@ -349,7 +380,7 @@ public class WalkDoors
                 if (!l.pivot) continue;
                 switch (l.motion)
                 {
-                    case Motion.Swing: l.pivot.localRotation = Quaternion.Euler(0f, l.sign * SwingOpenDeg * ease, 0f); break;
+                    case Motion.Swing: l.pivot.localRotation = Quaternion.Euler(0f, l.sign * l.openDeg * ease, 0f); break;
                     case Motion.Slide: l.pivot.localPosition = l.closedPos + l.slideDir * (l.slide * ease); break;
                     case Motion.Roll: l.pivot.localScale = new Vector3(1f, Mathf.Lerp(1f, 0.04f, ease), 1f); break;
                     case Motion.Tilt: l.pivot.localRotation = Quaternion.AngleAxis(l.sign * TiltDeg * ease, l.axis); break;
