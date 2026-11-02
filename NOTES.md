@@ -25,6 +25,8 @@ Aktualizuj na konci každé session. Pište stručně, nejnovější nahoře. Pr
 - Schody v Novostavbě jsou správně (uzavřeno): zasahují do neskenovaných Pracovna_dole / Satna (`extra_rooms` ve spec).
 - Cloud nemá scany ani Unity: vše z cloudu je ověřeno jen offline (FullCompile, WallTest, syntax).
 
+- Vysvětleno: `[Furniture] ... 338 parts in 46 rooms` vs `278 / 45` je jen přepínač `Furniture.WithSite` (skupina okolí domu = 60 dílů, 1 "místnost"), ne nedeterminismus.
+
 ## Historie
 
 - 2026-11-02 (cloud): dávka dveře + 3D scan + nástroje pro geometrii Novostavby, viz Aktuální stav.
