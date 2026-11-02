@@ -16,3 +16,8 @@ Doporučení: upgrade dělat na samostatné větvi, po něm spustit `-test views
 
 Seznam uložených scanů podle formátu (spustit na PC): `python3 Tools/list_scan_formats.py` (čte `Exports/RoomData`, po "Pull" i scany z headsetu).
 Každý V2 / MIXED scan je třeba před přechodem na 207 zkusmo načíst.
+
+## Stav uložených scanů (PC, `list_scan_formats.py`, 2026-11-02)
+37 scanů: **22x V2**, 12x V1, 3 neznámé (vzorové `Scan_Sample_*`). Většina uložených scanů je tedy V2 -> přechod na MRUK 207 je rizikový:
+před ním zkusmo načíst aspoň dva V2 scany (jeden s dveřmi / editací, jeden starší) přes `MRUK.LoadSceneFromJsonString` a ověřit stejný počet
+místností, zdí a dveří jako dnes. Do té doby zůstat na 205.
