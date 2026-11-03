@@ -364,14 +364,14 @@
       "opensIntoRoomUuid": "34b261d2-2363-19aa-2b09-795e7da1da0b",
       "sections": [
         {
-          "kind": 6,
-          "hinge": 0,
-          "width": 1470
+          "kind": 2,
+          "hinge": 1,
+          "width": 1350
         },
         {
-          "kind": 8,
-          "hinge": 1,
-          "width": 1050
+          "kind": 6,
+          "hinge": 0,
+          "width": 1350
         }
       ]
     },
@@ -394,7 +394,7 @@
         },
         {
           "kind": 6,
-          "hinge": 1,
+          "hinge": 0,
           "width": 1470
         }
       ]
@@ -443,133 +443,9 @@
           "width": 1087
         },
         {
-          "kind": 8,
-          "hinge": 1,
+          "kind": 6,
+          "hinge": 0,
           "width": 1433
-        }
-      ]
-    },
-    {
-      "anchorUuid": "0da02bb4-2ec4-e4be-6be0-da54a1b8af8f",
-      "roomUuid": "e040fdad-b441-38df-1a34-52d157f2fcef",
-      "localPos": {
-        "x": 8.5087,
-        "y": 1.7098,
-        "z": 0.0203
-      },
-      "kind": 0,
-      "hinge": 0,
-      "opensIntoRoomUuid": "e040fdad-b441-38df-1a34-52d157f2fcef",
-      "sections": [
-        {
-          "kind": 8,
-          "hinge": 0,
-          "width": 733
-        },
-        {
-          "kind": 8,
-          "hinge": 1,
-          "width": 987
-        }
-      ]
-    },
-    {
-      "anchorUuid": "95853a24-17f6-d76c-8adb-213b90c3ebc4",
-      "roomUuid": "1c9c52ea-8ee4-2172-c969-9f665d43fe95",
-      "localPos": {
-        "x": 8.7665,
-        "y": 1.7058,
-        "z": 2.4284
-      },
-      "kind": 0,
-      "hinge": 0,
-      "opensIntoRoomUuid": "1c9c52ea-8ee4-2172-c969-9f665d43fe95",
-      "sections": [
-        {
-          "kind": 8,
-          "hinge": 0,
-          "width": 733
-        },
-        {
-          "kind": 8,
-          "hinge": 1,
-          "width": 987
-        }
-      ]
-    },
-    {
-      "anchorUuid": "b6b99af3-337f-c959-82ab-cf4987014204",
-      "roomUuid": "1c9c52ea-8ee4-2172-c969-9f665d43fe95",
-      "localPos": {
-        "x": 5.7723,
-        "y": 2.0829,
-        "z": 4.256
-      },
-      "kind": 0,
-      "hinge": 0,
-      "opensIntoRoomUuid": "1c9c52ea-8ee4-2172-c969-9f665d43fe95",
-      "sections": [
-        {
-          "kind": 8,
-          "hinge": 0,
-          "width": 1220
-        }
-      ]
-    },
-    {
-      "anchorUuid": "fb2b7e45-0f62-33a2-1786-f4d90f77c377",
-      "roomUuid": "93ee5137-c69c-d157-5ef1-5fc5b75aece2",
-      "localPos": {
-        "x": 3.938,
-        "y": 2.0888,
-        "z": 4.4129
-      },
-      "kind": 0,
-      "hinge": 0,
-      "opensIntoRoomUuid": "93ee5137-c69c-d157-5ef1-5fc5b75aece2",
-      "sections": [
-        {
-          "kind": 8,
-          "hinge": 1,
-          "width": 720
-        }
-      ]
-    },
-    {
-      "anchorUuid": "6740bf61-fb99-5b9e-f80e-bd2e50440e9a",
-      "roomUuid": "3bf3e3b5-1057-358c-ff10-b4d06c4d29bd",
-      "localPos": {
-        "x": 0.7391,
-        "y": 2.1068,
-        "z": 4.8082
-      },
-      "kind": 0,
-      "hinge": 0,
-      "opensIntoRoomUuid": "3bf3e3b5-1057-358c-ff10-b4d06c4d29bd",
-      "sections": [
-        {
-          "kind": 8,
-          "hinge": 0,
-          "width": 1266
-        }
-      ]
-    },
-    {
-      "anchorUuid": "95255119-173f-892a-c272-fc012f2c86f5",
-      "roomUuid": "3bf3e3b5-1057-358c-ff10-b4d06c4d29bd",
-      "localPos": {
-        "x": 1.7325,
-        "y": 2.1061,
-        "z": 4.6964
-      },
-      "kind": 0,
-      "hinge": 0,
-      "opensIntoRoomUuid": "3bf3e3b5-1057-358c-ff10-b4d06c4d29bd",
-      "sections": [
-        {
-          "kind": 8,
-          "hinge": 1,
-          "width": 704
         }
       ]
     }

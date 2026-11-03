@@ -20,16 +20,18 @@ NP: 1NP = dolní patro (podlaha ~ -3,2 ve scanu), 2NP = horní (~ 0).
 | 13 | 2NP ložnice | 2520 x 1445 | 1087 (zvětšeno z 1050) + 1433, obě OS |
 | - | **vchodové dveře** (jiná objednávka) | 1480 x 2195 | boční světlík 400 (matné) + křídlo 1080, antracit uvnitř / bílé venku, otevírání ven |
 
-## Napárování na okna ve scanu (podle rozměru a místnosti)
-- `0da02b` (e040fd) a `95853a` (1c9c52): #8/#9 1720 x 1195 (scan 1,70 x 1,20).
-- `b6b99a` (1c9c52): #10 1220 x 950; `fb2b7e` (93ee51): #11 WC; `70936a` (6df884): #13 ložnice 2520 x 1445.
-- koupelna 3bf3e3: dvě okna ve scanu `6740bf` (1,18) + `952551` (0,72) = jedno okno #12 (1266 + 704); větší vlevo (předpoklad).
-- obývák 34b261: `79a321` (#4, 2,60 x 2,45) a `d908c8` (#3 kuchyň, 2,25 x 1,55); `03389a` (1,11) + `d90eeb` (1,39) odpovídají #6 (1050 + 1450, pracovna).
-- garáž 2e5efb: `548077`, `785c4e` (výška 1,0 / 0,95 m v 1,8 m) = #1, #2 (která je zrcadlová, nelze poznat).
-- Nenapárováno: #5 HS portál 2700 x 2490, #7 kumbál 720 x 1195 (ve scanu nenalezeno); `09f62a` (0,75 x 2,05, horní chodba) ve smlouvě není.
+## Napárování na okna ve scanu (podle rozměru, místnosti a stávajících úprav uživatele)
+Typ částí a strany pantů převzaty z úprav uživatele (jsou správně); smlouva doplňuje jen šířky částí.
+- `d908c8` (kuchyň, 2,25 x 1,55): úprava [otevíravé, pevné] = #3 -> 750 + 1470.
+- `70936a` (ložnice 6df884, 2,45 x 1,40): #13 -> 1087 + 1433 (pozor: úprava má 2. část jako pevnou, smlouva ji má otevíravou - vaše úprava zůstává).
+- `79a321` (obývák, 2,60 x 2,45): úprava [posuvná, pevná] = #5 HS portál 2 x 1350.
+- `03389a` (1,11) + `d90eeb` (1,39) v obýváku: #6 pracovna 1050 + 1450 (ve scanu dvě okna, šířky nechány).
+- 2NP: `0da02b`, `95853a` = #8/#9 1720 x 1195 (733 + 987); `b6b99a` = #10; `fb2b7e` = #11 WC; koupelna `6740bf` + `952551` = #12 (1266 + 704);
+  tyto nemají úpravu částí, aplikace je odhadne podle velikosti (otevíravě-sklopná křídla) - šířky se tu nepoužijí.
+- Garáž 2e5efb: `548077`, `785c4e` = #1, #2. Nenapárováno: #4 (balkonové dveře 2520 x 2450), #7 kumbál; `09f62a` (horní chodba) ve smlouvě není.
 
 ## V aplikaci
 - Rám oken: bílý uvnitř, antracitový zvenku (`WalkDoors.AddWindowFrame`), sloupek mezi částmi; části nestejně široké (`SectionEdit.width`, mm).
-- Návrh úprav oken z této smlouvy: `python3 Tools/apply_contract_windows.py <93_Data_Edits.json> novostavba.geometry.json <out.json>` ->
-  `docs/novostavba/93_Data_Edits.windows.proposed.json` (3 okna změněna, 6 přidáno; originál nedotčen). PC ho použije na kopii scanu `Scan_Novostavba Osove_clean`.
+- Šířky částí: `python3 Tools/apply_contract_windows.py <93_Data_Edits.json> <out.json>` -> `docs/novostavba/93_Data_Edits.windows.proposed.json`
+  (jen `width` u existujících úprav, typy a panty beze změny; originál nedotčen). PC ho použije na kopii scanu `Scan_Novostavba Osove_clean`.
 - Pozor v edits: dveře `2d30356d` mají v `93_Data_Edits.json` 9 duplicitních záznamů (kind 0 / 2); pravděpodobně chyba ukládání, stojí za kontrolu.
