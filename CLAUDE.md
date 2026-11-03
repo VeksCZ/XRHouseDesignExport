@@ -153,9 +153,9 @@ and exports 3D models, floor plans and reports from the scan.
   move in the walk-through (WalkDoors.SetFurnitureSliders) - open when you come close or on the trigger.
 - **Door leaves in the walk-through** (`WalkDoors`): a single door gets a standard 80 cm leaf (70 / 90 in a narrow / wide opening, 205 high) inside the scanned rough opening
   with a frame filling the rest; hinged leaves open as wide as a sphere sweep allows (up to 120 deg, `FreeSwing`); frames leave out the jamb at a room corner. A single
-  door 1.35-1.70 m wide is the **entrance door** (`BuildEntrance`, Aluprof 1480 x 2195: fixed 400 mm matte sidelight + leaf, white outside / anthracite inside, inox bar,
+  door 1.35-1.70 m wide is the **entrance door** (`BuildEntrance`, Aluprof 1480 x 2195: fixed 400 mm matte sidelight + leaf, anthracite outside / white inside (like the windows), inox bar,
   opens OUTWARD whatever the edit says).
-- **Windows** (walk-through): frame white inside / anthracite outside (`AddWindowFrame`, Veka Softline 82 from the contract in `docs/novostavba/OKNA_RYZI.md`); window parts can have
+- **Windows** (walk-through): outer frame + posts white inside / anthracite outside (`AddWindowFrame`) and each opening part has its own SASH FRAME of the same two colours that opens with the glass (`WinFrame` in `MakeLeaf`) ( Veka Softline 82 from the contract in `docs/novostavba/OKNA_RYZI.md`); window parts can have
   unequal widths (`SectionEdit.width`, relative, 0 = equal share). `DoorEdit.widthMm/heightMm` = the real frame size (centred in the rough opening, 3 cm above the sill). `Tools/apply_contract_windows.py` writes the contract (sizes, part widths, and parts for windows with no edit yet) into a COPY of an edits file; the user's own kinds / hinges are kept.
 - **Windows in extra rooms** (furniture spec `extra_rooms[].walls[]` as an object): `"windows": [{"at": centre along the wall (GLB x / z), "w", "h", "sill"}]` cuts an opening, draws the frame
   (white inside / anthracite outside) and the pane (`Furniture.cs`); the sizes are the real ones from the order.

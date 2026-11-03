@@ -86,3 +86,7 @@ Když něco nevyjde, napište mi (nebo PC session) číslo bodu a log (`Logs/Que
 41. Horní koupelna: sestava sprchy uprostřed krátké boční stěny kabiny; nad vanou na krátké stěně podomítková baterie, výtok a malá sprška.
 42. Terén (návrh): terasa před balkonovkami v obýváku, mez 1,5 m dolů do zahrady, rovná plocha vedle zastřešené terasy (rozměry jsou odhad - napište, co upravit).
 43. PC: `python3 Tools/apply_proposed_to_scan.py "Exports/RoomData/Scan_Novostavba Osove_clean"` přenese nábytek (stolek pod TV, konferenční stolek, hala, šatna), terén, okna a house_style na kopii scanu.
+
+## Okna a vchodové dveře - oprava (2026-11-03)
+44. Okna: otevírá se křídlo **i s vlastním rámem** (bílý uvnitř, antracit venku), obvodový rám a sloupek mezi částmi zůstávají. Pevné části mají také zasklívací rám.
+45. Vchodové dveře: **antracit zvenku, bílá uvnitř** (jako okna), zárubeň dvoubarevná stejně.

@@ -230,7 +230,7 @@ public class WalkDoors
         Vector3 left = floorCentre - rightIn * (w / 2f), right = floorCentre + rightIn * (w / 2f);
         MakeLeaf(visual, layer, door, left, rightIn, SidelightW, lh, 0f, LeafStyle.FixedPane, outward, true);
         door.leaves.Add(Hinged(visual, layer, door, right, -rightIn, outward, lw, lh, HandleHeight, LeafStyle.Entrance));
-        AddFrame(visual, layer, left, rightIn, w, h, true, true, 0f, h - lh, AnthraciteColor, SidelightW);
+        AddFrame(visual, layer, left, rightIn, w, h, true, true, 0f, h - lh, AnthraciteColor, SidelightW, -outward);
     }
 
     /// <summary>The leaf of a single door in a rough opening of this size: a standard 80 cm one (70 cm in a narrow opening, 90 cm in a wide
@@ -245,22 +245,33 @@ public class WalkDoors
     /// <summary>A door frame (zarubne): two jambs and a head just outside the opening, centred on the door's plane. No
     /// colliders - the opening stays as wide as scanned; where the wall is thicker than the frame it is hidden in it, where the
     /// door sits at a wall face it shows as a casing about 6 cm wide.</summary>
-    void AddFrame(GameObject visual, int layer, Vector3 hingeM, Vector3 toOtherM, float w, float h, bool jambHinge = true, bool jambOther = true, float inset = 0f, float drop = 0f, Color? color = null, float mullion = -1f)
+    void AddFrame(GameObject visual, int layer, Vector3 hingeM, Vector3 toOtherM, float w, float h, bool jambHinge = true, bool jambOther = true, float inset = 0f, float drop = 0f, Color? color = null, float mullion = -1f, Vector3? interiorM = null)
     {
         Quaternion rot = Quaternion.LookRotation(toOtherM, Vector3.up);
         var parts = new List<XRMeshPart>();
+        Vector3 faceDir = Vector3.Cross(Vector3.up, toOtherM);
+        Vector3 inDir = interiorM.HasValue ? (Vector3.Dot(faceDir, interiorM.Value) >= 0f ? faceDir : -faceDir) : Vector3.zero;
         void Span(float a0, float a1, float y0, float y1)   // a box from a0..a1 along the opening, y0..y1 high
         {
             if (a1 - a0 < 0.003f || y1 - y0 < 0.003f) return;
-            parts.Add(XRModelFactory.CreateBoxPart("DOOR_FRAME", hingeM + toOtherM * ((a0 + a1) / 2f) + Vector3.up * ((y0 + y1) / 2f), rot,
-                new Vector3(FrameDepth, y1 - y0, a1 - a0), "DOORLEAF", Vector3.zero, 0f));
+            Vector3 c = hingeM + toOtherM * ((a0 + a1) / 2f) + Vector3.up * ((y0 + y1) / 2f);
+            if (interiorM.HasValue)
+            {
+                // two-tone (the room half white, the outer half anthracite)
+                var sz = new Vector3(FrameDepth / 2f, y1 - y0, a1 - a0);
+                var pi = XRModelFactory.CreateBoxPart("DOOR_FRAME", c + inDir * (FrameDepth / 4f), rot, sz, "DOORLEAF", Vector3.zero, 0f); pi.color = WhiteColor;
+                var po = XRModelFactory.CreateBoxPart("DOOR_FRAME", c - inDir * (FrameDepth / 4f), rot, sz, "DOORLEAF", Vector3.zero, 0f); po.color = AnthraciteColor;
+                parts.Add(pi); parts.Add(po);
+                return;
+            }
+            parts.Add(XRModelFactory.CreateBoxPart("DOOR_FRAME", c, rot, new Vector3(FrameDepth, y1 - y0, a1 - a0), "DOORLEAF", Vector3.zero, 0f));
         }
         float x0 = jambHinge ? -FrameWidth : 0f, x1 = jambOther ? w + FrameWidth : w;   // the head stops where a jamb is left out
         Span(x0, inset, 0f, h);                       // hinge-side jamb (+ the infill up to a narrower leaf)
         Span(w - inset, x1, 0f, h);                   // the other jamb
         Span(x0, x1, h - drop, h + FrameWidth);       // head (+ the infill down to a lower leaf)
         if (mullion > 0f) Span(mullion - 0.02f, mullion + 0.01f, 0f, h - drop);   // between a sidelight and the leaf
-        foreach (var part in parts) part.color = color ?? FrameColor;
+        if (!interiorM.HasValue) foreach (var part in parts) part.color = color ?? FrameColor;
         var model = new XRHouseModel();
         model.rooms.Add(new XRRoomModel { roomName = "Frame", parts = parts });
         var go = UnityModelLoader.LoadToScene(model, shaded: true);
@@ -270,6 +281,10 @@ public class WalkDoors
     }
 
     enum LeafStyle { Door, SlidingDoor, Window, SlidingWindow, Garage, FixedPane, Entrance }
+
+    /// <summary>The sash frame of a window part (it opens with the sash): how far the sash is set in from the frame round it - 'near' on the hinge /
+    /// start side, 'far' on the other, at the bottom and top - and which way the room is.</summary>
+    struct WinFrame { public bool on; public float near, far, bottom, top; public Vector3 interior; }
 
     /// <summary>A window as its parts side by side (fixed panes, tilt-turn/casement sashes, tilt sashes, HS sliding
     /// sash in front of its neighbour), each opening part with its own handle.</summary>
@@ -291,6 +306,16 @@ public class WalkDoors
         }
         bool portal = d.height > 1.8f;            // floor-to-ceiling glazing (HS portal): handles at door height
         float handleH = portal ? HandleHeight : h * 0.5f;
+        string scanName = HouseEditsStore.CurrentScan;
+        bool frames = Furniture.StyleFlag(scanName, "window_frames");
+        float fwOuter = Mathf.Min(WinFrameW, Mathf.Min(W / 4f, h / 4f));
+        // how far a part's sash is set in from the window's outer frame / the post between parts (near = the hinge / start side)
+        WinFrame WF(float f0, float f1, bool nearLeft)
+        {
+            if (!frames) return default;
+            float li = f0 < 0.01f ? fwOuter : MullionW / 2f, ri = f1 > 0.99f ? fwOuter : MullionW / 2f;
+            return new WinFrame { on = true, near = nearLeft ? li : ri, far = nearLeft ? ri : li, bottom = fwOuter, top = fwOuter, interior = sM };
+        }
         foreach (var (s, f0, f1) in DoorCatalog.Sections(e))
         {
             float sw = W * (f1 - f0);
@@ -301,12 +326,12 @@ public class WalkDoors
             switch (s.kind)
             {
                 case DoorKind.Fixed:
-                    MakeLeaf(visual, layer, door, a, rM, sw, h, handleH, LeafStyle.FixedPane);
+                    MakeLeaf(visual, layer, door, a, rM, sw, h, handleH, LeafStyle.FixedPane, default, false, WF(f0, f1, true));
                     break;
                 case DoorKind.Tilt:
                 {
                     var leaf = new Leaf { motion = Motion.Tilt, axis = rM, sign = Vector3.Dot(Vector3.Cross(rM, Vector3.up), sM) >= 0f ? 1f : -1f };
-                    leaf.pivot = MakeLeaf(visual, layer, door, a, rM, sw, h, h * 0.85f, LeafStyle.Window);
+                    leaf.pivot = MakeLeaf(visual, layer, door, a, rM, sw, h, h * 0.85f, LeafStyle.Window, default, false, WF(f0, f1, true));
                     door.leaves.Add(leaf);
                     break;
                 }
@@ -316,18 +341,17 @@ public class WalkDoors
                     Vector3 start = hingeLeft ? a : b, along = hingeLeft ? rM : -rM;
                     Vector3 p = start + sM * (WindowThickness + 0.02f);
                     var leaf = new Leaf { motion = Motion.Slide, closedPos = p, slideDir = -along, slide = sw * 0.95f };
-                    leaf.pivot = MakeLeaf(visual, layer, door, p, along, sw, h, handleH, LeafStyle.SlidingWindow);
+                    leaf.pivot = MakeLeaf(visual, layer, door, p, along, sw, h, handleH, LeafStyle.SlidingWindow, default, false, WF(f0, f1, hingeLeft));
                     door.leaves.Add(leaf);
                     break;
                 }
                 default: // Single (casement), TiltTurn (opens like a casement), Double
-                    door.leaves.Add(Hinged(visual, layer, door, hingeLeft ? a : b, hingeLeft ? rM : -rM, sM, sw, h, handleH));
+                    door.leaves.Add(Hinged(visual, layer, door, hingeLeft ? a : b, hingeLeft ? rM : -rM, sM, sw, h, handleH, null, WF(f0, f1, hingeLeft)));
                     break;
             }
             doors.Add(door);
         }
-        string scanName = HouseEditsStore.CurrentScan;
-        if (Furniture.StyleFlag(scanName, "window_frames")) AddWindowFrame(visual, layer, leftM, rM, sM, W, h, DoorCatalog.Sections(e).Select(x => x.f1).ToList());
+        if (frames) AddWindowFrame(visual, layer, leftM, rM, sM, W, h, DoorCatalog.Sections(e).Select(x => x.f1).ToList());
         bool exterior = d.roomFront == null || d.roomBack == null;
         if (exterior && d.height > 0.3f && Furniture.StyleFlag(scanName, "blinds"))
         {
@@ -447,14 +471,14 @@ public class WalkDoors
         created.Add(go);
     }
 
-    Leaf Hinged(GameObject visual, int layer, Door door, Vector3 hinge, Vector3 toOther, Vector3 swing, float width, float h, float handleH, LeafStyle? styleOverride = null)
+    Leaf Hinged(GameObject visual, int layer, Door door, Vector3 hinge, Vector3 toOther, Vector3 swing, float width, float h, float handleH, LeafStyle? styleOverride = null, WinFrame wf = default)
     {
         // Rotating a vector by +90 degrees about up turns it into Cross(up, v) - so that's the way to open if it
         // points into the swing room, otherwise the other way round.
         float sign = Vector3.Dot(Vector3.Cross(Vector3.up, toOther), swing) >= 0f ? 1f : -1f;
         var style = styleOverride ?? (door.isWindow ? LeafStyle.Window : LeafStyle.Door);
         float open = door.isWindow ? DefaultSwingDeg : FreeSwing(visual, layer, hinge, toOther, sign, width, h);
-        return new Leaf { motion = Motion.Swing, pivot = MakeLeaf(visual, layer, door, hinge, toOther, width, h, handleH, style, swing), sign = sign, openDeg = open };
+        return new Leaf { motion = Motion.Swing, pivot = MakeLeaf(visual, layer, door, hinge, toOther, width, h, handleH, style, swing, false, wf), sign = sign, openDeg = open };
     }
 
     static readonly float[] SweepHeights = { 0.15f, 1.0f, 1.9f };
@@ -491,7 +515,7 @@ public class WalkDoors
 
     /// <summary>A pivot at 'pos' (model space) with a leaf running along 'along' for 'width' (garage: hanging down
     /// from the pivot), handles on both faces, and a trigger zone around them for opening by hand.</summary>
-    Transform MakeLeaf(GameObject visual, int layer, Door door, Vector3 pos, Vector3 along, float width, float h, float handleH, LeafStyle style, Vector3 outward = default, bool matte = false)
+    Transform MakeLeaf(GameObject visual, int layer, Door door, Vector3 pos, Vector3 along, float width, float h, float handleH, LeafStyle style, Vector3 outward = default, bool matte = false, WinFrame wf = default)
     {
         var pivot = new GameObject("LeafPivot");
         pivot.layer = layer;
@@ -513,12 +537,12 @@ public class WalkDoors
         Vector3 outN = face * ext, inN = -outN;
         if (entrance)
         {
-            // two-colour leaf: white outside (RAL 9016), anthracite inside (RAL 7016)
+            // two-colour leaf: anthracite outside (RAL 7016), white inside (RAL 9016) - the same way round as the windows
             Vector3 mid = new Vector3(0, h / 2f, 0) + along * (width / 2f);
             var outer = XRModelFactory.CreateBoxPart("DOOR_LEAF", mid + outN * (thick / 4f), leafRot, new Vector3(thick / 2f, h, width), "DOORLEAF", Vector3.zero, 0f);
-            outer.color = WhiteColor; parts.Add(outer);
+            outer.color = AnthraciteColor; parts.Add(outer);
             var inner = XRModelFactory.CreateBoxPart("DOOR_LEAF", mid + inN * (thick / 4f), leafRot, new Vector3(thick / 2f, h, width), "DOORLEAF", Vector3.zero, 0f);
-            inner.color = AnthraciteColor; parts.Add(inner);
+            inner.color = WhiteColor; parts.Add(inner);
             // narrow vertical glazing, two inox bars across, a long inox pull bar outside, rose + lever inside
             parts.Add(HandlePart(new Vector3(0, 1.15f, 0) + along * (width * 0.55f) + outN * (thick / 2f + 0.002f), leafRot, new Vector3(0.004f, 1.2f, 0.12f), SlitColor));
             parts.Add(HandlePart(new Vector3(0, 1.15f, 0) + along * (width * 0.55f) + inN * (thick / 2f + 0.002f), leafRot, new Vector3(0.004f, 1.2f, 0.12f), SlitColor));
@@ -534,16 +558,40 @@ public class WalkDoors
         }
         else
         {
-            var leafPart = XRModelFactory.CreateBoxPart(window ? "WINDOW_LEAF" : "DOOR_LEAF", new Vector3(0, bottom + h / 2f, 0) + along * (width / 2f),
-                leafRot, new Vector3(thick, h, width), "DOORLEAF", Vector3.zero, 0f);
-            leafPart.color = window ? (matte ? new Color(0.90f, 0.93f, 0.95f) : new Color(GlassColor.r, GlassColor.g, GlassColor.b)) : garage ? GarageColor : LeafColor;
-            parts.Add(leafPart);
+            if (window && wf.on)
+            {
+                // the sash with its own frame (white on the room side, anthracite outside) and the glass in it - all of it opens together
+                float u0 = wf.near, u1 = width - wf.far, y0 = wf.bottom, y1 = h - wf.top;
+                float sfw = Mathf.Max(0.02f, Mathf.Min(0.055f, Mathf.Min((u1 - u0) / 3f, (y1 - y0) / 3f)));
+                Vector3 inW = Vector3.Dot(face, wf.interior) >= 0f ? face : -face;
+                void Bar(float a0, float a1, float b0, float b1)
+                {
+                    var sz = new Vector3(thick / 2f, b1 - b0, a1 - a0);
+                    Vector3 cc = along * ((a0 + a1) / 2f) + Vector3.up * ((b0 + b1) / 2f);
+                    var pi = XRModelFactory.CreateBoxPart("WINDOW_SASH", cc + inW * (thick / 4f), leafRot, sz, "DOORLEAF", Vector3.zero, 0f); pi.color = WhiteColor;
+                    var po = XRModelFactory.CreateBoxPart("WINDOW_SASH", cc - inW * (thick / 4f), leafRot, sz, "DOORLEAF", Vector3.zero, 0f); po.color = AnthraciteColor;
+                    parts.Add(pi); parts.Add(po);
+                }
+                Bar(u0, u1, y0, y0 + sfw); Bar(u0, u1, y1 - sfw, y1);
+                Bar(u0, u0 + sfw, y0 + sfw, y1 - sfw); Bar(u1 - sfw, u1, y0 + sfw, y1 - sfw);
+                var gl = XRModelFactory.CreateBoxPart("WINDOW_LEAF", along * ((u0 + u1) / 2f) + Vector3.up * ((y0 + y1) / 2f), leafRot,
+                    new Vector3(0.012f, y1 - y0 - 2f * sfw + 0.01f, u1 - u0 - 2f * sfw + 0.01f), "DOORLEAF", Vector3.zero, 0f);
+                gl.color = matte ? new Color(0.90f, 0.93f, 0.95f) : new Color(GlassColor.r, GlassColor.g, GlassColor.b);
+                parts.Add(gl);
+            }
+            else
+            {
+                var leafPart = XRModelFactory.CreateBoxPart(window ? "WINDOW_LEAF" : "DOOR_LEAF", new Vector3(0, bottom + h / 2f, 0) + along * (width / 2f),
+                    leafRot, new Vector3(thick, h, width), "DOORLEAF", Vector3.zero, 0f);
+                leafPart.color = window ? (matte ? new Color(0.90f, 0.93f, 0.95f) : new Color(GlassColor.r, GlassColor.g, GlassColor.b)) : garage ? GarageColor : LeafColor;
+                parts.Add(leafPart);
+            }
         }
         if (garage)
             for (int k = 1; k < 8; k++) // slats
                 parts.Add(HandlePart(new Vector3(0, -h + h * k / 8f, 0) + along * (width / 2f), leafRot, new Vector3(thick + 0.01f, 0.012f, width), GarageColor * 0.85f));
 
-        Vector3 handleBase = garage ? along * (width / 2f) + Vector3.up * (handleH - h) : along * (width - HandleInset) + Vector3.up * handleH;
+        Vector3 handleBase = garage ? along * (width / 2f) + Vector3.up * (handleH - h) : along * (width - (wf.on ? wf.far : 0f) - HandleInset) + Vector3.up * handleH;
         foreach (float side in fixedPane || entrance ? new float[0] : new[] { 1f, -1f })
         {
             Vector3 n = face * side;
