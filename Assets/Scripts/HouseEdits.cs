@@ -101,6 +101,9 @@ public class DoorEdit
     public string opensIntoRoomUuid;
     /// <summary>Windows: the parts it's divided into, equal widths, left to right. Empty = one part of 'kind'.</summary>
     public List<SectionEdit> sections = new List<SectionEdit>();
+    /// <summary>Windows: the real frame size (mm, from the order / drawing) when it is not the scanned rough opening; 0 = use the opening.
+    /// The frame sits centred in the opening and 3 cm above the sill (the sill profile); a size larger than the opening is ignored.</summary>
+    public float widthMm, heightMm;
 }
 
 /// <summary>
