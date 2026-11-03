@@ -78,6 +78,7 @@ public static class Furniture
         // (tilting drawers), coat rack (a board with hooks and two jackets; "y" = its bottom edge)
         { "tv_stand", (1.60f, 0.42f, 0.45f) }, { "wardrobe", (1.20f, 0.60f, 2.30f) }, { "shoe_cabinet", (0.80f, 0.30f, 1.25f) },
         { "coat_rack", (0.90f, 0.04f, 0.14f) },
+        { "coffee_table", (1.10f, 0.60f, 0.42f) },   // coffee table: oak top, a lower shelf, four legs, a few books
     };
 
     /// <summary>Glass parts are named so the viewer can make them see-through.</summary>
@@ -902,6 +903,18 @@ public static class Furniture
                 B.Add(("oak", 0, w, 0, d, 0.07f, h));
                 for (int i = 1; i < 3; i++) B.Add(("gap", w * i / 3f - 0.002f, w * i / 3f + 0.002f, d, d + 0.004f, 0.08f, h - 0.01f));
                 for (int i = 0; i < 3; i++) B.Add(("steel", w * i / 3f + 0.05f, w * (i + 1) / 3f - 0.05f, d, d + 0.012f, h - 0.06f, h - 0.045f));
+                break;
+            }
+            case "coffee_table":
+            {
+                const float top = 0.035f, leg = 0.045f;
+                B.Add(("oak", 0, w, 0, d, h - top, h));                                                            // top
+                B.Add(("oak", leg, w - leg, leg, d - leg, 0.12f, 0.145f));                                         // lower shelf
+                foreach (var (lu, lv) in new[] { (0f, 0f), (w - leg, 0f), (0f, d - leg), (w - leg, d - leg) })
+                    B.Add(("dark", lu, lu + leg, lv, lv + leg, 0f, h - top));                                      // legs
+                B.Add(("linen", w * 0.12f, w * 0.12f + 0.26f, d * 0.2f, d * 0.2f + 0.19f, h, h + 0.035f));         // books and a small tray on top
+                B.Add(("duvet", w * 0.12f + 0.02f, w * 0.12f + 0.24f, d * 0.2f + 0.02f, d * 0.2f + 0.17f, h + 0.035f, h + 0.06f));
+                B.Add(("ceramic", w * 0.68f, w * 0.68f + 0.12f, d * 0.55f, d * 0.55f + 0.12f, h, h + 0.10f));      // a vase
                 break;
             }
             case "shoe_cabinet":

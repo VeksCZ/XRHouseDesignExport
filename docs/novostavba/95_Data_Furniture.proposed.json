@@ -336,6 +336,17 @@
           "w": 1.6,
           "d": 0.42,
           "h": 0.45
+        },
+        {
+          "type": "coffee_table",
+          "name": "Konferencni_stolek",
+          "wall": "-z",
+          "along": 1.38,
+          "gap": 1.4,
+          "w": 1.1,
+          "d": 0.6,
+          "h": 0.42,
+          "note": "pred sedackou (zacina 0.45 m od jejiho predku), vystredeny proti TV; along / gap jsou odhad"
         }
       ]
     },
