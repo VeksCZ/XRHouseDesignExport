@@ -70,3 +70,9 @@ Když něco nevyjde, napište mi (nebo PC session) číslo bodu a log (`Logs/Que
 30. **Venkovní žaluzie**: View > **Exterior blinds** (antracit): v otvorech oken ve vnějších zdech se plynule (~3 s) spustí / vytáhnou lamely do parapetu; kastlík je schovaný v překladu nad otvorem (neviditelný), vodicí lišty v ostění na vnějším
     konci (zeď 50 cm). Pokud lamely nevylézají ze správného místa nebo hloubka neodpovídá, napište kam.
 31. Barvy dveří: křídla světlejší hnědá, **zárubně** sytá hnědá (vchodové dveře: antracit / bílá).
+
+## Nábytek (2026-11-03) - v kopii spec `docs/novostavba/95_Data_Furniture.proposed.json`
+32. Sprchy: skutečná sestava (termostat s podomítkovou deskou a 2 knoflíky, rameno 450 mm, hlavová sprcha 300x300, výtok s držákem, hadice 1600 mm ve smyčce a ruční sprcha); pozici ramene lze posunout `set_u`.
+33. Kuchyň: trouba (ocelový rám, ovládací pás s displejem a knoflíky, černé sklo, madlo) a vestavná mikrovlnka (okénko, svislé madlo, ovládání).
+34. Obývák: stolek pod TV (3 dvířka, plinth). Vstupní hala `3DE1`: botník a věšák na severní stěně vpravo po vstupu (poloha `along` je odhad). Šatna (`Satna`): skříně na delší stěně `+z`.
+35. Spodní koupelna `49A5`: sprcha vzadu vlevo s pevným bočním sklem + posuvnými dveřmi, umyvadlo vlevo vpředu (už bylo), žebřík na topení na pravé stěně.

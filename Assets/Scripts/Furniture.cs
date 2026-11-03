@@ -74,6 +74,10 @@ public static class Furniture
         // "nightstands"), desk ("chair" = office chair in front).
         { "tv", (1.45f, 0.05f, 0.84f) }, { "sofa_corner", (2.90f, 0.95f, 0.85f) }, { "dining_table", (1.80f, 0.90f, 0.75f) },
         { "bed", (1.80f, 2.10f, 0.50f) }, { "desk", (1.20f, 0.60f, 0.75f) },
+        // TV unit (low cabinet under the TV), wardrobe (closed fronts, or "open": true = shelves + a hanging rail), shoe cabinet
+        // (tilting drawers), coat rack (a board with hooks and two jackets; "y" = its bottom edge)
+        { "tv_stand", (1.60f, 0.42f, 0.45f) }, { "wardrobe", (1.20f, 0.60f, 2.30f) }, { "shoe_cabinet", (0.80f, 0.30f, 1.25f) },
+        { "coat_rack", (0.90f, 0.04f, 0.14f) },
     };
 
     /// <summary>Glass parts are named so the viewer can make them see-through.</summary>
@@ -118,7 +122,15 @@ public static class Furniture
             string key = ((string)rs["room"] ?? "").ToLowerInvariant();
             if (key.StartsWith("room_")) key = key.Substring(5);
             var room = rooms.FirstOrDefault(r => DoorCatalog.RoomId(r).ToLowerInvariant().StartsWith(key));
-            if (room == null || !TryRoomBox(room, g, center, out var box)) { Debug.LogWarning($"[Furniture] room '{rs["room"]}' not found"); continue; }
+            RoomBox box = default;
+            if (room == null || !TryRoomBox(room, g, center, out box))
+            {
+                // an extra room of the spec (a room the scan lacks, e.g. "Satna"): its rectangle and floor are the item frame
+                bool found = false;
+                foreach (var er in ExtraRooms(spec, rooms, g, center))
+                    if (er.name.ToLowerInvariant() == key) { box = new RoomBox { xmin = er.x0, xmax = er.x1, zmin = er.z0, zmax = er.z1, y = er.floor }; found = true; room = null; break; }
+                if (!found) { Debug.LogWarning($"[Furniture] room '{rs["room"]}' not found"); continue; }
+            }
             // furniture stands on the finished floor (the build-up above the scanned rough floor)
             if (buildup != null) box.y += buildup(box.y + center.y);
             int k = 0;
@@ -138,7 +150,7 @@ public static class Furniture
                     // up to the ceiling above the item's middle (ceilings can slope), minus its own lift
                     var (cx, cz) = toXZ(w / 2f, d / 2f);
                     Vector3 world = Quaternion.Inverse(g) * new Vector3(cx, box.y, -cz) + center;
-                    float ceil = XRModelFactory.SampleCeilingHeight(room.CeilingAnchors, world, world.y + 2.6f) - center.y;
+                    float ceil = room != null ? XRModelFactory.SampleCeilingHeight(room.CeilingAnchors, world, world.y + 2.6f) - center.y : box.y + 2.6f;
                     h = Mathf.Max(0.1f, ceil - box.y - F(item, "y", 0f));
                 }
                 else h = F(item, "h", def.h);
@@ -732,7 +744,7 @@ public static class Furniture
                     else if (s == "left") B.Add(("glass", 0, gl, a0, side.Type == JTokenType.Object ? F((JObject)side, "to", d) : d, tray, h));
                     else if (s == "right") B.Add(("glass", w - gl, w, a0, side.Type == JTokenType.Object ? F((JObject)side, "to", d) : d, tray, h));
                 }
-                B.Add(("chrome", w / 2 - 0.08f, w / 2 + 0.08f, 0f, 0.25f, h - 0.02f, h));
+                ShowerSet(B, item, w, d, h);
                 break;
             }
             case "washbasin":
@@ -883,6 +895,78 @@ public static class Furniture
                 }
                 break;
             }
+            case "tv_stand":
+            {
+                // plinth, body, three fronts (gap lines) with slim handle strips along the top edge
+                B.Add(("dark", 0.05f, w - 0.05f, 0.03f, d - 0.03f, 0f, 0.07f));
+                B.Add(("oak", 0, w, 0, d, 0.07f, h));
+                for (int i = 1; i < 3; i++) B.Add(("gap", w * i / 3f - 0.002f, w * i / 3f + 0.002f, d, d + 0.004f, 0.08f, h - 0.01f));
+                for (int i = 0; i < 3; i++) B.Add(("steel", w * i / 3f + 0.05f, w * (i + 1) / 3f - 0.05f, d, d + 0.012f, h - 0.06f, h - 0.045f));
+                break;
+            }
+            case "shoe_cabinet":
+            {
+                // body with three tilting drawer fronts (gap lines), handle strips, a dark plinth
+                B.Add(("dark", 0.03f, w - 0.03f, 0.02f, d - 0.02f, 0f, 0.08f));
+                B.Add(("oak", 0, w, 0, d, 0.08f, h));
+                float fh = (h - 0.08f) / 3f;
+                for (int i = 0; i < 3; i++)
+                {
+                    float y0 = 0.08f + i * fh;
+                    if (i > 0) B.Add(("gap", 0.01f, w - 0.01f, d, d + 0.004f, y0 - 0.002f, y0 + 0.002f));
+                    B.Add(("steel", w * 0.25f, w * 0.75f, d, d + 0.012f, y0 + fh - 0.05f, y0 + fh - 0.035f));
+                }
+                break;
+            }
+            case "coat_rack":
+            {
+                // a wooden board on the wall with five hooks, a hat shelf above it and two jackets hanging from it
+                float y0 = F(item, "y", 1.65f);
+                B.Add(("wood", 0, w, 0, 0.02f, y0, y0 + h));
+                B.Add(("wood", 0, w, 0, 0.20f, y0 + h + 0.16f, y0 + h + 0.18f));
+                for (int i = 0; i < 5; i++)
+                {
+                    float hu = w * (i + 0.5f) / 5f;
+                    B.Add(("chrome", hu - 0.01f, hu + 0.01f, 0.02f, 0.07f, y0 + 0.05f, y0 + 0.07f));
+                    B.Add(("chrome", hu - 0.01f, hu + 0.01f, 0.06f, 0.07f, y0 + 0.05f, y0 + 0.10f));
+                }
+                foreach (int i in new[] { 1, 3 })
+                {
+                    float hu = w * (i + 0.5f) / 5f;
+                    B.Add(("fabric", hu - 0.17f, hu + 0.17f, 0.04f, 0.12f, y0 - 0.80f, y0 + 0.06f));
+                }
+                lift = 0f;
+                break;
+            }
+            case "wardrobe":
+            {
+                string fr = (string)item["color"] ?? "fronts";
+                bool open = item["open"] != null && (bool)item["open"];
+                B.Add(("dark", 0.03f, w - 0.03f, 0.03f, d - 0.03f, 0f, 0.08f));
+                if (open)
+                {
+                    // sides, top, shelves on one half, a hanging rail with clothes on the other
+                    B.Add(("oak", 0, 0.02f, 0, d, 0.08f, h)); B.Add(("oak", w - 0.02f, w, 0, d, 0.08f, h));
+                    B.Add(("oak", 0, w, 0, d, h - 0.02f, h)); B.Add(("oak", 0, w, 0, 0.01f, 0.08f, h));
+                    float half = w / 2f;
+                    for (int i = 1; i <= 5; i++) B.Add(("oak", 0.02f, half, 0.01f, d - 0.03f, 0.08f + i * (h - 0.1f) / 6f, 0.10f + i * (h - 0.1f) / 6f));
+                    B.Add(("chrome", half, w - 0.02f, d * 0.45f, d * 0.45f + 0.025f, h - 0.25f, h - 0.225f));
+                    for (int i = 0; i < 6; i++) B.Add(((i % 2 == 0) ? "fabric" : "linen", half + 0.03f + i * (w - half - 0.1f) / 6f, half + 0.03f + (i + 0.8f) * (w - half - 0.1f) / 6f,
+                        d * 0.45f - 0.10f, d * 0.45f + 0.10f, h - 1.35f, h - 0.27f));
+                }
+                else
+                {
+                    B.Add((fr, 0, w, 0, d, 0.08f, h));
+                    int doors = Mathf.Max(1, Mathf.RoundToInt(w / 0.5f));
+                    for (int i = 1; i < doors; i++) B.Add(("gap", w * i / doors - 0.002f, w * i / doors + 0.002f, d, d + 0.004f, 0.09f, h - 0.01f));
+                    for (int i = 0; i < doors; i++)
+                    {
+                        float hu = (i % 2 == 0) ? w * (i + 1) / doors - 0.05f : w * i / doors + 0.05f;   // handles at the middle gap of a pair
+                        B.Add(("steel", hu - 0.006f, hu + 0.006f, d, d + 0.02f, h * 0.45f, h * 0.45f + 0.25f));
+                    }
+                }
+                break;
+            }
             case "kitchen_base":
             {
                 string fr = (string)item["color"] ?? "fronts", top = (string)item["top"] ?? "oak";
@@ -922,13 +1006,38 @@ public static class Furniture
                 B.Add((fr, 0, w, 0, d, 0.10f, h));
                 if (item["oven"] != null && (bool)item["oven"])
                 {
-                    B.Add(("steel", 0.03f, w - 0.03f, d, d + 0.01f, 0.80f, 1.40f));
-                    B.Add(("dark", 0.08f, w - 0.08f, d + 0.01f, d + 0.012f, 0.88f, 1.28f));
+                    // built-in oven: steel surround, a control strip (display + five knobs) over a black glass door with a lighter
+                    // inner window, a horizontal handle bar on two brackets
+                    float y0 = 0.80f, y1 = 1.40f, cu0 = 0.03f, cu1 = w - 0.03f, fz = d + 0.01f;
+                    B.Add(("steel", cu0, cu1, d, fz, y0, y1));
+                    B.Add(("dark", cu0 + 0.01f, cu1 - 0.01f, fz, fz + 0.002f, y1 - 0.10f, y1 - 0.01f));                       // control strip
+                    B.Add(("ember", w / 2f - 0.05f, w / 2f + 0.05f, fz + 0.002f, fz + 0.003f, y1 - 0.065f, y1 - 0.045f));    // display
+                    for (int i = 0; i < 5; i++)
+                    {
+                        float ku = cu0 + 0.05f + i * (cu1 - cu0 - 0.10f) / 4f;
+                        if (i == 2) continue;
+                        B.Add(("chrome", ku - 0.012f, ku + 0.012f, fz + 0.002f, fz + 0.016f, y1 - 0.07f, y1 - 0.04f));       // knobs
+                    }
+                    B.Add(("dark", cu0 + 0.01f, cu1 - 0.01f, fz, fz + 0.003f, y0 + 0.01f, y1 - 0.11f));                       // door glass
+                    B.Add(("screen", cu0 + 0.07f, cu1 - 0.07f, fz + 0.003f, fz + 0.004f, y0 + 0.08f, y1 - 0.20f));          // inner window
+                    B.Add(("steel", cu0 + 0.03f, cu1 - 0.03f, fz + 0.028f, fz + 0.042f, y1 - 0.145f, y1 - 0.125f));          // handle bar
+                    B.Add(("steel", cu0 + 0.04f, cu0 + 0.055f, fz, fz + 0.03f, y1 - 0.145f, y1 - 0.125f));                   // brackets
+                    B.Add(("steel", cu1 - 0.055f, cu1 - 0.04f, fz, fz + 0.03f, y1 - 0.145f, y1 - 0.125f));
                 }
                 if (item["microwave"] != null && (bool)item["microwave"])
                 {
-                    B.Add(("steel", 0.03f, w - 0.03f, d, d + 0.01f, 1.45f, 1.85f));
-                    B.Add(("dark", 0.06f, w * 0.68f, d + 0.01f, d + 0.012f, 1.50f, 1.80f));
+                    // built-in microwave: steel front, a black door with a visible mesh window and a vertical handle on its right edge,
+                    // a control column on the right (display, a knob and three buttons)
+                    float y0 = 1.45f, y1 = 1.85f, cu0 = 0.03f, cu1 = w - 0.03f, fz = d + 0.01f, du = cu0 + (cu1 - cu0) * 0.70f;
+                    B.Add(("steel", cu0, cu1, d, fz, y0, y1));
+                    B.Add(("dark", cu0 + 0.012f, du, fz, fz + 0.003f, y0 + 0.012f, y1 - 0.012f));                           // door
+                    B.Add(("screen", cu0 + 0.05f, du - 0.05f, fz + 0.003f, fz + 0.0045f, y0 + 0.06f, y1 - 0.06f));          // window
+                    B.Add(("steel", du - 0.03f, du - 0.015f, fz + 0.003f, fz + 0.03f, y0 + 0.05f, y1 - 0.05f));             // vertical handle
+                    B.Add(("dark", du + 0.01f, cu1 - 0.012f, fz, fz + 0.002f, y0 + 0.012f, y1 - 0.012f));                    // control panel
+                    B.Add(("ember", du + 0.025f, cu1 - 0.03f, fz + 0.002f, fz + 0.003f, y1 - 0.09f, y1 - 0.07f));            // display
+                    float kc = (du + cu1) / 2f;
+                    B.Add(("chrome", kc - 0.02f, kc + 0.02f, fz + 0.002f, fz + 0.016f, y0 + 0.14f, y0 + 0.18f));            // knob
+                    for (int i = 0; i < 3; i++) B.Add(("steel", du + 0.025f, cu1 - 0.03f, fz + 0.002f, fz + 0.006f, y0 + 0.03f + i * 0.03f, y0 + 0.048f + i * 0.03f));
                 }
                 if (item["fridge"] != null && (bool)item["fridge"])
                     B.Add(("gap", 0, w, d, d + 0.004f, 0.88f, 0.90f));                   // fridge / freezer split
@@ -1000,6 +1109,35 @@ public static class Furniture
     }
 
     /// <summary>Local (u, v) -> GLB-axes (x, z), as furnish.py's place().</summary>
+    /// <summary>The shower set (Hansgrohe, as ordered): a concealed thermostat (square trim plate, two knobs), a 450 mm wall arm with a
+    /// 300 x 300 mm ultra-thin head, a wall elbow with holder, a 1600 mm hose hanging in a loop and the hand shower in its holder.
+    /// "set_u" = where along the wall the arm is (default the middle); all chrome.</summary>
+    static void ShowerSet(List<(string, float, float, float, float, float, float)> B, JObject item, float w, float d, float h)
+    {
+        float cu = Mathf.Clamp(F(item, "set_u", w / 2f), 0.2f, w - 0.2f);
+        // thermostat: trim plate and two knobs
+        B.Add(("chrome", cu - 0.095f, cu + 0.095f, 0f, 0.012f, 0.95f, 1.14f));
+        B.Add(("dark", cu - 0.07f, cu + 0.07f, 0.012f, 0.014f, 1.00f, 1.09f));
+        B.Add(("chrome", cu - 0.065f, cu - 0.025f, 0.012f, 0.032f, 1.025f, 1.065f));
+        B.Add(("chrome", cu + 0.025f, cu + 0.065f, 0.012f, 0.032f, 1.025f, 1.065f));
+        // wall arm 450 mm with a rosette, and the square head 300 x 300 x 4 mm on a ball joint
+        float ay = Mathf.Min(2.05f, h - 0.08f), arm = Mathf.Min(0.45f, d - 0.30f), hd = 0.30f;
+        B.Add(("chrome", cu - 0.035f, cu + 0.035f, 0f, 0.015f, ay - 0.035f, ay + 0.035f));
+        B.Add(("chrome", cu - 0.009f, cu + 0.009f, 0.015f, arm, ay - 0.009f, ay + 0.009f));
+        float hv0 = Mathf.Max(0.05f, arm - hd / 2f - 0.02f);
+        B.Add(("chrome", cu - 0.02f, cu + 0.02f, arm - 0.03f, arm + 0.01f, ay - 0.03f, ay - 0.009f));
+        B.Add(("chrome", cu - hd / 2f, cu + hd / 2f, hv0, hv0 + hd, ay - 0.034f, ay - 0.030f));
+        // wall elbow with the hand shower holder, the hose in a loop, the hand shower
+        float fu = cu + 0.28f <= w - 0.12f ? cu + 0.28f : Mathf.Max(0.12f, cu - 0.28f);
+        B.Add(("chrome", fu - 0.03f, fu + 0.03f, 0f, 0.075f, 0.88f, 0.94f));
+        B.Add(("chrome", fu - 0.018f, fu + 0.018f, 0f, 0.05f, 1.00f, 1.04f));                       // holder
+        B.Add(("chrome", fu - 0.02f, fu + 0.02f, 0.03f, 0.075f, 1.04f, 1.27f));                     // hand shower
+        B.Add(("chrome", fu - 0.03f, fu + 0.03f, 0.025f, 0.08f, 1.27f, 1.30f));
+        B.Add(("steel", fu - 0.006f, fu + 0.006f, 0.04f, 0.052f, 0.50f, 0.88f));                    // hose: down, across, up
+        B.Add(("steel", fu - 0.006f, fu + 0.006f, 0.04f, 0.16f, 0.50f, 0.512f));
+        B.Add(("steel", fu - 0.006f, fu + 0.006f, 0.148f, 0.16f, 0.50f, 1.04f));
+    }
+
     static Func<float, float, (float, float)> Place(RoomBox room, JObject item)
     {
         string wall = (string)item["wall"] ?? "-z";

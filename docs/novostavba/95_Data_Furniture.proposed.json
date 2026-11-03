@@ -327,6 +327,15 @@
           "w": 1.8,
           "d": 0.9,
           "chairs": 6
+        },
+        {
+          "type": "tv_stand",
+          "name": "TV_stolek",
+          "wall": "+z",
+          "along": 0.945,
+          "w": 1.6,
+          "d": 0.42,
+          "h": 0.45
         }
       ]
     },
@@ -450,6 +459,7 @@
           "w": 0.9,
           "d": 0.9,
           "glass": [
+            "right",
             {
               "side": "front",
               "sliding": true
@@ -464,6 +474,16 @@
           "w": 0.6,
           "d": 0.45,
           "mirror_off": 0.05
+        },
+        {
+          "type": "radiator",
+          "name": "Zebrik_topeni_dole",
+          "wall": "+x",
+          "along": 1.0,
+          "w": 0.5,
+          "d": 0.1,
+          "h": 1.2,
+          "y": 0.6
         }
       ]
     },
@@ -534,6 +554,64 @@
           "along": 0.0,
           "w": 0.6,
           "d": 0.5
+        }
+      ]
+    },
+    {
+      "room": "3DE1",
+      "items": [
+        {
+          "type": "shoe_cabinet",
+          "name": "Botnik",
+          "wall": "-z",
+          "along": 2.0,
+          "w": 0.8,
+          "d": 0.3,
+          "h": 1.25,
+          "note": "vpravo po vstupu zvenku; along je odhad (vzdalenost od zapadni steny haly), uprav podle skutecnosti"
+        },
+        {
+          "type": "coat_rack",
+          "name": "Vesak",
+          "wall": "-z",
+          "along": 1.0,
+          "w": 1.0,
+          "y": 1.6,
+          "note": "vedle botniku smerem do domu"
+        }
+      ]
+    },
+    {
+      "room": "Satna",
+      "items": [
+        {
+          "type": "wardrobe",
+          "name": "Skrin_1",
+          "wall": "+z",
+          "along": 0.0,
+          "w": 1.5,
+          "d": 0.6,
+          "h": 2.3
+        },
+        {
+          "type": "wardrobe",
+          "name": "Regal_otevreny",
+          "wall": "+z",
+          "along": 1.5,
+          "w": 1.2,
+          "d": 0.6,
+          "h": 2.3,
+          "open": true
+        },
+        {
+          "type": "wardrobe",
+          "name": "Skrin_2",
+          "wall": "+z",
+          "along": 2.7,
+          "w": 1.0,
+          "d": 0.6,
+          "h": 2.3,
+          "note": "satna: skrine podel delsi steny +z; rozmery a pocet jsou odhad"
         }
       ]
     }

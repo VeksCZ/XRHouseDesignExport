@@ -161,6 +161,9 @@ and exports 3D models, floor plans and reports from the scan.
   (white inside / anthracite outside) and the pane (`Furniture.cs`); the sizes are the real ones from the order.
 - **Exterior blinds** (`WalkDoors.AddBlind`, menu View > Exterior blinds, `WalkDoors.BlindsDown`): anthracite head box (17 cm, hidden in the lintel above the opening) + guide rails at the outer end of the reveal of every window in an
   outer wall (depth = the spec's `walls.exterior`), curtain slides to the sill in ~3 s; door leaves light brown, interior door frames saturated brown.
+- **Furniture spec types** (`Furniture.cs` `Shape`): besides bathroom / kitchen / bed / desk / tv: `tv_stand`, `wardrobe` (`"open": true` = shelves + rail), `shoe_cabinet`, `coat_rack` (`"y"` = bottom edge);
+  the shower has the real Hansgrohe set (`ShowerSet`: thermostat plate, 450 mm arm, 300 x 300 head, elbow + holder, hose loop, hand shower; `"set_u"` moves it) and the built-in oven / microwave of
+  `kitchen_tall` have steel surrounds, black glass, handles, knobs and displays. A `rooms[]` entry whose `"room"` is the NAME of an `extra_rooms` entry (e.g. `"Satna"`) furnishes that room.
 - **Logs**: headset session logs are in `persistentDataPath/Logs` (menu "Pull logs from Quest" -> `Logs/Quest`),
   never in the export folder.
 - **Build + install to a USB Quest**: call `MRUKExporter.EditorFastBuildAndInstall()` (e.g. via the Unity MCP
