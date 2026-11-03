@@ -668,6 +668,25 @@ public class WalkThroughMode : MonoBehaviour
 
     /// <summary>Where you stand as the room you are in + your feet in that room's own frame + which way you face. Unlike a
     /// scan-frame point this survives the scan being reloaded in another frame (a saved copy of the live scan).</summary>
+    // the last spot found in a room (refreshed twice a second while walking): a rebuild (a door added, a scan reloaded) that finds no room at the
+    // very moment still puts you back where you were instead of at the start
+    string rememberedRoom; Vector3 rememberedLocal; float rememberedYaw, rememberedAt = -999f, nextRemember;
+    void RememberFeet()
+    {
+        if (!isOn || Time.unscaledTime < nextRemember) return;
+        nextRemember = Time.unscaledTime + 0.5f;
+        if (TryGetFeetInRoom(out var r, out var l, out var y)) { rememberedRoom = r; rememberedLocal = l; rememberedYaw = y; rememberedAt = Time.unscaledTime; }
+    }
+    /// <summary>Where you stand, else (no room found right now) where you last stood in a room - up to a minute ago.</summary>
+    public bool TryGetFeetOrRemembered(out string roomUuid, out Vector3 localFeet, out float facingYaw)
+    {
+        if (TryGetFeetInRoom(out roomUuid, out localFeet, out facingYaw)) return true;
+        bool ok = rememberedRoom != null && Time.unscaledTime - rememberedAt < 60f;
+        roomUuid = ok ? rememberedRoom : null; localFeet = ok ? rememberedLocal : default; facingYaw = ok ? rememberedYaw : 0f;
+        Debug.Log($"[Walk] no room under the feet right now - {(ok ? "using the remembered spot (" + (Time.unscaledTime - rememberedAt).ToString("0.0") + " s old)" : "nothing remembered")}");
+        return ok;
+    }
+
     public bool TryGetFeetInRoom(out string roomUuid, out Vector3 localFeet, out float facingYaw)
     {
         roomUuid = null; localFeet = default;
@@ -843,6 +862,7 @@ public class WalkThroughMode : MonoBehaviour
             HandleMeasure();
             HandleSun();
         }
+        RememberFeet();
         if (walkVisual && walkDoors.Tick(walkVisual.transform.InverseTransformPoint(head.position), dt, EditModeController.AnyOn)) Physics.SyncTransforms();
         UpdateDoors();
         UpdateFade(dt);

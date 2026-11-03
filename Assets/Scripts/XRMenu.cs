@@ -220,7 +220,10 @@ public class XRMenu : MonoBehaviour
         ToolButton(EditModeController.Tool.Furniture, "Furniture", 0, t2);
         ToolButton(EditModeController.Tool.Measure, "Measure", 1, t2);
         ToolButton(EditModeController.Tool.Sun, "Sun", 2, t2);
-        XRUi.CreateText(tools, "Hint", "Pick a tool - it turns blue. Press it again, or hold Y, to leave it.", 17, TextAlignmentOptions.Center, Pad, t2 + h + 10, ContentW, 30, XRUi.MutedText);
+        float t3 = t2 + h + gap + cap + 8;
+        XRUi.CreateCaption(tools, "Repair the scan", Pad, t3 - cap, ContentW);
+        ToolButton(EditModeController.Tool.Walls, "Missing\nwall", 0, t3);
+        XRUi.CreateText(tools, "Hint", "Pick a tool - it turns blue. Press it again, or hold Y, to leave it.", 17, TextAlignmentOptions.Center, Pad, t3 + h + 10, ContentW, 30, XRUi.MutedText);
 
         // ---- Data: keep and hand over; the destructive ones apart below ----
         XRUi.CreateCaption(data, "This scan", Pad, y0 - cap, ContentW);
@@ -1042,12 +1045,17 @@ public class XRMenu : MonoBehaviour
                 {
                     // back where you stood, in the rebuilt model
                     // as room + room-local spot: a reloaded scan can sit in another frame (the saved copy of the live scan)
-                    bool here = walk.TryGetFeetInRoom(out var feetRoom, out var feetLocal, out var feetYaw);
+                    bool here = walk.TryGetFeetOrRemembered(out var feetRoom, out var feetLocal, out var feetYaw);
                     walk.Exit();
                     if (loaded && await walk.Enter(null, null))
                     {
                         dollhouse?.SetHidden(true);
-                        if (here) walk.TeleportToFeetInRoom(feetRoom, feetLocal, feetYaw);
+                        if (here)
+                        {
+                            string back = walk.TeleportToFeetInRoom(feetRoom, feetLocal, feetYaw);
+                            Debug.Log($"[Walk] back in room {(feetRoom ?? "?").Substring(0, Math.Min(8, (feetRoom ?? "?").Length))}: {(back == null ? "that room is not in the rebuilt model - at the start" : "ok")}");
+                        }
+                        else Debug.Log("[Walk] rebuilt without a remembered spot - at the start");
                     }
                     else dollhouse?.SetHidden(false);
                 }

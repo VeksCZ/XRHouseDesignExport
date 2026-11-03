@@ -76,3 +76,13 @@ Když něco nevyjde, napište mi (nebo PC session) číslo bodu a log (`Logs/Que
 33. Kuchyň: trouba (ocelový rám, ovládací pás s displejem a knoflíky, černé sklo, madlo) a vestavná mikrovlnka (okénko, svislé madlo, ovládání).
 34. Obývák: stolek pod TV (3 dvířka, plinth) a konferenční stolek před sedačkou (poloha `along` / `gap` je odhad). Vstupní hala `3DE1`: botník a věšák na severní stěně vpravo po vstupu (poloha `along` je odhad). Šatna (`Satna`): skříně na delší stěně `+z`.
 35. Spodní koupelna `49A5`: sprcha vzadu vlevo s pevným bočním sklem + posuvnými dveřmi, umyvadlo vlevo vpředu (už bylo), žebřík na topení na pravé stěně.
+
+## Opravy podle zpětné vazby (2026-11-03)
+36. **Tools > Repair the scan > Missing wall**: samostatný nástroj (bez dveří): zamiřte do mezery, trigger, potvrďte panel. Jen na uloženém scanu.
+37. **Save live scan**: po uložení se vždy přepne na uložený scan (úpravy jdou do něj).
+38. Walk: po přidání dveří / po přestavbě se vrátíte na místo, kde jste stál. Když ne, pošlete `Logs/Quest` - jsou tam řádky `[Walk] ...` (proč).
+39. Žaluzie: jen ve scanu, který má ve spec `house_style.blinds`; jedna žaluzie přes celé okno (balkonové dveře + pevná část). V bytě tlačítko Exterior blinds není.
+40. Finished floors: dveře i zárubně stojí na hotové podlaze (výš a o to nižší).
+41. Horní koupelna: sestava sprchy uprostřed krátké boční stěny kabiny; nad vanou na krátké stěně podomítková baterie, výtok a malá sprška.
+42. Terén (návrh): terasa před balkonovkami v obýváku, mez 1,5 m dolů do zahrady, rovná plocha vedle zastřešené terasy (rozměry jsou odhad - napište, co upravit).
+43. PC: `python3 Tools/apply_proposed_to_scan.py "Exports/RoomData/Scan_Novostavba Osove_clean"` přenese nábytek (stolek pod TV, konferenční stolek, hala, šatna), terén, okna a house_style na kopii scanu.

@@ -14,7 +14,7 @@ using UnityEngine.UI;
 /// </summary>
 public class EditModeController : MonoBehaviour
 {
-    public enum Tool { None, Doors, Stairs, Holes, Furniture, Measure, Sun, Photos, Routes }
+    public enum Tool { None, Doors, Stairs, Holes, Furniture, Measure, Sun, Photos, Routes, Walls }
 
     public XRMenu uiLog;
     public MRUKExporter exporter;
@@ -121,6 +121,7 @@ public class EditModeController : MonoBehaviour
         CurrentTool = CurrentTool == t ? Tool.None : t;
         if (CurrentTool == Tool.Stairs) uiLog?.AddLog("Stairs: trigger on the floor under the first step, each landing's middle, the top end - then Finish.");
         if (CurrentTool == Tool.Doors) uiLog?.AddLog("Doors: point at a door + trigger to pick it, then set it on the panel. A wall the scan missed: use the \"Missing wall\" button below.");
+        if (CurrentTool == Tool.Walls) uiLog?.AddLog("Missing wall: point at the gap where a wall is missing (a mirror, glass, a bare opening) and pull the trigger - it joins the loose wall ends; confirm on the panel. Works on a saved scan, not on the live one.");
         if (CurrentTool == Tool.Holes) uiLog?.AddLog("Opening: two opposite corners on the ceiling (from below) or the floor (from above).");
         if (CurrentTool == Tool.Sun) uiLog?.AddLog("Sun (while walking): sunny patches from the windows - right stick left/right = half an hour, up/down = a month.");
         if (CurrentTool == Tool.Measure) uiLog?.AddLog("Measure: trigger on the start point, then on the end point (walls, floor, furniture) - trigger again starts a new one.");
@@ -210,7 +211,7 @@ public class EditModeController : MonoBehaviour
         if (!toolbar) return;
         titleText.text = CurrentTool switch
         {
-            Tool.Doors => "Doors & windows", Tool.Stairs => "Stairs", Tool.Holes => "Openings", Tool.Furniture => "Furniture",
+            Tool.Doors => "Doors & windows", Tool.Walls => "Missing wall", Tool.Stairs => "Stairs", Tool.Holes => "Openings", Tool.Furniture => "Furniture",
             Tool.Measure => "Measure", Tool.Sun => "Sun", Tool.Photos => "Photos / 3D scan", Tool.Routes => "Routes",
             _ => "Pick a tool in the menu (Tools)",
         };

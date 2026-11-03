@@ -72,7 +72,9 @@ public class DoorEditTool : MonoBehaviour
         uiLog?.AddLog("Missing wall: point at the gap in the wall (or a wall near it) and pull the trigger.");
     }
 
-    bool Active => editMode != null && editMode.IsOn && editMode.CurrentTool == EditModeController.Tool.Doors;
+    bool Active => editMode != null && editMode.IsOn && (editMode.CurrentTool == EditModeController.Tool.Doors || WallsTool);
+    /// <summary>The "Missing wall" tool: the same gap finding and wall panel as the Doors tool, but on its own - no door is ever picked or added.</summary>
+    bool WallsTool => editMode != null && editMode.IsOn && editMode.CurrentTool == EditModeController.Tool.Walls;
 
     void Update()
     {
@@ -87,10 +89,12 @@ public class DoorEditTool : MonoBehaviour
             return;
         }
 
-        hovered = PickDoor();
+        if (WallsTool && !wallPanelOpen) missingWallMode = true;   // every trigger looks for a gap
+        hovered = WallsTool ? null : PickDoor();
         foreach (var d in doors)
         {
             var e = DoorCatalog.FindEdit(HouseEditsStore.Current, d, rooms);
+            if (WallsTool) break;                                    // only the gap is shown
             if (e != null && d.isWindow && e.kind != DoorKind.Wall) DrawWindow(d, e);
             else if (e != null) DrawSwing(d, e);
         }
