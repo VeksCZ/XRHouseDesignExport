@@ -406,6 +406,19 @@ public static class Furniture
 
     // ---------- finished floors + suspended ceilings (switchable) ----------
 
+    /// <summary>A switch of the scan's furniture spec: <c>"house_style": {"blinds": true, "entrance_door": true, "window_frames": true}</c> - things
+    /// that belong to one particular house (the new build's contract: exterior blinds, the entrance door, white / anthracite window frames)
+    /// and must not appear in other scans. Off when the key is missing.</summary>
+    public static bool StyleFlag(string scanName, string flag)
+    {
+        try
+        {
+            var t = Load(scanName)?["house_style"]?[flag];
+            return t != null && t.Type == JTokenType.Boolean && (bool)t;
+        }
+        catch { return false; }
+    }
+
     const string FinishedPref = "Model.Finished";
     /// <summary>On: the model shows the finished floors ("floor_buildup") and the suspended ceilings
     /// ("suspended_ceilings"). Off (default): the rough shell as scanned - what pipes in the floor and cables above the
@@ -717,6 +730,7 @@ public static class Furniture
                 B.Add(("ceramic", 0, w, 0, r, h - 0.02f, h)); B.Add(("ceramic", 0, w, d - r, d, h - 0.02f, h));
                 B.Add(("ceramic", 0, r, r, d - r, h - 0.02f, h)); B.Add(("ceramic", w - r, w, r, d - r, h - 0.02f, h));
                 B.Add(("water", r, w - r, r, d - r, h - 0.03f, h - 0.025f));
+                if (item["tap"] != null) BathTap(B, (string)item["tap"], w, d, h);
                 break;
             }
             case "shower":
@@ -1127,28 +1141,58 @@ public static class Furniture
     /// "set_u" = where along the wall the arm is (default the middle); all chrome.</summary>
     static void ShowerSet(List<(string, float, float, float, float, float, float)> B, JObject item, float w, float d, float h)
     {
-        float cu = Mathf.Clamp(F(item, "set_u", w / 2f), 0.2f, w - 0.2f);
+        // The set is drawn on a wall: a = along it, n = out of it. "set_wall": "back" (default, the wall behind) or "left" / "right" (the
+        // enclosure's short side wall at u = 0 / u = w), "set_u" = where along that wall (default the middle).
+        string wall = (string)item["set_wall"] ?? "back";
+        float len = wall == "back" ? w : d;
+        float cu = Mathf.Clamp(F(item, "set_u", len / 2f), 0.2f, len - 0.2f);
+        void Bx(string m, float a0, float a1, float n0, float n1, float y0, float y1)
+        {
+            if (wall == "left") B.Add((m, n0, n1, a0, a1, y0, y1));
+            else if (wall == "right") B.Add((m, w - n1, w - n0, a0, a1, y0, y1));
+            else B.Add((m, a0, a1, n0, n1, y0, y1));
+        }
+        float room = wall == "back" ? d : w;                         // how far the arm can reach into the enclosure
         // thermostat: trim plate and two knobs
-        B.Add(("chrome", cu - 0.095f, cu + 0.095f, 0f, 0.012f, 0.95f, 1.14f));
-        B.Add(("dark", cu - 0.07f, cu + 0.07f, 0.012f, 0.014f, 1.00f, 1.09f));
-        B.Add(("chrome", cu - 0.065f, cu - 0.025f, 0.012f, 0.032f, 1.025f, 1.065f));
-        B.Add(("chrome", cu + 0.025f, cu + 0.065f, 0.012f, 0.032f, 1.025f, 1.065f));
+        Bx("chrome", cu - 0.095f, cu + 0.095f, 0f, 0.012f, 0.95f, 1.14f);
+        Bx("dark", cu - 0.07f, cu + 0.07f, 0.012f, 0.014f, 1.00f, 1.09f);
+        Bx("chrome", cu - 0.065f, cu - 0.025f, 0.012f, 0.032f, 1.025f, 1.065f);
+        Bx("chrome", cu + 0.025f, cu + 0.065f, 0.012f, 0.032f, 1.025f, 1.065f);
         // wall arm 450 mm with a rosette, and the square head 300 x 300 x 4 mm on a ball joint
-        float ay = Mathf.Min(2.05f, h - 0.08f), arm = Mathf.Min(0.45f, d - 0.30f), hd = 0.30f;
-        B.Add(("chrome", cu - 0.035f, cu + 0.035f, 0f, 0.015f, ay - 0.035f, ay + 0.035f));
-        B.Add(("chrome", cu - 0.009f, cu + 0.009f, 0.015f, arm, ay - 0.009f, ay + 0.009f));
+        float ay = Mathf.Min(2.05f, h - 0.08f), arm = Mathf.Min(0.45f, room - 0.30f), hd = 0.30f;
+        Bx("chrome", cu - 0.035f, cu + 0.035f, 0f, 0.015f, ay - 0.035f, ay + 0.035f);
+        Bx("chrome", cu - 0.009f, cu + 0.009f, 0.015f, arm, ay - 0.009f, ay + 0.009f);
         float hv0 = Mathf.Max(0.05f, arm - hd / 2f - 0.02f);
-        B.Add(("chrome", cu - 0.02f, cu + 0.02f, arm - 0.03f, arm + 0.01f, ay - 0.03f, ay - 0.009f));
-        B.Add(("chrome", cu - hd / 2f, cu + hd / 2f, hv0, hv0 + hd, ay - 0.034f, ay - 0.030f));
+        Bx("chrome", cu - 0.02f, cu + 0.02f, arm - 0.03f, arm + 0.01f, ay - 0.03f, ay - 0.009f);
+        Bx("chrome", cu - hd / 2f, cu + hd / 2f, hv0, hv0 + hd, ay - 0.034f, ay - 0.030f);
         // wall elbow with the hand shower holder, the hose in a loop, the hand shower
-        float fu = cu + 0.28f <= w - 0.12f ? cu + 0.28f : Mathf.Max(0.12f, cu - 0.28f);
-        B.Add(("chrome", fu - 0.03f, fu + 0.03f, 0f, 0.075f, 0.88f, 0.94f));
-        B.Add(("chrome", fu - 0.018f, fu + 0.018f, 0f, 0.05f, 1.00f, 1.04f));                       // holder
-        B.Add(("chrome", fu - 0.02f, fu + 0.02f, 0.03f, 0.075f, 1.04f, 1.27f));                     // hand shower
-        B.Add(("chrome", fu - 0.03f, fu + 0.03f, 0.025f, 0.08f, 1.27f, 1.30f));
-        B.Add(("steel", fu - 0.006f, fu + 0.006f, 0.04f, 0.052f, 0.50f, 0.88f));                    // hose: down, across, up
-        B.Add(("steel", fu - 0.006f, fu + 0.006f, 0.04f, 0.16f, 0.50f, 0.512f));
-        B.Add(("steel", fu - 0.006f, fu + 0.006f, 0.148f, 0.16f, 0.50f, 1.04f));
+        float fu = cu + 0.28f <= len - 0.12f ? cu + 0.28f : Mathf.Max(0.12f, cu - 0.28f);
+        Bx("chrome", fu - 0.03f, fu + 0.03f, 0f, 0.075f, 0.88f, 0.94f);
+        Bx("chrome", fu - 0.018f, fu + 0.018f, 0f, 0.05f, 1.00f, 1.04f);                       // holder
+        Bx("chrome", fu - 0.02f, fu + 0.02f, 0.03f, 0.075f, 1.04f, 1.27f);                     // hand shower
+        Bx("chrome", fu - 0.03f, fu + 0.03f, 0.025f, 0.08f, 1.27f, 1.30f);
+        Bx("steel", fu - 0.006f, fu + 0.006f, 0.04f, 0.052f, 0.50f, 0.88f);                    // hose: down, across, up
+        Bx("steel", fu - 0.006f, fu + 0.006f, 0.04f, 0.16f, 0.50f, 0.512f);
+        Bx("steel", fu - 0.006f, fu + 0.006f, 0.148f, 0.16f, 0.50f, 1.04f);
+    }
+
+    /// <summary>The bath's fittings on the short wall at its end (u = 0 = "left" / u = w = "right"), in the middle of that wall: a concealed
+    /// mixer for filling (round trim plate + lever), the filler spout over the rim, and a small hand shower on a holder with its hose.
+    /// "tap": "left" | "right".</summary>
+    static void BathTap(List<(string, float, float, float, float, float, float)> B, string end, float w, float d, float h)
+    {
+        float c = d / 2f;
+        void Bx(string m, float n0, float n1, float a0, float a1, float y0, float y1)   // n = out of the end wall, a = along it (v)
+        {
+            if (end == "right") B.Add((m, w - n1, w - n0, a0, a1, y0, y1)); else B.Add((m, n0, n1, a0, a1, y0, y1));
+        }
+        Bx("chrome", 0f, 0.012f, c - 0.07f, c + 0.07f, 0.80f, 0.94f);              // trim plate of the concealed mixer
+        Bx("chrome", 0.012f, 0.05f, c - 0.012f, c + 0.012f, 0.86f, 0.88f);          // lever
+        Bx("chrome", 0f, 0.14f, c - 0.015f, c + 0.015f, h + 0.07f, h + 0.10f);      // filler spout over the rim
+        Bx("chrome", 0f, 0.03f, c - 0.02f, c + 0.02f, 1.10f, 1.16f);                // hand shower holder (small)
+        Bx("chrome", 0.03f, 0.065f, c - 0.015f, c + 0.015f, 1.00f, 1.30f);          // the small hand shower
+        Bx("steel", 0.03f, 0.042f, c - 0.006f, c + 0.006f, 0.70f, 1.00f);           // its hose, looped down
+        Bx("steel", 0.03f, 0.10f, c - 0.006f, c + 0.006f, 0.70f, 0.712f);
     }
 
     static Func<float, float, (float, float)> Place(RoomBox room, JObject item)

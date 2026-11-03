@@ -27,7 +27,8 @@
           "along": 0.0,
           "w": 1.8,
           "d": 0.8,
-          "h": 0.6
+          "h": 0.6,
+          "tap": "left"
         },
         {
           "type": "radiator",
@@ -52,7 +53,8 @@
               "side": "front",
               "sliding": true
             }
-          ]
+          ],
+          "set_wall": "left"
         },
         {
           "type": "washbasin",
@@ -814,7 +816,7 @@
     }
   ],
   "site": {
-    "note": "RD Osove, parc. 442/3 - z koordinacni situace C.3; sever = GLB (0.342, 0.940), garaz na SSV",
+    "note": "RD Osove, parc. 442/3 - z koordinacni situace C.3; sever = GLB (0.342, 0.940), garaz na SSV | teren (odhad, upravit): terasa pred balkonovkami obyvaku (3 m), mez 1,5 m dolu do zahrady, rovna plocha kolem zastresene terasy k spodni loznici",
     "lat": 49.325,
     "lon": 16.015,
     "north": [
@@ -944,6 +946,104 @@
             -2.64
           ]
         ]
+      },
+      {
+        "name": "terasa_obyvak",
+        "color": "concrete",
+        "y": -1.35,
+        "t": 1.65,
+        "poly": [
+          [
+            -4.84,
+            -10.87
+          ],
+          [
+            4.89,
+            -10.87
+          ],
+          [
+            4.89,
+            -7.87
+          ],
+          [
+            -4.84,
+            -7.87
+          ]
+        ]
+      },
+      {
+        "name": "terasa_propoj",
+        "color": "concrete",
+        "y": -1.35,
+        "t": 1.65,
+        "poly": [
+          [
+            -7.8,
+            -10.87
+          ],
+          [
+            -4.84,
+            -10.87
+          ],
+          [
+            -4.84,
+            -8.2
+          ],
+          [
+            -7.8,
+            -8.2
+          ]
+        ]
+      },
+      {
+        "name": "terasa_zapad",
+        "color": "concrete",
+        "y": -1.35,
+        "t": 0.5,
+        "poly": [
+          [
+            -10.8,
+            -10.87
+          ],
+          [
+            -7.8,
+            -10.87
+          ],
+          [
+            -7.8,
+            1.3
+          ],
+          [
+            -10.8,
+            1.3
+          ]
+        ]
+      },
+      {
+        "name": "mez_zahrada",
+        "color": "bank",
+        "poly": [
+          [
+            -10.8,
+            -1.35,
+            -10.87
+          ],
+          [
+            4.89,
+            -1.35,
+            -10.87
+          ],
+          [
+            4.89,
+            -2.97,
+            -13.97
+          ],
+          [
+            -10.8,
+            -2.97,
+            -13.97
+          ]
+        ]
       }
     ],
     "fences": [
@@ -1067,10 +1167,24 @@
         "eave": 3.2,
         "ridge": 6.2
       }
+    ],
+    "ground_cuts": [
+      {
+        "x0": -60,
+        "x1": 60,
+        "z0": -90,
+        "z1": -10.87,
+        "y": -2.97
+      }
     ]
   },
   "walls": {
     "exterior": 0.5,
     "note": "obvodove zdi 50 cm (cihla 50 s presahem pres zakladovku), pricky ~15 cm (dopocitane ze skenu)"
+  },
+  "house_style": {
+    "blinds": true,
+    "entrance_door": true,
+    "window_frames": true
   }
 }

@@ -45,8 +45,34 @@ public static class SiteModel
         if (site["ground"]?.Type != JTokenType.Boolean || (bool)site["ground"])
         {
             float s = F(site["ground"] as JObject, "size", 160f);
-            var sq = new List<Vector3> { new Vector3(-s / 2, gy, -s / 2), new Vector3(s / 2, gy, -s / 2), new Vector3(s / 2, gy, s / 2), new Vector3(-s / 2, gy, s / 2) };
-            rm.parts.Add(Prism("ground", sq, gy - 0.2f, Col((string)(site["ground"] as JObject)?["color"], "grass")));
+            Color gc = Col((string)(site["ground"] as JObject)?["color"], "grass");
+            // "ground_cuts": [{"x0","x1","z0","z1","y"}] - rectangles of the ground that lie lower (a garden below a terrace): the flat square is
+            // split round them and the cut ones are drawn at their own height
+            var flat = new List<(float x0, float x1, float z0, float z1)> { (-s / 2, s / 2, -s / 2, s / 2) };
+            int ci = 0;
+            foreach (var cj in (site["ground_cuts"] as JArray ?? new JArray()).OfType<JObject>())
+            {
+                float cx0 = F(cj, "x0", 0f), cx1 = F(cj, "x1", 0f), cz0 = F(cj, "z0", 0f), cz1 = F(cj, "z1", 0f), cy = F(cj, "y", gy - 1f);
+                var next = new List<(float, float, float, float)>();
+                foreach (var r in flat)
+                {
+                    float ix0 = Mathf.Max(r.x0, cx0), ix1 = Mathf.Min(r.x1, cx1), iz0 = Mathf.Max(r.z0, cz0), iz1 = Mathf.Min(r.z1, cz1);
+                    if (ix1 <= ix0 || iz1 <= iz0) { next.Add(r); continue; }
+                    if (ix0 > r.x0) next.Add((r.x0, ix0, r.z0, r.z1));                 // left strip
+                    if (ix1 < r.x1) next.Add((ix1, r.x1, r.z0, r.z1));                 // right strip
+                    if (iz0 > r.z0) next.Add((ix0, ix1, r.z0, iz0));                   // below
+                    if (iz1 < r.z1) next.Add((ix0, ix1, iz1, r.z1));                   // above
+                    var low = new List<Vector3> { new Vector3(ix0, cy, iz0), new Vector3(ix1, cy, iz0), new Vector3(ix1, cy, iz1), new Vector3(ix0, cy, iz1) };
+                    rm.parts.Add(Prism("ground_cut" + ci++, low, cy - 0.2f, gc));
+                }
+                flat = next;
+            }
+            int gi = 0;
+            foreach (var r in flat)
+            {
+                var sq = new List<Vector3> { new Vector3(r.x0, gy, r.z0), new Vector3(r.x1, gy, r.z0), new Vector3(r.x1, gy, r.z1), new Vector3(r.x0, gy, r.z1) };
+                rm.parts.Add(Prism(gi++ == 0 ? "ground" : "ground" + gi, sq, gy - 0.2f, gc));
+            }
         }
 
         // areas: [{"name", "poly": [[x,z] | [x,y,z], ...], "y": top (flat ones), "t": thickness, "color"}]

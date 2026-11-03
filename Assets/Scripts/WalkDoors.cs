@@ -140,8 +140,12 @@ public class WalkDoors
             DoorCatalog.Swing(d, e, out var hinge, out var swing, out var toOther);
             Vector3 hingeM = M(hinge), swingM = g * swing, toOtherM = g * toOther;
             float h = d.height - 0.01f, w = d.width;
+            // finished floors (Furniture.Finished): the build-up (screed, floor covering) is poured over the rough floor, so the door and its frame
+            // start on the FINISHED floor: they stand higher and are that much shorter (the head of the opening stays where it is)
+            float lift = Mathf.Max(0f, XRModelFactory.FloorBuildupAt?.Invoke(d.FloorY) ?? 0f);
+            if (lift > 0.005f) { hingeM += Vector3.up * lift; h = Mathf.Max(1.2f, h - lift); }
             float frameInset = 0f, frameDrop = 0f; bool entranceDone = false;   // how much of the opening the frame fills at the sides / at the top
-            var door = new Door { center = M(d.center - Vector3.up * (d.height / 2f)), isWindow = d.isWindow, garage = e.kind == DoorKind.Garage };
+            var door = new Door { center = M(d.center - Vector3.up * (d.height / 2f)) + Vector3.up * lift, isWindow = d.isWindow, garage = e.kind == DoorKind.Garage };
             door.manual = wasOpen.Any(p => Vector3.Distance(p, door.center) < 0.1f);
             float handleH = d.isWindow ? h / 2f : HandleHeight;
 
@@ -149,7 +153,7 @@ public class WalkDoors
             {
                 case DoorKind.Single:
                 {
-                    if (!d.isWindow && w >= EntranceMinW && w <= EntranceMaxW)
+                    if (!d.isWindow && w >= EntranceMinW && w <= EntranceMaxW && Furniture.StyleFlag(HouseEditsStore.CurrentScan, "entrance_door"))
                     {
                         // an entrance door (about 1.48 m wide): fixed sidelight + leaf, opening OUTWARD (the edit says inward -> the other way)
                         BuildEntrance(visual, layer, door, door.center, -swingM, w, h);
@@ -205,6 +209,7 @@ public class WalkDoors
             }
             doors.Add(door);
         }
+        BuildBlinds(visual, layer);   // after every window is known: one blind per window group
     }
 
     static readonly Color FrameColor = new Color(0.62f, 0.42f, 0.22f);   // door frame: the saturated brown
@@ -321,16 +326,54 @@ public class WalkDoors
             }
             doors.Add(door);
         }
-        AddWindowFrame(visual, layer, leftM, rM, sM, W, h, DoorCatalog.Sections(e).Select(x => x.f1).ToList());
+        string scanName = HouseEditsStore.CurrentScan;
+        if (Furniture.StyleFlag(scanName, "window_frames")) AddWindowFrame(visual, layer, leftM, rM, sM, W, h, DoorCatalog.Sections(e).Select(x => x.f1).ToList());
         bool exterior = d.roomFront == null || d.roomBack == null;
-        if (exterior && d.height > 0.3f)
+        if (exterior && d.height > 0.3f && Furniture.StyleFlag(scanName, "blinds"))
         {
             Vector3 nM = g * d.normal;                      // points into the front room
-            AddBlind(visual, layer, openLeftM, rM, d.roomFront != null ? -nM : nM, d.width, d.height);
+            blindReqs.Add(new BlindReq { left = openLeftM, along = rM, outN = d.roomFront != null ? -nM : nM, w = d.width, h = d.height });
         }
     }
 
     const float BlindBox = 0.17f, BlindRail = 0.03f, BlindDepth = 0.12f;
+
+    struct BlindReq { public Vector3 left, along, outN; public float w, h; }
+    readonly List<BlindReq> blindReqs = new List<BlindReq>();
+
+    /// <summary>One blind over a whole window: the windows (anchors) of one wall that stand next to each other - a balcony door and its fixed
+    /// part, an HS portal - get a single blind across their joined width, not one per anchor.</summary>
+    void BuildBlinds(GameObject visual, int layer)
+    {
+        var rest = new List<BlindReq>(blindReqs);
+        blindReqs.Clear();
+        while (rest.Count > 0)
+        {
+            var cur = rest[0]; rest.RemoveAt(0);
+            float start = 0f, end = cur.w, bottom = cur.left.y, top = cur.left.y + cur.h;
+            Vector3 origin = cur.left;
+            bool grew = true;
+            while (grew)
+            {
+                grew = false;
+                for (int i = 0; i < rest.Count; i++)
+                {
+                    var o = rest[i];
+                    if (Vector3.Dot(o.outN, cur.outN) < 0.98f || Mathf.Abs(Vector3.Dot(o.along, cur.along)) < 0.98f) continue;
+                    if (Mathf.Abs(Vector3.Dot(o.left - origin, cur.outN)) > 0.08f) continue;           // the same wall plane
+                    if (Mathf.Abs((o.left.y + o.h) - top) > 0.15f) continue;                           // the same head height
+                    float s = Vector3.Dot(o.left - origin, cur.along), e = s + o.w * Mathf.Sign(Vector3.Dot(o.along, cur.along));
+                    float lo = Mathf.Min(s, e), hi = Mathf.Max(s, e);
+                    if (lo > end + 0.35f || hi < start - 0.35f) continue;                               // not next to it
+                    start = Mathf.Min(start, lo); end = Mathf.Max(end, hi);
+                    bottom = Mathf.Min(bottom, o.left.y); top = Mathf.Max(top, o.left.y + o.h);
+                    rest.RemoveAt(i); grew = true; break;
+                }
+            }
+            Vector3 left = origin + cur.along * start; left.y = bottom;
+            AddBlind(visual, layer, left, cur.along, cur.outN, end - start, top - bottom);
+        }
+    }
 
     /// <summary>An exterior blind in the reveal of a window in an outer wall (the wall is as thick as the spec's "exterior"):
     /// the head box is hidden in the lintel above the opening (the space left there for it; it is inside the solid wall, so only
@@ -628,7 +671,7 @@ public class WalkDoors
 
     public void Clear()
     {
-        blinds.Clear();
+        blinds.Clear(); blindReqs.Clear();
         foreach (var r in Suppressed) if (r) r.enabled = true;
         Suppressed.Clear();
         foreach (var c in suppressedColliders) if (c) c.enabled = true;

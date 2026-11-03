@@ -702,6 +702,11 @@ public class XRMenu : MonoBehaviour
         // rough shell (off) | finished floors (on) - one switch
         XRUi.SetToggle(finishedButton, Furniture.Finished);
         XRUi.SetToggle(blindsButton, WalkDoors.BlindsDown);
+        if (blindsButton != null)   // only a scan whose spec has "house_style": {"blinds": true} has blinds (not other places)
+        {
+            bool has = Furniture.StyleFlag(HouseEditsStore.CurrentScan, "blinds");
+            if (blindsButton.gameObject.activeSelf != has) blindsButton.gameObject.SetActive(has);
+        }
         SyncNextFloorButton();
         SyncAlignButton();
     }
@@ -1194,10 +1199,13 @@ public class XRMenu : MonoBehaviour
         {
             await Busy("Saving...");
             string name = await exporter.SaveScanToCache(this);
-            if (name != null && HouseEditsStore.CarryLiveInto(name))
+            if (name != null)
             {
-                exporter.AdoptSavedLiveScan(name); // the edits belong to the saved copy now - show it
-                AddLog($"<color=green>Edits made on the live scan saved with it - now on '{name}'.</color>");
+                // always continue on the saved copy (that is where edits are allowed); edits made on the live scan move along with it
+                bool carried = HouseEditsStore.CarryLiveInto(name);
+                exporter.AdoptSavedLiveScan(name);
+                AddLog(carried ? $"<color=green>Edits made on the live scan saved with it - now on '{name}'.</color>"
+                               : $"<color=green>Saved - now working on '{name}' (edits go there).</color>");
             }
             SetStatus(name != null ? "Scan saved" : "Save failed");
             RefreshScanLabel();
