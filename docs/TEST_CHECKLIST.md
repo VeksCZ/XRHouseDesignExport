@@ -67,6 +67,6 @@ Když něco nevyjde, napište mi (nebo PC session) číslo bodu a log (`Logs/Que
     Pokud se křídlo otevírá dovnitř, nebo je světlík na druhé straně, napište mi to.
 
 ## Vchodové dveře, okna, žaluzie (2026-11-03)
-30. **Venkovní žaluzie**: View > **Exterior blinds** (antracit): v otvorech oken ve vnějších zdech se plynule (~3 s) spustí / vytáhnou lamely do parapetu; nahoře zůstane kastlík
-    (17 cm) a vodicí lišty v ostění na vnějším konci (zeď 50 cm). Pokud je kastlík vidět jinak než chcete, napište, kam má sedět (výška, hloubka).
+30. **Venkovní žaluzie**: View > **Exterior blinds** (antracit): v otvorech oken ve vnějších zdech se plynule (~3 s) spustí / vytáhnou lamely do parapetu; kastlík je schovaný v překladu nad otvorem (neviditelný), vodicí lišty v ostění na vnějším
+    konci (zeď 50 cm). Pokud lamely nevylézají ze správného místa nebo hloubka neodpovídá, napište kam.
 31. Barvy dveří: křídla světlejší hnědá, **zárubně** sytá hnědá (vchodové dveře: antracit / bílá).

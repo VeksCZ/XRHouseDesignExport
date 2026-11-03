@@ -333,17 +333,18 @@ public class WalkDoors
     const float BlindBox = 0.17f, BlindRail = 0.03f, BlindDepth = 0.12f;
 
     /// <summary>An exterior blind in the reveal of a window in an outer wall (the wall is as thick as the spec's "exterior"):
-    /// a head box at the top of the opening and two guide rails at its outer end, anthracite, and the curtain that slides down
-    /// to the sill (<see cref="BlindsDown"/>). 'outN' points to the outside.</summary>
+    /// the head box is hidden in the lintel above the opening (the space left there for it; it is inside the solid wall, so only
+    /// the curtain comes out of the slot), two anthracite guide rails stand at the outer end of the reveal and the curtain slides
+    /// down to the sill (<see cref="BlindsDown"/>). 'outN' points to the outside.</summary>
     void AddBlind(GameObject visual, int layer, Vector3 openLeftM, Vector3 rM, Vector3 outN, float openW, float openH)
     {
         float wall = Mathf.Max(0.2f, XRModelFactory.ExteriorWallThickness);
         Vector3 baseP = openLeftM + outN * (wall - BlindDepth / 2f - 0.01f);   // at the outer end of the reveal, left jamb, sill
         Quaternion rot = Quaternion.LookRotation(rM, Vector3.up);
-        float railH = openH - BlindBox;
+        float railH = openH;                                   // the rails and the curtain use the whole opening - the box is up in the lintel
         var parts = new List<XRMeshPart>();
         void Box(Vector3 c, Vector3 size) { var p = XRModelFactory.CreateBoxPart("BLIND", c, rot, size, "DOORLEAF", Vector3.zero, 0f); p.color = AnthraciteColor; parts.Add(p); }
-        Box(baseP + rM * (openW / 2f) + Vector3.up * (openH - BlindBox / 2f), new Vector3(BlindDepth, BlindBox, openW));                 // head box
+        Box(baseP + rM * (openW / 2f) + Vector3.up * (openH + BlindBox / 2f), new Vector3(BlindDepth, BlindBox, openW));                 // head box, hidden in the lintel
         Box(baseP + rM * (BlindRail / 2f) + Vector3.up * (railH / 2f), new Vector3(0.04f, railH, BlindRail));                              // guide rails
         Box(baseP + rM * (openW - BlindRail / 2f) + Vector3.up * (railH / 2f), new Vector3(0.04f, railH, BlindRail));
         var model = new XRHouseModel();

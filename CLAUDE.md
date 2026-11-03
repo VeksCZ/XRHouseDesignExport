@@ -159,7 +159,7 @@ and exports 3D models, floor plans and reports from the scan.
   unequal widths (`SectionEdit.width`, relative, 0 = equal share). `DoorEdit.widthMm/heightMm` = the real frame size (centred in the rough opening, 3 cm above the sill). `Tools/apply_contract_windows.py` writes the contract (sizes, part widths, and parts for windows with no edit yet) into a COPY of an edits file; the user's own kinds / hinges are kept.
 - **Windows in extra rooms** (furniture spec `extra_rooms[].walls[]` as an object): `"windows": [{"at": centre along the wall (GLB x / z), "w", "h", "sill"}]` cuts an opening, draws the frame
   (white inside / anthracite outside) and the pane (`Furniture.cs`); the sizes are the real ones from the order.
-- **Exterior blinds** (`WalkDoors.AddBlind`, menu View > Exterior blinds, `WalkDoors.BlindsDown`): anthracite head box (17 cm) + guide rails at the outer end of the reveal of every window in an
+- **Exterior blinds** (`WalkDoors.AddBlind`, menu View > Exterior blinds, `WalkDoors.BlindsDown`): anthracite head box (17 cm, hidden in the lintel above the opening) + guide rails at the outer end of the reveal of every window in an
   outer wall (depth = the spec's `walls.exterior`), curtain slides to the sill in ~3 s; door leaves light brown, interior door frames saturated brown.
 - **Logs**: headset session logs are in `persistentDataPath/Logs` (menu "Pull logs from Quest" -> `Logs/Quest`),
   never in the export folder.
