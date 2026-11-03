@@ -172,7 +172,13 @@ public class WalkDoors
                     break;
                 }
             }
-            if (e.kind != DoorKind.Garage) AddFrame(visual, layer, hingeM, toOtherM, w, h);
+            if (e.kind != DoorKind.Garage)
+            {
+                // no jamb on a side where the door sits at a room corner: the frame would poke into the wall that meets here
+                bool cornerH = DoorCatalog.JambAtCorner(rooms, d, hinge, -toOther, 0.08f);
+                bool cornerO = DoorCatalog.JambAtCorner(rooms, d, hinge + toOther * w, toOther, 0.08f);
+                AddFrame(visual, layer, hingeM, toOtherM, w, h, !cornerH, !cornerO);
+            }
             doors.Add(door);
         }
     }
@@ -183,15 +189,16 @@ public class WalkDoors
     /// <summary>A door frame (zarubne): two jambs and a head just outside the opening, centred on the door's plane. No
     /// colliders - the opening stays as wide as scanned; where the wall is thicker than the frame it is hidden in it, where the
     /// door sits at a wall face it shows as a casing about 6 cm wide.</summary>
-    void AddFrame(GameObject visual, int layer, Vector3 hingeM, Vector3 toOtherM, float w, float h)
+    void AddFrame(GameObject visual, int layer, Vector3 hingeM, Vector3 toOtherM, float w, float h, bool jambHinge = true, bool jambOther = true)
     {
         Quaternion rot = Quaternion.LookRotation(toOtherM, Vector3.up);
         var parts = new List<XRMeshPart>();
         float half = FrameWidth / 2f;
         void Box(Vector3 centre, Vector3 size) => parts.Add(XRModelFactory.CreateBoxPart("DOOR_FRAME", centre, rot, size, "DOORLEAF", Vector3.zero, 0f));
-        Box(hingeM - toOtherM * half + Vector3.up * (h / 2f), new Vector3(FrameDepth, h, FrameWidth));
-        Box(hingeM + toOtherM * (w + half) + Vector3.up * (h / 2f), new Vector3(FrameDepth, h, FrameWidth));
-        Box(hingeM + toOtherM * (w / 2f) + Vector3.up * (h + half), new Vector3(FrameDepth, FrameWidth, w + 2f * FrameWidth));
+        if (jambHinge) Box(hingeM - toOtherM * half + Vector3.up * (h / 2f), new Vector3(FrameDepth, h, FrameWidth));
+        if (jambOther) Box(hingeM + toOtherM * (w + half) + Vector3.up * (h / 2f), new Vector3(FrameDepth, h, FrameWidth));
+        float x0 = jambHinge ? -FrameWidth : 0f, x1 = jambOther ? w + FrameWidth : w;   // the head stops where a jamb is left out
+        Box(hingeM + toOtherM * ((x0 + x1) / 2f) + Vector3.up * (h + half), new Vector3(FrameDepth, FrameWidth, x1 - x0));
         foreach (var part in parts) part.color = FrameColor;
         var model = new XRHouseModel();
         model.rooms.Add(new XRRoomModel { roomName = "Frame", parts = parts });

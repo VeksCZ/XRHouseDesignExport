@@ -280,6 +280,11 @@ public static class DoorCatalog
         return 4f;
     }
 
+    /// <summary>True when the jamb sits right at a corner of one of the two rooms (the wall it is in ends within 'limit' behind it) -
+    /// a door frame there would run into the wall that meets this one.</summary>
+    public static bool JambAtCorner(List<MRUKRoom> rooms, DoorInfo d, Vector3 jamb, Vector3 outward, float limit) =>
+        WallRun(rooms, d.roomFront, jamb, outward, d.normal) < limit || WallRun(rooms, d.roomBack, jamb, outward, -d.normal) < limit;
+
     /// <summary>Hinge on the jamb nearer the room's corner, so the open leaf lies against the wall.</summary>
     static HingeSide GuessHinge(DoorInfo d, DoorEdit e, List<MRUKRoom> rooms)
     {
