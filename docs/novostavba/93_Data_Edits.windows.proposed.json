@@ -329,9 +329,12 @@
       "sections": [
         {
           "kind": 8,
-          "hinge": 0
+          "hinge": 0,
+          "width": 1050
         }
-      ]
+      ],
+      "widthMm": 1050,
+      "heightMm": 2440
     },
     {
       "anchorUuid": "03389adf-6c8e-c4b5-6dd6-896aff8c324b",
@@ -352,7 +355,7 @@
         }
       ],
       "widthMm": 1050,
-      "heightMm": 2440
+      "heightMm": 2450
     },
     {
       "anchorUuid": "79a321fa-7486-b9e6-a54b-1df7e56c83ab",
@@ -450,8 +453,8 @@
           "width": 1087
         },
         {
-          "kind": 6,
-          "hinge": 0,
+          "kind": 8,
+          "hinge": 1,
           "width": 1433
         }
       ],
@@ -647,6 +650,27 @@
         {
           "kind": 6,
           "hinge": 0,
+          "width": 1470
+        }
+      ],
+      "widthMm": 1470,
+      "heightMm": 2450
+    },
+    {
+      "anchorUuid": "832eff72-bc39-6a4c-216e-60dc63f6bba0",
+      "roomUuid": "b3293e15-38eb-b543-5c2f-64b1441798a6",
+      "localPos": {
+        "x": -4.3826,
+        "y": -1.7012,
+        "z": 3.5094
+      },
+      "kind": 0,
+      "hinge": 0,
+      "opensIntoRoomUuid": "b3293e15-38eb-b543-5c2f-64b1441798a6",
+      "sections": [
+        {
+          "kind": 6,
+          "hinge": 1,
           "width": 1450
         }
       ],

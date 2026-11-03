@@ -11,6 +11,7 @@ The original file is never written."""
 import json, sys
 
 FIXED, TT = 6, 8; L, R = 0, 1
+FORCE = {'70936a'}    # the contract wins over the user's edit (bedroom: both sashes open)
 # window anchor id prefix -> (contract item, width mm, height mm, parts [(kind, hinge, width mm)] for a window WITHOUT an edit)
 PLAN = {
     '0da02b': ('#8 2NP pokoj vpravo',            1720, 1195, [(TT, L, 733), (TT, R, 987)]),
@@ -19,13 +20,17 @@ PLAN = {
     'fb2b7e': ('#11 2NP WC',                      720,  950, [(TT, R, 720)]),                 # handle on the left -> hinge right
     '6740bf': ('#12 2NP koupelna, vetsi kridlo (vlevo)', None, None, [(TT, L, 1266)]),       # scan splits the window in two anchors
     '952551': ('#12 2NP koupelna, mensi kridlo (vpravo)', None, None, [(TT, R, 704)]),
-    '70936a': ('#13 2NP loznice',                2520, 1445, [(TT, L, 1087), (TT, R, 1433)]),
+    '70936a': ('#13 2NP loznice (podle PDF: obe kridla otevirave)', 2520, 1445, [(TT, L, 1087), (TT, R, 1433)]),
     '785c4e': ('#1 1NP garaz, vlevo (klika vpravo)', 1220, 950, [(TT, L, 1220)]),            # the left window of the pair = item 1
     '548077': ('#2 1NP garaz, vpravo (klika vlevo)', 1220, 950, [(TT, R, 1220)]),            # the right one = item 2 (handles towards the middle)
     'd908c8': ('#3 1NP kuchyn',                  2220, 1560, [(TT, L, 750), (FIXED, R, 1470)]),
     '79a321': ('#5 1NP HS portal',               2700, 2490, [(2, R, 1350), (FIXED, L, 1350)]),
-    'd90eeb': ('#6 1NP pracovna, pevna cast vlevo', 1450, 2440, [(FIXED, L, 1450)]),         # the pair is mirrored against the drawing: fixed part LEFT,
-    '03389a': ('#6 1NP pracovna, dvere vpravo',  1050, 2440, [(TT, R, 1050)]),               # tilt-turn door RIGHT (the user's hinge: right)
+    # balkonove dvere: obyvak 34b261 (dlouha stena 8,7 m) = #4: pevna cast 1470 vlevo, dvere 1050 vpravo (jako vykres)
+    'd90eeb': ('#4 1NP obyvak, pevna cast vlevo',  1470, 2450, [(FIXED, L, 1470)]),
+    '03389a': ('#4 1NP obyvak, dvere vpravo',      1050, 2450, [(TT, R, 1050)]),               # the user's hinge: right
+    # spodni loznice b3293e (obe okna na jedne stene) = #6: dvere 1050 vlevo, pevna cast 1450 vpravo (jako vykres)
+    '84ff94': ('#6 1NP spodni loznice, dvere vlevo', 1050, 2440, [(TT, L, 1050)]),             # the user's hinge: left
+    '832eff': ('#6 1NP spodni loznice, pevna cast vpravo', 1450, 2440, [(FIXED, R, 1450)]),
 }
 
 def main():
@@ -42,7 +47,9 @@ def main():
         if hit:
             for d in hit:
                 secs = d.get('sections') or []
-                if len(secs) == len(parts):                           # keep the user's kinds and hinges, add the contract widths
+                if key in FORCE:
+                    d['sections'] = [{'kind': k, 'hinge': h, 'width': wd} for k, h, wd in parts]; note = 'parts replaced by the contract (asked for)'
+                elif len(secs) == len(parts):                           # keep the user's kinds and hinges, add the contract widths
                     for s, (k, h, wd) in zip(secs, parts): s['width'] = wd
                     note = 'user parts kept, widths added'
                 else: note = f'user has {len(secs)} part(s), contract {len(parts)} - parts left alone'

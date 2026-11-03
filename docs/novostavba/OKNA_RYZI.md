@@ -26,11 +26,14 @@ Typ částí a strany pantů: **u oken, kde je uživatel už nastavil, zůstáva
 Poloha vlevo / vpravo je určená z geometrie scanu při pohledu zevnitř místnosti:
 - koupelna 3bf3e3: `6740bf` (1,18) je vlevo od `952551` (0,72) -> větší křídlo 1266 vlevo, menší 704 vpravo (jako výkres); obě mají kliku uprostřed (panty venku).
 - garáž 2e5efb: `785c4e` je vlevo, `548077` vpravo -> č. 1 (klika vpravo) vlevo, č. 2 (klika vlevo) vpravo, kliky směrem ke středu (předpoklad: položky jsou řazené zleva doprava).
-- pracovna / obývák 34b261: `d90eeb` (1,39) je vlevo, `03389a` (1,11) vpravo -> proti výkresu #6 je to zrcadlově: pevná část 1450 vlevo, dveře 1050 vpravo (panty vpravo, jak je máte v úpravách).
-- obývák `79a321` = #5 HS portál 2 x 1350 (vaše úprava: posuvná + pevná), kuchyň `d908c8` = #3 (750 OS + 1470 pevné).
-- ložnice `70936a` = #13 1087 + 1433; vaše úprava má druhou část pevnou, smlouva otevíravou (ponechána vaše).
+- **balkonové dveře jsou v obýváku a ve spodní ložnici** (uživatel): obývák 34b261 má dvoje okna na dlouhé stěně `66bca3` (8,7 m): `d90eeb` (1,39) vlevo = pevná část 1470 a `03389a` (1,11)
+  vpravo = dveře 1050 -> položka #4 (2520 x 2450), přesně jako výkres; na kratší stěně `71d017` (5,0 m) je `79a321` = #5 HS portál 2 x 1350 (vaše úprava: posuvná + pevná).
+  Spodní ložnice b3293e: obě okna na stěně `3ff743`: `84ff94` (0,97) vlevo = dveře 1050 (vaše úprava, panty vlevo) a `832eff` (1,23) vpravo = pevná část 1450 -> #6 (2500 x 2440), jako výkres.
+  (Ve smlouvě je #6 označeno "PRACOVNA", fyzicky je to spodní ložnice.)
+- kuchyň `d908c8` = #3 (750 OS + 1470 pevné).
+- ložnice nahoře `70936a` = #13: **podle PDF obě křídla otevíravá** (1087 + 1433, panty vlevo / vpravo) - přepisuje vaši dřívější úpravu (druhá část pevná).
 - 2NP: `0da02b` = #8 pokoj vpravo, `95853a` = #9 pokoj vlevo (stejné 733 + 987), `b6b99a` = #10 dětský pokoj vlevo, `fb2b7e` = #11 WC.
-- Nenapárováno: #4 (balkonové dveře 2520 x 2450), #7 kumbál 720 x 1195; `09f62a` (horní chodba) ve smlouvě není.
+- Nenapárováno: #7 kumbál 720 x 1195 - kumbál (vedle spodní ložnice, vchod z chodby naproti spodní koupelně) není ve scanu (limit 15 místností) a ve specifikaci nábytku v repozitáři není mezi `extra_rooms` (jen `Satna`, `Pracovna_dole`); spec zatím neumí okna u ručně přidané místnosti. `09f62a` (horní chodba) ve smlouvě není.
 
 ## V aplikaci
 - Rám oken: bílý uvnitř, antracitový zvenku (`WalkDoors.AddWindowFrame`), sloupek mezi částmi; části nestejně široké (`SectionEdit.width`, mm).

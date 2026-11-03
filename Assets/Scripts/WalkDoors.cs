@@ -265,15 +265,12 @@ public class WalkDoors
         float W = d.width, h = d.height - 0.01f;
         if (e.widthMm > 0f && e.heightMm > 0f)
         {
-            // the real frame size (from the order): centred in the scanned rough opening, on the 3 cm sill profile
+            // the real frame size (from the order): centred in the scanned rough opening (clamped to it), on the 3 cm sill profile
             float cw = e.widthMm / 1000f, ch = e.heightMm / 1000f;
-            if (cw <= d.width + 0.03f && ch <= d.height + 0.03f)
-            {
-                W = Mathf.Min(cw, d.width);
-                float lift = ch < 2.0f ? 0.03f : 0f;
-                h = Mathf.Min(ch, d.height - lift - 0.01f);
-                leftM += rM * ((d.width - W) / 2f) + Vector3.up * lift;
-            }
+            W = Mathf.Min(cw, d.width);                       // never bigger than the scanned opening
+            float lift = ch < 2.0f ? 0.03f : 0f;
+            h = Mathf.Min(ch, d.height - lift - 0.01f);
+            leftM += rM * ((d.width - W) / 2f) + Vector3.up * lift;
         }
         bool portal = d.height > 1.8f;            // floor-to-ceiling glazing (HS portal): handles at door height
         float handleH = portal ? HandleHeight : h * 0.5f;
