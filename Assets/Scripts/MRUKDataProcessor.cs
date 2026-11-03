@@ -10,6 +10,13 @@ using Meta.XR.MRUtilityKit;
 
 public static class MRUKDataProcessor
 {
+    // A loaded (non-live) scan's room anchors have no real OVR space handle, so every semantic-label query on
+    // them fails (logs a native ErrorHandleInvalid) every single time - and GetRoomLabel is called per room on
+    // every export pass and every door-panel refresh. Remember once that a room's anchors have nothing useful so
+    // later calls skip straight to the furniture heuristics instead of repeating a call that is never going to
+    // succeed for that room this session.
+    static readonly HashSet<Guid> NoSemanticLabels = new HashSet<Guid>();
+
     public static string GetRoomLabel(MRUKRoom room)
     {
         if (room == null) return "Unknown";
@@ -23,32 +30,39 @@ public static class MRUKDataProcessor
         // either. So these two tiers can only ever surface an object classification that happens to be
         // attached to the room's own anchors, not an actual room name; tier 3 below (furniture-based
         // heuristics) is what actually determines BEDROOM/KITCHEN/etc. today.
-        var classifications = new List<OVRSemanticLabels.Classification>();
-
-        // 1. Try to find an anchor that represents the room itself
-        var roomAnchor = room.Anchors.FirstOrDefault(a => a.Label.ToString().ToUpper() == "ROOM");
-        if (roomAnchor != null && roomAnchor.Anchor.TryGetComponent<OVRSemanticLabels>(out var roomSemantic))
+        if (!NoSemanticLabels.Contains(room.Anchor.Uuid))
         {
-            roomSemantic.GetClassifications(classifications);
-            foreach (var c in classifications)
-            {
-                string l = c.ToString().ToUpperInvariant();
-                if (l != "OTHER") return l;
-            }
-        }
+            var classifications = new List<OVRSemanticLabels.Classification>();
+            bool gotAny = false;
 
-        // 2. Fallback to existing semantic labels on any anchor
-        if (room.Anchor.TryGetComponent<OVRSemanticLabels>(out var semantic))
-        {
-            semantic.GetClassifications(classifications);
-            foreach (var c in classifications)
+            // 1. Try to find an anchor that represents the room itself
+            var roomAnchor = room.Anchors.FirstOrDefault(a => a.Label.ToString().ToUpper() == "ROOM");
+            if (roomAnchor != null && roomAnchor.Anchor.TryGetComponent<OVRSemanticLabels>(out var roomSemantic))
             {
-                string l = c.ToString().ToUpperInvariant();
-                if (l != "OTHER" && l != "STORAGE" && l != "CEILING" && l != "FLOOR" && !l.Contains("WALL"))
+                gotAny = true;
+                roomSemantic.GetClassifications(classifications);
+                foreach (var c in classifications)
                 {
-                    return l;
+                    string l = c.ToString().ToUpperInvariant();
+                    if (l != "OTHER") return l;
                 }
             }
+
+            // 2. Fallback to existing semantic labels on any anchor
+            if (room.Anchor.TryGetComponent<OVRSemanticLabels>(out var semantic))
+            {
+                gotAny = true;
+                semantic.GetClassifications(classifications);
+                foreach (var c in classifications)
+                {
+                    string l = c.ToString().ToUpperInvariant();
+                    if (l != "OTHER" && l != "STORAGE" && l != "CEILING" && l != "FLOOR" && !l.Contains("WALL"))
+                    {
+                        return l;
+                    }
+                }
+            }
+            if (!gotAny) NoSemanticLabels.Add(room.Anchor.Uuid);
         }
 
         // 2. MRUKAnchor Label
