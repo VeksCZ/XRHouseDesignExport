@@ -22,7 +22,7 @@ public class WalkDoors
     const float AutoOpenDist = 1.1f;     // edit mode: horizontal distance from the door's middle
     const float OpenSpeed = 2f;          // full open/close per second (~0.5 s); the garage door is slower
     const float TiltDeg = 8f;
-    static readonly Color LeafColor = new Color(0.62f, 0.42f, 0.22f);   // a touch more saturated brown than before
+    static readonly Color LeafColor = new Color(0.74f, 0.58f, 0.40f);   // door leaf: light brown (lighter, as asked)
     static readonly Color GarageColor = new Color(0.72f, 0.73f, 0.75f);
     /// <summary>Window glass - opening sashes and (WalkThroughMode) the fixed panes use the same look.</summary>
     internal static readonly Color GlassColor = new Color(0.70f, 0.85f, 1f, 0.35f);
@@ -92,6 +92,17 @@ public class WalkDoors
     }
 
     readonly List<Door> doors = new List<Door>();
+
+    // ---- exterior blinds (anthracite, in the reveal of every window in an outer wall) ----
+    const string BlindsPref = "Model.BlindsDown";
+    /// <summary>The exterior blinds are down (lowered over the windows); remembered. They slide up / down by themselves.</summary>
+    public static bool BlindsDown
+    {
+        get { try { return PlayerPrefs.GetInt(BlindsPref, 0) == 1; } catch { return false; } }
+        set { try { PlayerPrefs.SetInt(BlindsPref, value ? 1 : 0); PlayerPrefs.Save(); } catch { } }
+    }
+    class Blind { public Transform pivot; public float full, down; }
+    readonly List<Blind> blinds = new List<Blind>();
     readonly List<GameObject> created = new List<GameObject>();
     readonly List<Material> materials = new List<Material>();
     /// <summary>The plain door/window panels replaced by real leaves - the walk-through keeps them hidden.</summary>
@@ -196,7 +207,7 @@ public class WalkDoors
         }
     }
 
-    static readonly Color FrameColor = new Color(0.92f, 0.91f, 0.88f);
+    static readonly Color FrameColor = new Color(0.62f, 0.42f, 0.22f);   // door frame: the saturated brown
     const float FrameWidth = 0.06f, FrameDepth = 0.12f;
 
     const float EntranceMinW = 1.35f, EntranceMaxW = 1.70f, SidelightW = 0.40f, EntranceTotalH = 2.195f, EntranceThickness = 0.06f;
@@ -263,6 +274,7 @@ public class WalkDoors
         DoorCatalog.LeftFrame(d, e, out var left, out var toRight, out var swing);
         Vector3 leftM = M(left), rM = g * toRight, sM = g * swing;
         float W = d.width, h = d.height - 0.01f;
+        Vector3 openLeftM = leftM;                          // the scanned opening's left jamb at the sill (before the real frame size)
         if (e.widthMm > 0f && e.heightMm > 0f)
         {
             // the real frame size (from the order): centred in the scanned rough opening (also where it is bigger), on the 3 cm sill profile
@@ -310,6 +322,53 @@ public class WalkDoors
             doors.Add(door);
         }
         AddWindowFrame(visual, layer, leftM, rM, sM, W, h, DoorCatalog.Sections(e).Select(x => x.f1).ToList());
+        bool exterior = d.roomFront == null || d.roomBack == null;
+        if (exterior && d.height > 0.3f)
+        {
+            Vector3 nM = g * d.normal;                      // points into the front room
+            AddBlind(visual, layer, openLeftM, rM, d.roomFront != null ? -nM : nM, d.width, d.height);
+        }
+    }
+
+    const float BlindBox = 0.17f, BlindRail = 0.03f, BlindDepth = 0.12f;
+
+    /// <summary>An exterior blind in the reveal of a window in an outer wall (the wall is as thick as the spec's "exterior"):
+    /// a head box at the top of the opening and two guide rails at its outer end, anthracite, and the curtain that slides down
+    /// to the sill (<see cref="BlindsDown"/>). 'outN' points to the outside.</summary>
+    void AddBlind(GameObject visual, int layer, Vector3 openLeftM, Vector3 rM, Vector3 outN, float openW, float openH)
+    {
+        float wall = Mathf.Max(0.2f, XRModelFactory.ExteriorWallThickness);
+        Vector3 baseP = openLeftM + outN * (wall - BlindDepth / 2f - 0.01f);   // at the outer end of the reveal, left jamb, sill
+        Quaternion rot = Quaternion.LookRotation(rM, Vector3.up);
+        float railH = openH - BlindBox;
+        var parts = new List<XRMeshPart>();
+        void Box(Vector3 c, Vector3 size) { var p = XRModelFactory.CreateBoxPart("BLIND", c, rot, size, "DOORLEAF", Vector3.zero, 0f); p.color = AnthraciteColor; parts.Add(p); }
+        Box(baseP + rM * (openW / 2f) + Vector3.up * (openH - BlindBox / 2f), new Vector3(BlindDepth, BlindBox, openW));                 // head box
+        Box(baseP + rM * (BlindRail / 2f) + Vector3.up * (railH / 2f), new Vector3(0.04f, railH, BlindRail));                              // guide rails
+        Box(baseP + rM * (openW - BlindRail / 2f) + Vector3.up * (railH / 2f), new Vector3(0.04f, railH, BlindRail));
+        var model = new XRHouseModel();
+        model.rooms.Add(new XRRoomModel { roomName = "BlindBox", parts = parts });
+        var go = UnityModelLoader.LoadToScene(model, shaded: true);
+        go.transform.SetParent(visual.transform, false);
+        foreach (var t in go.GetComponentsInChildren<Transform>()) t.gameObject.layer = layer;
+        created.Add(go);
+        // the curtain: a unit-high box hanging from a pivot under the head box, scaled in y (up = nothing shows, down = to the sill)
+        var pivot = new GameObject("BlindCurtain");
+        pivot.layer = layer;
+        pivot.transform.SetParent(visual.transform, false);
+        pivot.transform.localPosition = baseP + rM * (openW / 2f) + Vector3.up * railH;
+        created.Add(pivot);
+        var cp = XRModelFactory.CreateBoxPart("BLIND_CURTAIN", new Vector3(0f, -0.5f, 0f), rot, new Vector3(0.02f, 1f, openW - 2f * BlindRail), "DOORLEAF", Vector3.zero, 0f);
+        cp.color = AnthraciteColor * 0.92f;
+        var cm = new XRHouseModel();
+        cm.rooms.Add(new XRRoomModel { roomName = "BlindCurtain", parts = new List<XRMeshPart> { cp } });
+        var cgo = UnityModelLoader.LoadToScene(cm, shaded: true);
+        cgo.transform.SetParent(pivot.transform, false);
+        foreach (var t in cgo.GetComponentsInChildren<Transform>()) t.gameObject.layer = layer;
+        float down = BlindsDown ? 1f : 0f;
+        pivot.transform.localScale = new Vector3(1f, Mathf.Max(0.001f, railH * down), 1f);
+        pivot.SetActive(down > 0.005f);
+        blinds.Add(new Blind { pivot = pivot.transform, full = railH, down = down });
     }
 
     const float WinFrameW = 0.065f, WinFrameD = 0.09f, MullionW = 0.05f;
@@ -508,6 +567,15 @@ public class WalkDoors
     public bool Tick(Vector3 headLocal, float dt, bool autoOpen)
     {
         bool moved = false;
+        float bt = BlindsDown ? 1f : 0f;
+        foreach (var b in blinds)
+        {
+            if (b.pivot == null) continue;
+            if (!Mathf.Approximately(b.down, bt)) b.down = Mathf.MoveTowards(b.down, bt, dt * 0.35f);   // ~3 s up / down
+            bool vis = b.down > 0.005f;
+            if (b.pivot.gameObject.activeSelf != vis) b.pivot.gameObject.SetActive(vis);
+            if (vis) b.pivot.localScale = new Vector3(1f, b.full * b.down, 1f);
+        }
         foreach (var d in doors.Concat(furnitureDoors))
         {
             bool target = d.manual;
@@ -559,6 +627,7 @@ public class WalkDoors
 
     public void Clear()
     {
+        blinds.Clear();
         foreach (var r in Suppressed) if (r) r.enabled = true;
         Suppressed.Clear();
         foreach (var c in suppressedColliders) if (c) c.enabled = true;

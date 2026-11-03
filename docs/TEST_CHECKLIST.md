@@ -65,3 +65,8 @@ Když něco nevyjde, napište mi (nebo PC session) číslo bodu a log (`Logs/Que
 29. Vchodové dveře (otvor 1,35-1,70 m, v Novostavbě `5cdd3e`, 1,49 m): vlevo (zevnitř) pevný matný světlík 40 cm, vpravo křídlo 1,08 m s úzkým okénkem a dvěma
     příčnými lištami; venku bílé a dlouhá inox tyč, uvnitř antracit a klika; otevírají se ven; zárubeň antracit; nad dveřmi (2,195 m) vyplněný antracitový pás.
     Pokud se křídlo otevírá dovnitř, nebo je světlík na druhé straně, napište mi to.
+
+## Vchodové dveře, okna, žaluzie (2026-11-03)
+30. **Venkovní žaluzie**: View > **Exterior blinds** (antracit): v otvorech oken ve vnějších zdech se plynule (~3 s) spustí / vytáhnou lamely do parapetu; nahoře zůstane kastlík
+    (17 cm) a vodicí lišty v ostění na vnějším konci (zeď 50 cm). Pokud je kastlík vidět jinak než chcete, napište, kam má sedět (výška, hloubka).
+31. Barvy dveří: křídla světlejší hnědá, **zárubně** sytá hnědá (vchodové dveře: antracit / bílá).

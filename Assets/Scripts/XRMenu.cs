@@ -51,7 +51,7 @@ public class XRMenu : MonoBehaviour
     Button scanLabelButton;
     // Every button that shows a state is synced every frame (SyncToggleTints) from what is really on - a toggle can
     // also change from elsewhere (a panel's own Close, a shortcut, a scan change), and a per-frame sync never goes stale.
-    Button dollhouseButton, plansButton, scanOverlayButton, saveButton, exportButton, alignButton, finishedButton, modeButton, nextFloorButton, miniMapButton, walkButton, showRoutesButton, showPhotosButton, fittingsButton, photoMarkersButton;
+    Button dollhouseButton, plansButton, scanOverlayButton, saveButton, exportButton, alignButton, finishedButton, blindsButton, modeButton, nextFloorButton, miniMapButton, walkButton, showRoutesButton, showPhotosButton, fittingsButton, photoMarkersButton;
     XRRayInteractor rightRay;
     float flickCooldown;
     bool menuPlaced;
@@ -176,6 +176,7 @@ public class XRMenu : MonoBehaviour
         modeButton = XRUi.CreateButton(view, "", X2(0), m0, w2, h, OnCycleDollhouseMode, 22);
         nextFloorButton = XRUi.CreateButton(view, "Next floor", X2(1), m0, w2, h, OnNextFloor, 22);
         finishedButton = XRUi.CreateButton(view, "Finished floors\n<size=72%><color=#9aa6b8>off = bare shell, for pipes</color></size>", X2(0), m0 + h + gap, w2, h, () => SetFinished(!Furniture.Finished), 22);
+        blindsButton = XRUi.CreateButton(view, "Exterior blinds\n<size=72%><color=#9aa6b8>down / up on the windows (Walk)</color></size>", X2(1), m0 + h + gap, w2, h, () => { WalkDoors.BlindsDown = !WalkDoors.BlindsDown; AddLog(WalkDoors.BlindsDown ? "Blinds: going down" : "Blinds: going up"); }, 22);
 
         // ---- Layers: what is drawn on the walls (real walls, Walk and Dollhouse alike) ----
         layersText = XRUi.CreateText(layers, "Where", "", 18, TextAlignmentOptions.TopLeft, Pad + 4, y0 - cap, ContentW - 8, 56, XRUi.MutedText);
@@ -700,6 +701,7 @@ public class XRMenu : MonoBehaviour
         if (scanButton != null) XRUi.SetTint(scanButton, scanning ? XRUi.ButtonOnColor : XRUi.ButtonColor);
         // rough shell (off) | finished floors (on) - one switch
         XRUi.SetToggle(finishedButton, Furniture.Finished);
+        XRUi.SetToggle(blindsButton, WalkDoors.BlindsDown);
         SyncNextFloorButton();
         SyncAlignButton();
     }
