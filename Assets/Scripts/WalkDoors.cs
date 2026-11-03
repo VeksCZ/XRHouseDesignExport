@@ -300,6 +300,39 @@ public class WalkDoors
             }
             doors.Add(door);
         }
+        AddWindowFrame(visual, layer, leftM, rM, sM, W, h, DoorCatalog.Sections(e).Select(x => x.f1).ToList());
+    }
+
+    const float WinFrameW = 0.065f, WinFrameD = 0.09f, MullionW = 0.05f;
+
+    /// <summary>The window's frame: the outer profile and a post between the parts, white on the room side (RAL 9016) and
+    /// anthracite on the outside (Veka Softline 82, "Bila / Antracit hladky"). 'interiorM' points into the room.</summary>
+    void AddWindowFrame(GameObject visual, int layer, Vector3 leftM, Vector3 rM, Vector3 interiorM, float W, float h, List<float> splits)
+    {
+        Quaternion rot = Quaternion.LookRotation(rM, Vector3.up);
+        Vector3 face = Vector3.Cross(Vector3.up, rM);
+        Vector3 inN = Vector3.Dot(face, interiorM) >= 0f ? face : -face, outN = -inN;
+        var parts = new List<XRMeshPart>();
+        void Span(float a0, float a1, float y0, float y1)
+        {
+            if (a1 - a0 < 0.003f || y1 - y0 < 0.003f) return;
+            Vector3 c = leftM + rM * ((a0 + a1) / 2f) + Vector3.up * ((y0 + y1) / 2f);
+            var sz = new Vector3(WinFrameD / 2f, y1 - y0, a1 - a0);
+            var inside = XRModelFactory.CreateBoxPart("WINDOW_FRAME", c + inN * (WinFrameD / 4f), rot, sz, "DOORLEAF", Vector3.zero, 0f); inside.color = WhiteColor;
+            var outside = XRModelFactory.CreateBoxPart("WINDOW_FRAME", c + outN * (WinFrameD / 4f), rot, sz, "DOORLEAF", Vector3.zero, 0f); outside.color = AnthraciteColor;
+            parts.Add(inside); parts.Add(outside);
+        }
+        float fw = Mathf.Min(WinFrameW, Mathf.Min(W / 4f, h / 4f));
+        Span(0f, fw, 0f, h); Span(W - fw, W, 0f, h);          // jambs
+        Span(fw, W - fw, h - fw, h); Span(fw, W - fw, 0f, fw); // head, sill
+        foreach (float f in splits) if (f > 0.01f && f < 0.99f) Span(f * W - MullionW / 2f, f * W + MullionW / 2f, fw, h - fw);
+        if (parts.Count == 0) return;
+        var model = new XRHouseModel();
+        model.rooms.Add(new XRRoomModel { roomName = "WindowFrame", parts = parts });
+        var go = UnityModelLoader.LoadToScene(model, shaded: true);
+        go.transform.SetParent(visual.transform, false);
+        foreach (var t in go.GetComponentsInChildren<Transform>()) t.gameObject.layer = layer;
+        created.Add(go);
     }
 
     Leaf Hinged(GameObject visual, int layer, Door door, Vector3 hinge, Vector3 toOther, Vector3 swing, float width, float h, float handleH, LeafStyle? styleOverride = null)

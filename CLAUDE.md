@@ -155,6 +155,8 @@ and exports 3D models, floor plans and reports from the scan.
   with a frame filling the rest; hinged leaves open as wide as a sphere sweep allows (up to 120 deg, `FreeSwing`); frames leave out the jamb at a room corner. A single
   door 1.35-1.70 m wide is the **entrance door** (`BuildEntrance`, Aluprof 1480 x 2195: fixed 400 mm matte sidelight + leaf, white outside / anthracite inside, inox bar,
   opens OUTWARD whatever the edit says).
+- **Windows** (walk-through): frame white inside / anthracite outside (`AddWindowFrame`, Veka Softline 82 from the contract in `docs/novostavba/OKNA_RYZI.md`); window parts can have
+  unequal widths (`SectionEdit.width`, relative, 0 = equal share). `Tools/apply_contract_windows.py` writes the contract's parts into a COPY of an edits file.
 - **Logs**: headset session logs are in `persistentDataPath/Logs` (menu "Pull logs from Quest" -> `Logs/Quest`),
   never in the export folder.
 - **Build + install to a USB Quest**: call `MRUKExporter.EditorFastBuildAndInstall()` (e.g. via the Unity MCP

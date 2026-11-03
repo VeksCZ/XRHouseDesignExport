@@ -241,7 +241,14 @@ public static class DoorCatalog
             : e.kind == DoorKind.Double
                 ? new List<SectionEdit> { new SectionEdit { kind = DoorKind.Single, hinge = HingeSide.Left }, new SectionEdit { kind = DoorKind.Single, hinge = HingeSide.Right } }
                 : new List<SectionEdit> { new SectionEdit { kind = e.kind, hinge = e.hinge } };
-        for (int i = 0; i < secs.Count; i++) list.Add((secs[i], i / (float)secs.Count, (i + 1) / (float)secs.Count));
+        // each part's share: its own width when given (0 = an equal share, 1 unit), normalised to the whole window
+        float total = 0f; foreach (var x in secs) total += x.width > 0f ? x.width : 1f;
+        float at = 0f;
+        for (int i = 0; i < secs.Count; i++)
+        {
+            float f0 = at / total; at += secs[i].width > 0f ? secs[i].width : 1f;
+            list.Add((secs[i], f0, i == secs.Count - 1 ? 1f : at / total));
+        }
         return list;
     }
 

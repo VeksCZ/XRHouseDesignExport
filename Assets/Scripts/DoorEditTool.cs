@@ -628,7 +628,7 @@ public class DoorEditTool : MonoBehaviour
             if (e == null) { e = GuessedEdit(d); edits.doors.Add(e); }
             if (e.sections == null || e.sections.Count == 0)
                 e.sections = e.kind == DoorKind.Wall ? new List<SectionEdit> { new SectionEdit() }
-                    : DoorCatalog.Sections(e).Select(x => new SectionEdit { kind = x.s.kind, hinge = x.s.hinge }).ToList();
+                    : DoorCatalog.Sections(e).Select(x => new SectionEdit { kind = x.s.kind, hinge = x.s.hinge, width = x.s.width }).ToList();
             mutate(e.sections);
             e.kind = DoorKind.Single; // "a window made of parts" (not walled up)
         });

@@ -81,6 +81,8 @@ public class SectionEdit
 {
     public DoorKind kind = DoorKind.Fixed;
     public HingeSide hinge = HingeSide.Left;
+    /// <summary>This part's share of the window's width (any unit, e.g. mm); 0 = an equal share. Parts of 750 + 1470 split 750 : 1470.</summary>
+    public float width;
 }
 public enum HingeSide { Left, Right }
 
