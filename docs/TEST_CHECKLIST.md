@@ -60,3 +60,8 @@ Když něco nevyjde, napište mi (nebo PC session) číslo bodu a log (`Logs/Que
 ## PERF log (po 5+ minutách používání)
 28. V `Logs/Quest` hledejte řádky `PERF calls:` – `validRooms(hit/miss/loading)`: hodně `miss` nebo velké `computeMs` mimo načítání scanu =
     zbytečný přepočet; `overlayRebuilds` vysoké ve stoje = pohledy se přestavují zbytečně. Pošlete mi je.
+
+## Vchodové dveře (2026-11-03)
+29. Vchodové dveře (otvor 1,35-1,70 m, v Novostavbě `5cdd3e`, 1,49 m): vlevo (zevnitř) pevný matný světlík 40 cm, vpravo křídlo 1,08 m s úzkým okénkem a dvěma
+    příčnými lištami; venku bílé a dlouhá inox tyč, uvnitř antracit a klika; otevírají se ven; zárubeň antracit; nad dveřmi (2,195 m) vyplněný antracitový pás.
+    Pokud se křídlo otevírá dovnitř, nebo je světlík na druhé straně, napište mi to.

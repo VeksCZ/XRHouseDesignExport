@@ -151,6 +151,10 @@ and exports 3D models, floor plans and reports from the scan.
   (V2 face / V1 entity inserted in `wallUuids`); the walk-through keeps your spot over a reload (`TryGetFeetInRoom`, room + room-local point).
 - **Sliding furniture parts** (shower doors, spec glass `{"side":"front","sliding":true}`): parts named `@slide...`
   move in the walk-through (WalkDoors.SetFurnitureSliders) - open when you come close or on the trigger.
+- **Door leaves in the walk-through** (`WalkDoors`): a single door gets a standard 80 cm leaf (70 / 90 in a narrow / wide opening, 205 high) inside the scanned rough opening
+  with a frame filling the rest; hinged leaves open as wide as a sphere sweep allows (up to 120 deg, `FreeSwing`); frames leave out the jamb at a room corner. A single
+  door 1.35-1.70 m wide is the **entrance door** (`BuildEntrance`, Aluprof 1480 x 2195: fixed 400 mm matte sidelight + leaf, white outside / anthracite inside, inox bar,
+  opens OUTWARD whatever the edit says).
 - **Logs**: headset session logs are in `persistentDataPath/Logs` (menu "Pull logs from Quest" -> `Logs/Quest`),
   never in the export folder.
 - **Build + install to a USB Quest**: call `MRUKExporter.EditorFastBuildAndInstall()` (e.g. via the Unity MCP
