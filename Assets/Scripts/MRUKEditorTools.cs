@@ -284,6 +284,56 @@ public static class MRUKEditorTools {
         Debug.Log("<color=green>App icon set for Android (Legacy, Round, Adaptive) - rebuild to see it on the Quest.</color>");
     }
 
+    /// <summary>The reverse of Pull: sends a PC scan folder (Exports/RoomData/Scan_&lt;name&gt; or Export_&lt;name&gt;) to the
+    /// headset as a new saved scan (ScanCache/&lt;name&gt;.scene.json etc., the Quest's flat layout - see MRUKSceneCache,
+    /// FolderMode is PC-only) - for trying a PC-made copy (e.g. a cleanup edit) in the headset without touching any
+    /// scan already there. Adds a new entry in the scan list; never overwrites an existing one with a different source.</summary>
+    [MenuItem("MRUK/5c. Push Scan to Quest", false, 33)]
+    public static void PushScanToQuestMenu() {
+        string root = Path.GetFullPath("Exports/RoomData");
+        string picked = EditorUtility.OpenFolderPanel("Pick a scan folder to push to the Quest", root, "");
+        if (!string.IsNullOrEmpty(picked)) PushScanToQuest(picked);
+    }
+
+    /// <summary>Batch mode: -executeMethod MRUKEditorTools.PushScanToQuestBatch -scan "Scan_Name" (relative to Exports/RoomData, or an absolute path).</summary>
+    public static void PushScanToQuestBatch() {
+        string arg = null;
+        var a = Environment.GetCommandLineArgs();
+        for (int i = 0; i + 1 < a.Length; i++) if (a[i] == "-scan") arg = a[i + 1];
+        if (string.IsNullOrEmpty(arg)) { Debug.LogError("<color=red>PushScanToQuestBatch: pass -scan \"<folder>\".</color>"); return; }
+        string dir = Path.IsPathRooted(arg) ? arg : Path.Combine(Path.GetFullPath("Exports/RoomData"), arg);
+        PushScanToQuest(dir);
+    }
+
+    public static void PushScanToQuest(string localDir) {
+        string scene = Path.Combine(localDir, MRUKPathUtility.DATA_SCENE);
+        if (!File.Exists(scene)) { Debug.LogError($"<color=red>No {MRUKPathUtility.DATA_SCENE} in {localDir}.</color>"); return; }
+        string folderName = Path.GetFileName(localDir.TrimEnd('/', '\\'));
+        string name = folderName.StartsWith(MRUKSceneCache.ScanFolderPrefix) ? folderName.Substring(MRUKSceneCache.ScanFolderPrefix.Length)
+            : folderName.StartsWith("Export_") ? folderName.Substring("Export_".Length) : folderName;
+        string remoteRoot = $"{RemoteAppFiles}/ScanCache";
+        if (!RunAdb($"shell mkdir -p \"{remoteRoot}\"")) { Debug.LogError("<color=red>Push failed (is the Quest connected?).</color>"); return; }
+        bool ok = true;
+        void PushOne(string local, string ext) {
+            if (!File.Exists(local)) return;
+            string staged = $"/sdcard/Download/_push_{Guid.NewGuid():N}";
+            string final = $"{remoteRoot}/{name}{ext}";
+            // A direct "adb push" straight into ScanCache fails ("remote fchown failed") when the file doesn't
+            // already exist there - the dir is shell-writable but adb's push tries (and isn't allowed) to chown
+            // new files to the app's uid. Stage in the public Download folder, then `cp`/`chmod` as the shell user
+            // (no chown involved) - same trick as the files the app itself already has there.
+            ok &= RunAdb($"push \"{local}\" \"{staged}\"");
+            ok &= RunAdb($"shell \"cp '{staged}' '{final}'\"");
+            ok &= RunAdb($"shell \"chmod 666 '{final}'\"");
+            RunAdb($"shell \"rm '{staged}'\"");
+        }
+        PushOne(scene, MRUKSceneCache.EXTENSION);
+        PushOne(Path.Combine(localDir, MRUKPathUtility.DATA_EDITS), HouseEditsStore.EXTENSION);
+        PushOne(Path.Combine(localDir, MRUKPathUtility.DATA_FURNITURE), MRUKSceneCache.FurnitureExtension);
+        if (ok) Debug.Log($"<color=green>Pushed '{name}' to the Quest's saved scans - pick it in the scan list.</color>");
+        else Debug.LogError("<color=red>Push failed (is the Quest connected?).</color>");
+    }
+
     [MenuItem("MRUK/8. Open Exports Folder", false, 50)]
     public static void OpenExportsFolder() {
         string path = Path.GetFullPath("Exports/RoomData");

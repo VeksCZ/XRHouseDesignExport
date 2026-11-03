@@ -58,6 +58,7 @@ public partial class DesktopWalkApp
                     "detect" => !DetectRoutes().Contains("failed") && ExportWallDrawings(false, outDir) != null,
                     "adddoor" => await TestAddDoor(),
                     "addwall" => await TestAddWall(Arg("-room"), Arg("-walls")),
+                    "wallview" => await TestWallView(Arg("-wall"), outDir),
                     "menu" => await TestMenu(outDir),
                     "niches" => await TestNiches(outDir),
                     _ => false,
@@ -138,6 +139,35 @@ public partial class DesktopWalkApp
         var bar = GameObject.Find("EditToolbar");
         if (bar != null) { Put(bar.transform, 0.45f, 0f); await Shot(Path.Combine(outDir, "toolbar.png")); }
         return true;
+    }
+
+    /// <summary>wallview -wall &lt;uuid prefix&gt;: stands 1.2 m inside the wall's own room, facing it, and shoots one PNG -
+    /// for checking a specific wall (e.g. a seam from a neighbouring wing's wall showing through) without hand-picked
+    /// world coordinates, which the furniture spec's model-space frame makes easy to get wrong.</summary>
+    async Task<bool> TestWallView(string wallPrefix, string outDir)
+    {
+#if META_XR_SDK_INSTALLED
+        var rooms = MRUKDataProcessor.GetValidRooms(MRUK.Instance);
+        MRUKAnchor wall = null; MRUKRoom owner = null;
+        foreach (var r in rooms)
+        {
+            var w = r.WallAnchors.FirstOrDefault(a => a != null && a.Anchor.Uuid.ToString().StartsWith(wallPrefix, StringComparison.OrdinalIgnoreCase));
+            if (w != null) { wall = w; owner = r; break; }
+        }
+        if (wall == null || !wall.PlaneRect.HasValue) { Debug.Log($"TEST wallview: wall {wallPrefix} not found"); return false; }
+        var rc = wall.PlaneRect.Value; var t = wall.transform;
+        Vector3 center = t.TransformPoint(new Vector3((rc.xMin + rc.xMax) / 2f, rc.yMin, 0f));
+        float floorY = owner.FloorAnchors.Count > 0 ? owner.FloorAnchors.Min(f => f.transform.position.y) : center.y - 1.5f;
+        Vector3 standPos = center + t.forward * 1.2f;   // wall anchors face into their own room (WallScan's convention)
+        standPos.y = floorY + 1.2f;
+        Vector3 lookDir = new Vector3(center.x - standPos.x, 0f, center.z - standPos.z);
+        await StandAt(standPos, Yaw(lookDir), -15f);
+        await Shot(Path.Combine(outDir, $"wall_{wallPrefix}.png"));
+        return true;
+#else
+        await Task.Yield();
+        return false;
+#endif
     }
 
     /// <summary>addwall -room &lt;uuid prefix&gt; -walls &lt;wallUuidPrefix1,wallUuidPrefix2&gt;: closes the gap at the loose

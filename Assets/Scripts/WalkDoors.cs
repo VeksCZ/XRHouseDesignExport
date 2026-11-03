@@ -22,7 +22,7 @@ public class WalkDoors
     const float AutoOpenDist = 1.1f;     // edit mode: horizontal distance from the door's middle
     const float OpenSpeed = 2f;          // full open/close per second (~0.5 s); the garage door is slower
     const float TiltDeg = 8f;
-    static readonly Color LeafColor = new Color(0.62f, 0.45f, 0.28f);
+    static readonly Color LeafColor = new Color(0.62f, 0.42f, 0.22f);   // a touch more saturated brown than before
     static readonly Color GarageColor = new Color(0.72f, 0.73f, 0.75f);
     /// <summary>Window glass - opening sashes and (WalkThroughMode) the fixed panes use the same look.</summary>
     internal static readonly Color GlassColor = new Color(0.70f, 0.85f, 1f, 0.35f);
@@ -261,11 +261,16 @@ public class WalkDoors
     }
 
     static readonly float[] SweepHeights = { 0.15f, 1.0f, 1.9f };
+    // The lever handle sticks out roughly LeafThickness/2 + 0.035 (its base offset) + ~0.02 (its own half-size) from
+    // the leaf's centre-plane - a plain 2 cm sweep along the leaf's own edge missed it, so the handle could swing
+    // into a wall the leaf itself still cleared ("the handle sinks into the door").
+    const float HandleProtrusion = 0.08f;
 
-    /// <summary>How far a leaf can swing open before it touches a wall (or anything else in the walk model): the leaf's line
-    /// (a 4 cm sphere swept from the hinge to the free end, at three heights) is turned in 2-degree steps up to
-    /// <see cref="MaxSwingDeg"/>; the first step that hits ends it (minus a 4-degree margin, never under 60). A hit right
-    /// at the start is more likely the frame or the jamb than a real obstacle - then the default angle is used.</summary>
+    /// <summary>How far a leaf can swing open before it (or its handle) touches a wall (or anything else in the walk
+    /// model): a sphere big enough to cover the handle's protrusion, swept from the hinge to the free end at three
+    /// heights, is turned in 2-degree steps up to <see cref="MaxSwingDeg"/>; the first step that hits ends it (minus a
+    /// 4-degree margin, never under 60). A hit right at the start is more likely the frame or the jamb than a real
+    /// obstacle - then the default angle is used.</summary>
     float FreeSwing(GameObject visual, int layer, Vector3 hinge, Vector3 toOther, float sign, float width, float h)
     {
         var t = visual.transform;
@@ -279,7 +284,7 @@ public class WalkDoors
             {
                 if (y > h) continue;
                 Vector3 o = t.TransformPoint(hinge + Vector3.up * y) + dir * 0.05f;
-                if (!Physics.SphereCast(o, 0.02f, dir, out _, len, mask, QueryTriggerInteraction.Ignore)) continue;
+                if (!Physics.SphereCast(o, HandleProtrusion, dir, out _, len, mask, QueryTriggerInteraction.Ignore)) continue;
                 if (deg <= 12) return DefaultSwingDeg;
                 return Mathf.Clamp(deg - 4f, 60f, MaxSwingDeg);
             }
