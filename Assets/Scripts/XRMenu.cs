@@ -772,10 +772,15 @@ public class XRMenu : MonoBehaviour
 
         if (layersText != null && exporter != null)
         {
+            // Not aligned splits into two different things: Align was never tried (picking a scan always starts
+            // with it off, so this is the normal state right after picking one) vs. it was tried and found no
+            // room in common with where you're standing (genuinely a different place).
             string t = MRUKExporter.Loading ? "Loading the scan..."
                 : exporter.WorldAligned
                     ? "<color=#7fe07f>On the real walls here</color>, in Walk and in the Dollhouse. Point at a route or box to see what it is."
-                    : "<color=#ffa040>This scan is of another place</color> - layers show in Walk and the Dollhouse only. Real-wall layers need this scan lined up with the place you stand in: press Align to real walls, or pick that place's scan.";
+                : !exporter.AlignEnabled
+                    ? "<color=#9aa6b8>Not lined up with the real walls yet</color> - layers show in Walk and the Dollhouse only. Press Align to real walls if you are standing in this scan's place."
+                    : "<color=#ffa040>This scan is of another place</color> - layers show in Walk and the Dollhouse only. No room here matched the live scan; pick that place's scan instead.";
             if (!string.IsNullOrEmpty(WallScan.Status)) t += $"  <color=#9ecbff>{WallScan.Status}</color>";
             if (t != layersShown) { layersShown = t; layersText.text = t; }
         }
@@ -785,6 +790,7 @@ public class XRMenu : MonoBehaviour
             string place = MRUKExporter.Loading ? "loading..."
                 : exporter.ActiveSource != exporter.SelectedSource ? "<color=#ffb050>not loaded</color>"
                 : exporter.WorldAligned ? "<color=#6fe08f>lined up here</color>"
+                : !exporter.AlignEnabled ? "<color=#9aa6b8>not aligned - press Align</color>"
                 : "<color=#ffb050>another place</color>";
             string save = live && (PendingChanges.LiveUnsaved || HouseEditsStore.LiveHasEdits) ? "  ·  <color=#ffb050>not saved</color>" : "";
             string exp = PendingChanges.ExportPending ? "  ·  <color=#ffb050>not exported</color>" : "";

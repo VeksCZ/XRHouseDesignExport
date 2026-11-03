@@ -15,7 +15,7 @@ using UnityEngine;
 public static class XRLogger
 {
     const int KeepSessions = 5;
-    const long MaxBytes = 8L * 1024 * 1024;
+    const long MaxBytes = 32L * 1024 * 1024;
 
     static readonly ConcurrentQueue<string> queue = new ConcurrentQueue<string>();
     static readonly AutoResetEvent wake = new AutoResetEvent(false);
