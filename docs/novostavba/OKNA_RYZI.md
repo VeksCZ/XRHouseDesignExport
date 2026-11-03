@@ -33,7 +33,7 @@ Poloha vlevo / vpravo je určená z geometrie scanu při pohledu zevnitř místn
 - kuchyň `d908c8` = #3 (750 OS + 1470 pevné).
 - ložnice nahoře `70936a` = #13: **podle PDF obě křídla otevíravá** (1087 + 1433, panty vlevo / vpravo) - přepisuje vaši dřívější úpravu (druhá část pevná).
 - 2NP: `0da02b` = #8 pokoj vpravo, `95853a` = #9 pokoj vlevo (stejné 733 + 987), `b6b99a` = #10 dětský pokoj vlevo, `fb2b7e` = #11 WC.
-- Nenapárováno: #7 kumbál 720 x 1195 - kumbál (vedle spodní ložnice, vchod z chodby naproti spodní koupelně) není ve scanu (limit 15 místností) a ve specifikaci nábytku v repozitáři není mezi `extra_rooms` (jen `Satna`, `Pracovna_dole`); spec zatím neumí okna u ručně přidané místnosti. `09f62a` (horní chodba) ve smlouvě není.
+- #7 kumbál 720 x 1195 = `Pracovna_dole` (ručně přidaná místnost): okno na delší stěně `+z` směrem ke garáži, střed ~1 m za koncem garáže (x = -4,71; garáž `walls.x0` = -3,71); parapet 0,95 m je odhad. Zapsáno do `docs/novostavba/95_Data_Furniture.proposed.json` (`extra_rooms` > `walls` > `windows`), kód: `Furniture.cs`. Nenapárováno: `09f62a` (horní chodba) ve smlouvě není.
 
 ## V aplikaci
 - Rám oken: bílý uvnitř, antracitový zvenku (`WalkDoors.AddWindowFrame`), sloupek mezi částmi; části nestejně široké (`SectionEdit.width`, mm).

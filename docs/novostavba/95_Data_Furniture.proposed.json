@@ -1,6 +1,19 @@
 {
-  "floor_buildup": [0.23, 0.12],
-  "suspended_ceilings": [{"rooms": ["3BF3", "93EE", "Satna"], "h": 2.5, "note": "podhled v koupelne, WC a satne nahore, 2.5 m nad hotovou podlahou; jinde nahore sikmy strop"}],
+  "floor_buildup": [
+    0.23,
+    0.12
+  ],
+  "suspended_ceilings": [
+    {
+      "rooms": [
+        "3BF3",
+        "93EE",
+        "Satna"
+      ],
+      "h": 2.5,
+      "note": "podhled v koupelne, WC a satne nahore, 2.5 m nad hotovou podlahou; jinde nahore sikmy strop"
+    }
+  ],
   "floor_buildup_note": "skladba podlahy nad hrubou podlahou (scan = hruba stavba): prizemi ~23 cm, patro ~12 cm",
   "note": "Koupelna + WC v patre podle vizualizace koupelny (koupelny.cz). Mira v metrech; along = od rohu s mensi souradnici (od horni steny pro -x/+x, od leve steny pro -z/+z v pohledu shora). Kuchyn v obyvaku (34B2) podle nahledu: L-linka s drezem pod oknem, vitrina, trouba+mikrovlnka, lednice, varna deska vlevo, ostruvek. Sprchovy kout: vstup zepredu, posuvne dvere. Komin podle meshe (volne stojici ~0.4 m od steny), rohovy krb vlevo od nej u steny. Sprchovy kout: vstup zepredu, posuvne dvere. Komin podle meshe (volne stojici ~0.4 m od steny), rohovy krb vlevo od nej u steny. extra_rooms: neskenovane mistnosti (satna nahore, mistnost dole) - podlaha, strop a jen vnejsi zdi. Obyvak: TV vpravo od krbu, rohova sedacka v protejsim rohu, jidelni stul se 6 zidlemi. Loznice B329/6DF8 dvojpostel, detske pokoje E040/1C9C postel u steny se dvermi a psaci stul pod oknem. WC dole v BA36 (vlevo pri vychodu z obyvaku). Niky v koupelne 3BF3 (hruby otvor ve zdivu, vysky od hrube podlahy): ve sprse 3x 30x30 na stene se dvermi 20 cm od rohu u sprchy, spodni hrany +75/+120/+165; pod oknem 194,3x30 v liciti s ostenim, spodni hrana +105; hloubka 10 cm (predpoklad).",
   "rooms": [
@@ -552,7 +565,16 @@
         "-x",
         {
           "side": "+z",
-          "to": -3.21
+          "to": -3.21,
+          "windows": [
+            {
+              "at": -4.71,
+              "w": 0.72,
+              "h": 1.195,
+              "sill": 0.95,
+              "note": "okno kumbalu (smlouva #7, 720 x 1195): na delsi strane smerem ke garazi, ~1 m za koncem garaze; parapet 0.95 je odhad"
+            }
+          ]
         }
       ],
       "h_fallback": 2.9,

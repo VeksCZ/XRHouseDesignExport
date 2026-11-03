@@ -190,10 +190,45 @@ public static class Furniture
                 if (Mathf.Abs(b - hi) < 0.01f) b += t;
                 float y0 = er.floor - slab;
                 Func<float, float, float> bot = (x, z) => y0, top = (x, z) => ceilAt(x, z) + slab;
-                if (side == "-x") rm.parts.Add(SlopedBox(er.name + "_wall", "wall", er.x0 - t, er.x0, a, b, bot, top, "WALL"));
-                else if (side == "+x") rm.parts.Add(SlopedBox(er.name + "_wall", "wall", er.x1, er.x1 + t, a, b, bot, top, "WALL"));
-                else if (side == "-z") rm.parts.Add(SlopedBox(er.name + "_wall", "wall", a, b, er.z0 - t, er.z0, bot, top, "WALL"));
-                else if (side == "+z") rm.parts.Add(SlopedBox(er.name + "_wall", "wall", a, b, er.z1, er.z1 + t, bot, top, "WALL"));
+                // a wall piece between p0..p1 along the wall, bottom / top given as functions
+                void Piece(float p0, float p1, Func<float, float, float> lo, Func<float, float, float> hi)
+                {
+                    if (p1 - p0 < 0.002f) return;
+                    if (side == "-x") rm.parts.Add(SlopedBox(er.name + "_wall", "wall", er.x0 - t, er.x0, p0, p1, lo, hi, "WALL"));
+                    else if (side == "+x") rm.parts.Add(SlopedBox(er.name + "_wall", "wall", er.x1, er.x1 + t, p0, p1, lo, hi, "WALL"));
+                    else if (side == "-z") rm.parts.Add(SlopedBox(er.name + "_wall", "wall", p0, p1, er.z0 - t, er.z0, lo, hi, "WALL"));
+                    else if (side == "+z") rm.parts.Add(SlopedBox(er.name + "_wall", "wall", p0, p1, er.z1, er.z1 + t, lo, hi, "WALL"));
+                }
+                // "windows": [{"at": centre along the wall (GLB x or z), "w", "h", "sill": above the floor}] - an opening in the wall with a frame
+                // (white inside, anthracite outside) and glass; sizes as ordered (the real frame size)
+                var wins = (wl.Type == JTokenType.Object ? ((JObject)wl)["windows"] as JArray : null)?.OfType<JObject>()
+                    .OrderBy(w => F(w, "at", 0f)).ToList() ?? new List<JObject>();
+                float cursor = a;
+                foreach (var wj in wins)
+                {
+                    float ww = F(wj, "w", 0.9f), wh = F(wj, "h", 1.2f), sill = er.floor + F(wj, "sill", 0.9f), at = F(wj, "at", (a + b) / 2f);
+                    float w0 = at - ww / 2f, w1 = at + ww / 2f, wTop = sill + wh;
+                    Piece(cursor, w0, bot, top);                                 // wall up to the window
+                    Piece(w0, w1, bot, (x, z) => sill);                          // under it
+                    Piece(w0, w1, (x, z) => wTop, top);                          // above it
+                    cursor = w1;
+                    // the frame: in the middle of the wall, the room half white (RAL 9016), the outer half anthracite; 6.5 cm profiles
+                    float inw = (side == "-x" || side == "-z") ? 1f : -1f;      // towards the room, along the wall's normal axis
+                    float lo0 = (side == "-x") ? er.x0 - t : (side == "+x") ? er.x1 : (side == "-z") ? er.z0 - t : er.z1;
+                    float mid = lo0 + t / 2f, D = Mathf.Min(0.09f, t), fw = 0.065f;
+                    void Fr(float p0, float p1, float y0, float y1, float n0, float n1, string mat)
+                    {
+                        bool xn = side == "-x" || side == "+x";
+                        rm.parts.Add(xn ? Box(er.name + "_wframe", mat, n0, n1, y0, y1, p0, p1) : Box(er.name + "_wframe", mat, p0, p1, y0, y1, n0, n1));
+                    }
+                    foreach (var (mat, n0, n1) in new[] { ("#F1F0EA", mid, mid + inw * D / 2f), ("#292F31", mid - inw * D / 2f, mid) })
+                    {
+                        Fr(w0, w0 + fw, sill, wTop, n0, n1, mat); Fr(w1 - fw, w1, sill, wTop, n0, n1, mat);       // jambs
+                        Fr(w0 + fw, w1 - fw, wTop - fw, wTop, n0, n1, mat); Fr(w0 + fw, w1 - fw, sill, sill + fw, n0, n1, mat);   // head, sill
+                    }
+                    Fr(w0 + fw, w1 - fw, sill + fw, wTop - fw, mid - 0.01f, mid + 0.01f, "glass");               // the pane
+                }
+                Piece(cursor, b, bot, top);
             }
             model.rooms.Add(rm);
         }
@@ -498,7 +533,7 @@ public static class Furniture
 
     /// <summary>A room the headset couldn't scan any more (the scan has a room limit), drawn from the spec:
     /// "extra_rooms": [{"name", "like": room id (floor height and ceiling taken from it), "x0","x1","z0","z1"
-    /// (GLB axes), "walls": ["-x", {"side": "+z", "from": x, "to": x}, ...]}]. Only the listed walls are drawn -
+    /// (GLB axes), "walls": ["-x", {"side": "+z", "from": x, "to": x, "windows": [{"at", "w", "h", "sill"}]}, ...]}]. Only the listed walls are drawn -
     /// the other sides are neighbours' walls, which get thin where they meet it (see <see cref="ExtraFaces"/>).</summary>
     struct ExtraRoom
     {
