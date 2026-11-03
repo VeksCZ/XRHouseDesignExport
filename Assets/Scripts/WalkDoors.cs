@@ -129,6 +129,7 @@ public class WalkDoors
             DoorCatalog.Swing(d, e, out var hinge, out var swing, out var toOther);
             Vector3 hingeM = M(hinge), swingM = g * swing, toOtherM = g * toOther;
             float h = d.height - 0.01f, w = d.width;
+            float frameInset = 0f, frameDrop = 0f;   // how much of the opening the frame fills at the sides / at the top
             var door = new Door { center = M(d.center - Vector3.up * (d.height / 2f)), isWindow = d.isWindow, garage = e.kind == DoorKind.Garage };
             door.manual = wasOpen.Any(p => Vector3.Distance(p, door.center) < 0.1f);
             float handleH = d.isWindow ? h / 2f : HandleHeight;
@@ -136,8 +137,13 @@ public class WalkDoors
             switch (e.kind)
             {
                 case DoorKind.Single:
-                    door.leaves.Add(Hinged(visual, layer, door, hingeM, toOtherM, swingM, w, h, handleH));
+                {
+                    // the scan measures the rough opening; the leaf is a standard one inside a frame that fills the rest
+                    LeafSize(w, h, out float lw, out float lh);
+                    frameInset = (w - lw) / 2f; frameDrop = h - lh;
+                    door.leaves.Add(Hinged(visual, layer, door, hingeM + toOtherM * frameInset, toOtherM, swingM, lw, lh, handleH));
                     break;
+                }
                 case DoorKind.Double:
                     door.leaves.Add(Hinged(visual, layer, door, hingeM, toOtherM, swingM, w / 2f, h, handleH));
                     door.leaves.Add(Hinged(visual, layer, door, hingeM + toOtherM * w, -toOtherM, swingM, w / 2f, h, handleH));
@@ -177,7 +183,7 @@ public class WalkDoors
                 // no jamb on a side where the door sits at a room corner: the frame would poke into the wall that meets here
                 bool cornerH = DoorCatalog.JambAtCorner(rooms, d, hinge, -toOther, 0.08f);
                 bool cornerO = DoorCatalog.JambAtCorner(rooms, d, hinge + toOther * w, toOther, 0.08f);
-                AddFrame(visual, layer, hingeM, toOtherM, w, h, !cornerH, !cornerO);
+                AddFrame(visual, layer, hingeM, toOtherM, w, h, !cornerH, !cornerO, frameInset, frameDrop);
             }
             doors.Add(door);
         }
@@ -186,19 +192,32 @@ public class WalkDoors
     static readonly Color FrameColor = new Color(0.92f, 0.91f, 0.88f);
     const float FrameWidth = 0.06f, FrameDepth = 0.12f;
 
+    /// <summary>The leaf of a single door in a rough opening of this size: a standard 80 cm one (70 cm in a narrow opening, 90 cm in a wide
+    /// one), 205 cm high - never bigger than the opening less a frame.</summary>
+    static void LeafSize(float openW, float openH, out float leafW, out float leafH)
+    {
+        float std = openW < 0.86f ? 0.70f : openW >= 1.05f ? 0.90f : 0.80f;
+        leafW = Mathf.Min(std, openW - 0.04f);
+        leafH = Mathf.Min(2.05f, openH - 0.05f);
+    }
+
     /// <summary>A door frame (zarubne): two jambs and a head just outside the opening, centred on the door's plane. No
     /// colliders - the opening stays as wide as scanned; where the wall is thicker than the frame it is hidden in it, where the
     /// door sits at a wall face it shows as a casing about 6 cm wide.</summary>
-    void AddFrame(GameObject visual, int layer, Vector3 hingeM, Vector3 toOtherM, float w, float h, bool jambHinge = true, bool jambOther = true)
+    void AddFrame(GameObject visual, int layer, Vector3 hingeM, Vector3 toOtherM, float w, float h, bool jambHinge = true, bool jambOther = true, float inset = 0f, float drop = 0f)
     {
         Quaternion rot = Quaternion.LookRotation(toOtherM, Vector3.up);
         var parts = new List<XRMeshPart>();
-        float half = FrameWidth / 2f;
-        void Box(Vector3 centre, Vector3 size) => parts.Add(XRModelFactory.CreateBoxPart("DOOR_FRAME", centre, rot, size, "DOORLEAF", Vector3.zero, 0f));
-        if (jambHinge) Box(hingeM - toOtherM * half + Vector3.up * (h / 2f), new Vector3(FrameDepth, h, FrameWidth));
-        if (jambOther) Box(hingeM + toOtherM * (w + half) + Vector3.up * (h / 2f), new Vector3(FrameDepth, h, FrameWidth));
+        void Span(float a0, float a1, float y0, float y1)   // a box from a0..a1 along the opening, y0..y1 high
+        {
+            if (a1 - a0 < 0.003f || y1 - y0 < 0.003f) return;
+            parts.Add(XRModelFactory.CreateBoxPart("DOOR_FRAME", hingeM + toOtherM * ((a0 + a1) / 2f) + Vector3.up * ((y0 + y1) / 2f), rot,
+                new Vector3(FrameDepth, y1 - y0, a1 - a0), "DOORLEAF", Vector3.zero, 0f));
+        }
         float x0 = jambHinge ? -FrameWidth : 0f, x1 = jambOther ? w + FrameWidth : w;   // the head stops where a jamb is left out
-        Box(hingeM + toOtherM * ((x0 + x1) / 2f) + Vector3.up * (h + half), new Vector3(FrameDepth, FrameWidth, x1 - x0));
+        Span(x0, inset, 0f, h);                       // hinge-side jamb (+ the infill up to a narrower leaf)
+        Span(w - inset, x1, 0f, h);                   // the other jamb
+        Span(x0, x1, h - drop, h + FrameWidth);       // head (+ the infill down to a lower leaf)
         foreach (var part in parts) part.color = FrameColor;
         var model = new XRHouseModel();
         model.rooms.Add(new XRRoomModel { roomName = "Frame", parts = parts });
