@@ -50,6 +50,9 @@ public class WallOverlays : MonoBehaviour
     /// <summary>The wall scan shown even when switched off (while the 3D scan is recording - you see where to look next).</summary>
     public static bool ForceScan { get => forceScan; set { if (forceScan != value) { forceScan = value; Bump(); } } }
     static bool forceScan; // cached: PlayerPrefs is a JNI call on Android, read every frame here
+    /// <summary>While recording: the room whose planes get the "not scanned yet" veil (the one you stand in); null = none. Changing it rebuilds the overlay.</summary>
+    public static string CoverRoom { get => coverRoom; set { if (coverRoom != value) { coverRoom = value; if (forceScan) Bump(); } } }
+    static string coverRoom;
 
     /// <summary>Over passthrough: the planned fittings (bath, shower, basins... as see-through ghosts) and the niches
     /// (as recesses "behind" the real wall) from the furnished saved scan, on the live scan's matching rooms.</summary>
@@ -332,6 +335,8 @@ public class WallOverlays : MonoBehaviour
         {
             // recording over passthrough: the blue "not scanned yet" veil on every plane; otherwise only planes with photos
             if (!cover && !p.HasData) continue;
+            if (cover && coverRoom != null && p.roomUuid != coverRoom) continue;   // the veil only in the room you scan
+            if (cover && coverRoom == null) continue;
             var mat = cover ? WallScan.CoverMaterial(p) : WallScan.ShowMaterial(p);
             if (mat == null) break;
             Vector3 lift = p.normal * (ctx == worldCtx ? 0.004f : 0.011f);

@@ -61,7 +61,7 @@ public static class WallScan
 
     [Serializable] class ManifestEntry { public string id; public List<string> frames = new List<string>(); }
     /// <summary>Bumped when the way frames are painted changes - older caches are rebuilt.</summary>
-    const int CacheVersion = 3; // 2: occlusion by the room's other planes; 3: denser textures (4.5 mm per texel)
+    const int CacheVersion = 4; // 2: occlusion by the room's other planes; 3: denser textures (4.5 mm per texel); 4: floors / ceilings squared to the walls (their axes changed)
     [Serializable] class Manifest { public int version; public List<ManifestEntry> planes = new List<ManifestEntry>(); }
 
     static readonly Dictionary<string, Plane> planes = new Dictionary<string, Plane>();
@@ -181,9 +181,11 @@ public static class WallScan
                 p.normal = a.HasAnyLabel(MRUKAnchor.SceneLabels.WALL_FACE) ? n : (Vector3.Dot(inside - c, n) >= 0 ? n : -n);
                 if (planes.ContainsKey(p.id)) continue;
                 p.isWall = a.HasAnyLabel(MRUKAnchor.SceneLabels.WALL_FACE);
-                p.grid = new CoverageGrid(r.width, r.height);
-                p.pxW = Mathf.Clamp(Mathf.CeilToInt(r.width * PxPerMeter), 16, MaxSize);
-                p.pxH = Mathf.Clamp(Mathf.CeilToInt(r.height * PxPerMeter), 16, MaxSize);
+                if (!p.isWall) SquareToWalls(room, p);   // a floor / ceiling rectangle can lie at any angle (45 degrees: a diagonal grid) - its axes follow the walls
+                float pw = p.axisU.magnitude, ph = p.axisV.magnitude;
+                p.grid = new CoverageGrid(pw, ph);
+                p.pxW = Mathf.Clamp(Mathf.CeilToInt(pw * PxPerMeter), 16, MaxSize);
+                p.pxH = Mathf.Clamp(Mathf.CeilToInt(ph * PxPerMeter), 16, MaxSize);
                 LoadCached(p, manifest);   // allocates the texture only for a plane that has saved frames
                 planes[p.id] = p;
             }
@@ -193,6 +195,35 @@ public static class WallScan
                 Debug.Log($"[WallScan] plane {p.id.Substring(0, 6)} room {p.roomUuid.Substring(0, 8)} o {p.origin} u {p.axisU} v {p.axisV} n {p.normal}");
         Version++;
         Debug.Log($"[WallScan] {planes.Count} plane(s) for scene {builtFor}, {planes.Values.Sum(x => x.frames.Count)} frame-plane(s) from the cache");
+    }
+
+    /// <summary>Re-axes a horizontal floor / ceiling plane so that its u axis runs along the room's longest wall: the same surface as before, covered by the
+    /// smallest rectangle in the new axes. Left alone when it is square to the walls already (within 3 degrees), sloped, or the room has no wall.</summary>
+    static void SquareToWalls(MRUKRoom room, Plane p)
+    {
+        MRUKAnchor longest = null; float lw = 0f;
+        foreach (var w in room.WallAnchors) if (w != null && w.PlaneRect.HasValue && w.PlaneRect.Value.width > lw) { lw = w.PlaneRect.Value.width; longest = w; }
+        if (longest == null) return;
+        Vector3 n = Vector3.Cross(p.axisU, p.axisV).normalized;
+        if (Mathf.Abs(n.y) < 0.99f) return;                                            // only horizontal planes
+        Vector3 dir = Vector3.ProjectOnPlane(longest.transform.right, Vector3.up);
+        Vector3 u0 = Vector3.ProjectOnPlane(p.axisU, Vector3.up);
+        if (dir.sqrMagnitude < 1e-4f || u0.sqrMagnitude < 1e-4f) return;
+        dir.Normalize();
+        float ang = Mathf.Abs(Vector3.SignedAngle(dir, u0, Vector3.up)) % 90f;
+        if (Mathf.Min(ang, 90f - ang) < 3f) return;
+        Vector3 u = dir, v = Vector3.Cross(n, u).normalized;
+        Vector3 c0 = p.origin;
+        Vector3[] cs = { p.origin, p.origin + p.axisU, p.origin + p.axisU + p.axisV, p.origin + p.axisV };
+        float umin = float.MaxValue, umax = float.MinValue, vmin = float.MaxValue, vmax = float.MinValue;
+        foreach (var c in cs)
+        {
+            float su = Vector3.Dot(c - c0, u), sv = Vector3.Dot(c - c0, v);
+            umin = Mathf.Min(umin, su); umax = Mathf.Max(umax, su); vmin = Mathf.Min(vmin, sv); vmax = Mathf.Max(vmax, sv);
+        }
+        p.origin = c0 + u * umin + v * vmin;
+        p.axisU = u * (umax - umin);
+        p.axisV = v * (vmax - vmin);
     }
 
     static void LoadCached(Plane p, Manifest manifest)

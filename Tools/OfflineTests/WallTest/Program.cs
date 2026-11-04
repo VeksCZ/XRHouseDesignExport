@@ -313,5 +313,32 @@ class T {
       }
     }
 
+    // ---- OutlineMatch: lining two scans up by room shape (no shared UUIDs) ----
+    {
+      List<(float x, float z)> Rect(float x0, float z0, float w, float d) => new List<(float, float)> { (x0, z0), (x0 + w, z0), (x0 + w, z0 + d), (x0, z0 + d) };
+      List<(float x, float z)> Xform(List<(float x, float z)> poly, float yaw, float tx, float tz, float jitter = 0f) {
+        var rnd = new Random(7); var r = new List<(float, float)>();
+        foreach (var q in poly) { var p = OutlineMatch.Rotate(q, yaw); r.Add((p.x + tx + (float)(rnd.NextDouble() - .5) * jitter, p.z + tz + (float)(rnd.NextDouble() - .5) * jitter)); }
+        return r; }
+      var L = new List<(float x, float z)> { (0, 0), (5, 0), (5, 2), (2.5f, 2), (2.5f, 4), (0, 4) };      // an L-shaped room
+      var live1 = new List<List<(float x, float z)>> { L };
+      var saved1 = new List<List<(float x, float z)>> { Xform(L, 37f, 3.2f, -1.7f, 0.04f) };
+      bool okL = OutlineMatch.Align(live1, saved1, out var fL);
+      Check(okL && Math.Abs(fL.yawDeg - 37f) < 1.5f, $"an L-shaped room is lined up: yaw {fL.yawDeg:0.0} (want 37), iou {fL.iou:0.00}");
+      if (okL) { var c = OutlineMatch.Rotate(OutlineMatch.Centroid(L), fL.yawDeg); var cs = OutlineMatch.Centroid(saved1[0]);
+        Check(Math.Abs(c.x + fL.tx - cs.x) < 0.15f && Math.Abs(c.z + fL.tz - cs.z) < 0.15f, "... and shifted onto the saved room (within 15 cm)"); }
+      // a whole flat: three rectangular rooms of different sizes
+      var flat = new List<List<(float x, float z)>> { Rect(0, 0, 4, 3), Rect(4.1f, 0, 3, 3.6f), Rect(0, 3.1f, 2.2f, 2.5f) };
+      var flatSaved = new List<List<(float x, float z)>>(); foreach (var r in flat) flatSaved.Add(Xform(r, 123f, -6f, 9f, 0.03f));
+      bool okF = OutlineMatch.Align(flat, flatSaved, out var fF);
+      Check(okF && Math.Abs(OutlineMatch.Rotate((1f, 1f), fF.yawDeg).x - OutlineMatch.Rotate((1f, 1f), 123f).x) < 0.05f && fF.rooms >= 3, $"three rectangular rooms: yaw {fF.yawDeg:0.0} (want 123), {fF.rooms} rooms agree");
+      // one plain rectangle fits turned by 180 degrees as well: ambiguous, no result
+      bool okR = OutlineMatch.Align(new List<List<(float x, float z)>> { Rect(0, 0, 4, 3) }, new List<List<(float x, float z)>> { Xform(Rect(0, 0, 4, 3), 20f, 1f, 1f) }, out _);
+      Check(!okR, "a single rectangle (fits two ways) is not aligned");
+      // another place: unrelated shapes
+      bool okO = OutlineMatch.Align(flat, new List<List<(float x, float z)>> { Rect(0, 0, 9, 1.8f), Rect(0, 3, 1.5f, 1.5f) }, out _);
+      Check(!okO, "an unrelated place is not aligned");
+    }
+
     Console.WriteLine(fails == 0 ? "ALL PASSED" : fails + " FAILED"); return fails; }
 }

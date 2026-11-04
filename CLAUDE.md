@@ -169,6 +169,10 @@ and exports 3D models, floor plans and reports from the scan.
   copies the cloud's proposals (furniture + terrain + house_style, window edits) into a scan copy. `site.ground_cuts` lowers rectangles of the ground (a garden under a terrace).
 - **Missing wall** is its own tool (Tools > Repair the scan > Missing wall, `Tool.Walls`; `DoorEditTool` runs it without ever picking doors). **Save live scan** always switches to the saved copy.
   A rebuild of the walk-through (door added, scan reloaded) puts you back at the remembered spot (`TryGetFeetOrRemembered`, `[Walk]` log lines say what happened).
+- **Aligning a saved scan** (`MRUKExporter.AlignToLive`): by shared room UUIDs; when there are none (the rooms were scanned again) `TryAlignByOutline` lays the live rooms' floor outlines over the saved
+  scan's (`OutlineMatch`, pure geometry, tested in `WallTest`; refuses an ambiguous fit, e.g. a single rectangle). Wall boxes are drawn `CornerOverlap` (5 cm) longer at an end where another wall ends
+  (the slit from snapping walls to right angles). Wall-scan floor / ceiling planes are squared to the longest wall (`WallScan.SquareToWalls`, cache version 4 = one rebuild); the blue "not scanned yet"
+  veil is drawn only in the room you stand in (`WallOverlays.CoverRoom`); the 3D scan says so (and logs it) when it drops frames because you are outside every room of the loaded scan.
 - **Logs**: headset session logs are in `persistentDataPath/Logs` (menu "Pull logs from Quest" -> `Logs/Quest`),
   never in the export folder.
 - **Build + install to a USB Quest**: call `MRUKExporter.EditorFastBuildAndInstall()` (e.g. via the Unity MCP

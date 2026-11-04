@@ -13,6 +13,7 @@
     <Compile Include="Program.cs" />
     <Compile Include="../../../Assets/Scripts/SceneJsonEdit.cs" />
     <Compile Include="../../../Assets/Scripts/MissingWall.cs" />
+    <Compile Include="../../../Assets/Scripts/OutlineMatch.cs" />
     <Compile Include="../../../Assets/Scripts/StairFloorSnap.cs" />
     <Compile Include="../../../Assets/Scripts/FrameCulling.cs" />
     <Compile Include="../../../Assets/Scripts/CoverageGrid.cs" />

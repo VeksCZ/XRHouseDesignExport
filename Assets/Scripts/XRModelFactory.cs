@@ -50,8 +50,14 @@ public static class XRModelFactory
             foreach (var f in anchors.Where(a => a.Label == MRUKAnchor.SceneLabels.FLOOR))
                 rm.parts.Add(CreateFloorSlab(f, center, rotation));
 
-            foreach (var w in anchors.Where(MRUKDataProcessor.IsStructuralWall)) {
+            var structuralWalls = anchors.Where(MRUKDataProcessor.IsStructuralWall).ToList();
+            foreach (var w in structuralWalls) {
                 float wW = w.PlaneRect.Value.width, wH = w.PlaneRect.Value.height;
+                // Snapping a wall to the right angle swings its ends by a few cm, which opens a slit where it meets the next wall (the outside shows
+                // through a corner): where another wall ends next to this end, the wall is drawn CornerOverlap longer there (hidden in the other slab)
+                Vector3 rawHalf = w.transform.right * (wW / 2f);
+                float oL = WallEndNear(structuralWalls, w, w.transform.position - rawHalf, 0.35f) ? CornerOverlap : 0f;
+                float oR = WallEndNear(structuralWalls, w, w.transform.position + rawHalf, 0.35f) ? CornerOverlap : 0f;
                 // A real wall's own scanned rotation is never off by more than a few degrees, but drawn as-is
                 // that jitter is exactly what made walls look crooked/non-perpendicular - snap it to the nearest
                 // right angle from the house's own dominant direction so every wall comes out square, the way a
@@ -81,7 +87,7 @@ public static class XRModelFactory
                 var niches = NichesOn(wallPos, wallRot, wW, wH, wallShift - wallThickness, wallShift);
 
                 if (wallHoles.Count > 0 || cuts.Count > 0 || niches.Count > 0) {
-                    var xC = new List<float> { -wW/2f, wW/2f };
+                    var xC = new List<float> { -wW/2f - oL, wW/2f + oR };
                     var yC = new List<float> { -wH/2f, wH/2f };
                     foreach(var h in wallHoles) {
                         Vector3 lp = Quaternion.Inverse(wallRot) * (OPos(h) - wallPos);
@@ -109,7 +115,7 @@ public static class XRModelFactory
                             if (!isHole) AddWallCell(rm, wallPos, wallRot, midX, midY, x2-x1, y2-y1, wallShift - wallThickness, wallShift, niches, center, rotation);
                         }
                     }
-                } else rm.parts.Add(CreateBoxPart("WALL", wallPos, wallRot, new Vector3(wW, wH, wallThickness), "WALL", center, rotation, wallOff));
+                } else rm.parts.Add(CreateBoxPart("WALL", wallPos, wallRot, new Vector3(wW + oL + oR, wH, wallThickness), "WALL", center, rotation, wallOff + new Vector3((oR - oL) / 2f, 0f, 0f)));
 
                 // A wall anchor's own PlaneRect height is whatever flat rectangle MRUK fit to that panel, which
                 // stops short of the real ceiling under a sloped/vaulted roof - sample the actual ceiling height
@@ -461,6 +467,22 @@ return model;
     /// When the two faces touch or cross, both walls are drawn thin and meet halfway: <paramref name="shift"/>
     /// is how far this wall's face moves into its own room to get there.
     /// </remarks>
+    /// <summary>How much longer a wall is drawn at an end where the next wall ends (see the use in CreateAnchorAnalytical).</summary>
+    const float CornerOverlap = 0.05f;
+
+    /// <summary>True when another wall of the room has an end within 'within' metres (in plan) of this wall's end.</summary>
+    static bool WallEndNear(List<MRUKAnchor> walls, MRUKAnchor self, Vector3 end, float within)
+    {
+        foreach (var o in walls)
+        {
+            if (o == self || o.PlaneRect == null) continue;
+            Vector3 t = o.transform.right * (o.PlaneRect.Value.width / 2f);
+            foreach (var e in new[] { o.transform.position - t, o.transform.position + t })
+                if ((e.x - end.x) * (e.x - end.x) + (e.z - end.z) * (e.z - end.z) < within * within) return true;
+        }
+        return false;
+    }
+
     private static float EstimateWallThickness(MRUKRoom room, List<MRUKRoom> allRooms, Vector3 wallWorldPos, Vector3 outwardNormal, float extentAlongWall, Vector3 wallDir, float fallback, out float shift, float height = 2.5f)
     {
         const float minGap = -0.15f, maxThickness = 0.5f, thin = 0.02f;

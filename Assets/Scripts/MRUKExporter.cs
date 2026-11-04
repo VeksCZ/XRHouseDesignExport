@@ -82,7 +82,22 @@ public class MRUKExporter : MonoBehaviour
     /// <summary>How the loaded saved scan sits on the real house, e.g. "aligned to the house via 7 rooms (2 cm)".</summary>
     public string AlignInfo { get; private set; } = "";
 
-    struct LiveRoom { public Vector3 pos; public Quaternion rot; public bool intact; }
+    struct LiveRoom { public Vector3 pos; public Quaternion rot; public bool intact; public List<(float x, float z)> outline; public float floorY; }
+
+    /// <summary>The room's floor outline in the world frame (x, z) and the floor height - the shape OutlineMatch lines scans up by.</summary>
+    static List<(float x, float z)> RoomOutline(MRUKRoom r, out float floorY)
+    {
+        floorY = 0f; List<(float x, float z)> best = null;
+        foreach (var f in r.FloorAnchors)
+        {
+            if (f == null || f.PlaneBoundary2D == null || f.PlaneBoundary2D.Count < 3) continue;
+            if (best != null && f.PlaneBoundary2D.Count <= best.Count) continue;
+            best = new List<(float x, float z)>();
+            foreach (var p2 in f.PlaneBoundary2D) { var w = f.transform.TransformPoint(new Vector3(p2.x, p2.y, 0f)); best.Add((w.x, w.z)); }
+            floorY = f.transform.position.y;
+        }
+        return best;
+    }
 
     static Dictionary<string, LiveRoom> SnapshotRooms()
     {
@@ -94,6 +109,7 @@ public class MRUKExporter : MonoBehaviour
             {
                 pos = r.transform.position, rot = r.transform.rotation,
                 intact = r.FloorAnchors.Count > 0 && r.WallAnchors.Count >= 3,
+                outline = RoomOutline(r, out float fy), floorY = fy,
             };
         }
         return d;
@@ -115,7 +131,9 @@ public class MRUKExporter : MonoBehaviour
         }
         if (pairs.Count == 0)
         {
-            AlignInfo = "not aligned - no room in common with the live scan (another place)";
+            // no shared room id (the rooms were scanned again, so the live scene has new ids): line the scans up by the shape of the rooms
+            if (TryAlignByOutline(live, ui)) return;
+            AlignInfo = "not aligned - no room in common with the live scan, and no room shape matches either (another place)";
             ui?.AddLog($"<color=orange>Saved scan: {AlignInfo}. It is a model only here.</color>");
             Debug.Log("[Align] " + AlignInfo);
             return;
@@ -158,6 +176,30 @@ public class MRUKExporter : MonoBehaviour
         AlignInfo = $"aligned to the house via {agree.Count} of {pairs.Count} shared room(s), {res * 100f:0} cm";
         ui?.AddLog($"<color=green>Saved scan {AlignInfo}.</color>");
         Debug.Log($"[Align] {AlignInfo}; yaw {Yaw(Rf):0.0} deg, offset {tf}; disagreeing: {string.Join(", ", pairs.Except(agree).Select(p => p.id.Substring(0, 8)))}");
+    }
+
+    /// <summary>The fallback of AlignToLive: the live rooms' floor outlines laid over the loaded saved scan's (OutlineMatch). Only an unambiguous fit is used.</summary>
+    bool TryAlignByOutline(Dictionary<string, LiveRoom> live, XRMenu ui)
+    {
+        var liveOutlines = live.Values.Where(l => l.outline != null).Select(l => l.outline).ToList();
+        var savedOutlines = new List<List<(float x, float z)>>(); var savedY = new List<float>();
+        foreach (var r in MRUK.Instance.Rooms)
+        {
+            if (r == null) continue;
+            var o = RoomOutline(r, out float fy);
+            if (o != null) { savedOutlines.Add(o); savedY.Add(fy); }
+        }
+        if (liveOutlines.Count == 0 || savedOutlines.Count == 0) return false;
+        if (!OutlineMatch.Align(liveOutlines, savedOutlines, out var fit)) return false;
+        // the height: the mean floor-level difference of the live rooms that landed on a saved room
+        float dy = savedY.Average() - live.Values.Where(l => l.outline != null).Average(l => l.floorY);
+        var R = Quaternion.Euler(0f, fit.yawDeg, 0f);
+        SetTrackingOffset(Matrix4x4.TRS(new Vector3(fit.tx, dy, fit.tz), R, Vector3.one));
+        WorldAligned = true;
+        AlignInfo = $"aligned to the house by the room shapes ({fit.rooms} room(s), overlap {fit.iou * 100f:0} %)";
+        ui?.AddLog($"<color=green>Saved scan {AlignInfo}.</color>");
+        Debug.Log($"[Align] {AlignInfo}; yaw {fit.yawDeg:0.0} deg, shift ({fit.tx:0.00}, {dy:0.00}, {fit.tz:0.00})");
+        return true;
     }
 
     /// <summary>Re-does the live-snapshot + AlignToLive pair for the scan already loaded (AlignEnabled flipped on

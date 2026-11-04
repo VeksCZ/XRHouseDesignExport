@@ -138,6 +138,7 @@ public class WallPhotoCapture : MonoBehaviour
     float retryAt;
     readonly Dictionary<string, int> cableByRoom = new Dictionary<string, int>(), denseByRoom = new Dictionary<string, int>();
     string currentRoomUuid, currentRoomName;
+    float lastOutsideWarn = -99f;
 
     AudioSource audioSrc;
     AudioClip shutterClip;
@@ -178,7 +179,7 @@ public class WallPhotoCapture : MonoBehaviour
     {
         if (!Active)
         {
-            if (wasActive) { wasActive = false; started = false; StopCamera(); ClosePanel(); CloseHud(); ClearOutlines(); if (covGo) covGo.SetActive(false); if (guideGo) guideGo.SetActive(false); guideRoom = "-"; WallOverlays.ForceScan = false; WallScan.SaveAll(); }
+            if (wasActive) { wasActive = false; started = false; StopCamera(); ClosePanel(); CloseHud(); ClearOutlines(); if (covGo) covGo.SetActive(false); if (guideGo) guideGo.SetActive(false); guideRoom = "-"; WallOverlays.CoverRoom = null; WallOverlays.ForceScan = false; WallScan.SaveAll(); }
             return;
         }
         wasActive = true;
@@ -462,6 +463,13 @@ public class WallPhotoCapture : MonoBehaviour
         {
             capturing = false;
             if (!isDense) uiLog?.AddLog("<color=orange>Photos: you are outside every scanned room - not saved.</color>");
+            else if (Time.unscaledTime - lastOutsideWarn > 6f)
+            {
+                // the 3D scan used to drop every frame silently here - which looks like "it does not take any photos"
+                lastOutsideWarn = Time.unscaledTime;
+                uiLog?.AddLog("<color=orange>3D scan: you are outside every room of the loaded scan, so no frame is saved. Pick the live scan (menu top row) - or Align a saved scan to the real walls - and stand in a scanned room.</color>");
+                Debug.Log($"[WallPhotos] dense frame dropped: head is in no room of the loaded scan ({WallScan.Rooms().Count} room(s), source '{(exporter != null ? exporter.ActiveSource : "?")}')");
+            }
             return;
         }
         // Seed points for a splat: a grid of rays hit against the scan now; their colours come from the pixels below.
@@ -809,6 +817,7 @@ public class WallPhotoCapture : MonoBehaviour
         string uuid = room != null ? room.Anchor.Uuid.ToString() : null;
         if (uuid == currentRoomUuid) return;
         currentRoomUuid = uuid;
+        if (dense) WallOverlays.CoverRoom = uuid;   // the blue "not scanned yet" veil only in the room you scan, not through the walls in the others
         currentRoomName = room != null ? MRUKDataProcessor.GetRoomLabel(room) : null;
         RefreshPanel();
         Debug.Log($"[WallPhotos] room: {currentRoomName ?? "outside"} ({uuid}){(dense ? "" : GuideSummary().Replace("\n", " - "))}");

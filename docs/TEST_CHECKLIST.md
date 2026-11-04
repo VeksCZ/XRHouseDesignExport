@@ -90,3 +90,9 @@ Když něco nevyjde, napište mi (nebo PC session) číslo bodu a log (`Logs/Que
 ## Okna a vchodové dveře - oprava (2026-11-03)
 44. Okna: otevírá se křídlo **i s vlastním rámem** (bílý uvnitř, antracit venku), obvodový rám a sloupek mezi částmi zůstávají. Pevné části mají také zasklívací rám.
 45. Vchodové dveře: **antracit zvenku, bílá uvnitř** (jako okna), zárubeň dvoubarevná stejně.
+
+## Zarovnání, rohy, 3D scan (2026-11-04)
+46. Scan 7 rooms v bytě: **Layers > Align to real walls**. I když se živá scéna nepřeskenovala se stejnými UUID, zkusí se zarovnání podle tvaru místností ("aligned ... by the room shapes ..."). Jedna obdélníková místnost se nezarovná (dvojznačné) - pak je potřeba víc místností.
+47. Rohy: ve zdech u rohů už nemá prosvítat venek (zdi jsou u rohu o 5 cm delší). Pokud prosvítá pořád, napište kde (místnost, roh).
+48. 3D scan: veil / grid jen v místnosti, kde stojíte (ne přes zdi do ostatních); strop i podlaha mají grid rovnoběžný se zdmi (ne o 45°). První načtení přestaví cache (CacheVersion 4).
+49. 3D scan nefotí: aplikace teď hlásí proč (stojíte mimo všechny místnosti načteného scanu - vyberte živý scan nebo Align). Pošlete `Logs/Quest`, pokud se to děje i když stojíte v naskenované místnosti.
