@@ -298,6 +298,8 @@ public class WalkThroughMode : MonoBehaviour
     bool SunTool => editMode && editMode.IsOn && editMode.CurrentTool == EditModeController.Tool.Sun;
     bool sunStickArmed = true;
 
+    public bool SunOn => sun.On;
+
     public string ToggleSun()
     {
         if (!isOn) return null;

@@ -119,8 +119,10 @@ public class WalkDoors
         Quaternion gInv = Quaternion.Inverse(g);
         Vector3 M(Vector3 p) => g * (p - center);
         var panelList = panels.Where(r => r).ToList();
+        var allDoors = DoorCatalog.Build(rooms);
+        var sharedEdge = WindowSharedEdges(allDoors, edits, rooms, g, center);
 
-        foreach (var d in DoorCatalog.Build(rooms))
+        foreach (var d in allDoors)
         {
             var e = DoorCatalog.FindEdit(edits, d, rooms);
             if (e == null || e.kind == DoorKind.Wall || e.kind == DoorKind.Fixed) continue; // walled up / stays as scanned
@@ -135,7 +137,12 @@ public class WalkDoors
                 if (col && col.enabled) { col.enabled = false; suppressedColliders.Add(col); }
             }
             if (e.kind == DoorKind.Opening) continue; // just the empty opening
-            if (d.isWindow) { BuildWindow(visual, layer, d, e, g, center, wasOpen); continue; }
+            if (d.isWindow)
+            {
+                var (sharedLeft, sharedRight) = sharedEdge.TryGetValue(d.uuid, out var sh) ? sh : (false, false);
+                BuildWindow(visual, layer, d, e, g, center, wasOpen, sharedLeft, sharedRight);
+                continue;
+            }
 
             DoorCatalog.Swing(d, e, out var hinge, out var swing, out var toOther);
             Vector3 hingeM = M(hinge), swingM = g * swing, toOtherM = g * toOther;
@@ -210,6 +217,57 @@ public class WalkDoors
             doors.Add(door);
         }
         BuildBlinds(visual, layer);   // after every window is known: one blind per window group
+        BuildWindowFrames(visual, layer);
+    }
+
+    struct WinFrameReq { public Vector3 left, along, outN; public float w, h; public List<float> splitsM; }
+    readonly List<WinFrameReq> winFrameReqs = new List<WinFrameReq>();
+
+    /// <summary>One continuous outer frame for a group of window anchors MRUK split from one physical window (same
+    /// wall plane, same sill/head height, next to each other within a few cm - a real mullion, not a gap to another
+    /// window): same grouping as BuildBlinds, but the group's own splits (each member's own mullions, plus one where
+    /// two members meet) go to AddWindowFrame instead of drawing each member's full frame on its own.</summary>
+    void BuildWindowFrames(GameObject visual, int layer)
+    {
+        var rest = new List<WinFrameReq>(winFrameReqs);
+        winFrameReqs.Clear();
+        while (rest.Count > 0)
+        {
+            var cur = rest[0]; rest.RemoveAt(0);
+            float start = 0f, end = cur.w;
+            Vector3 origin = cur.left;
+            var members = new List<(float at, WinFrameReq req)> { (0f, cur) };
+            bool grew = true;
+            while (grew)
+            {
+                grew = false;
+                for (int i = 0; i < rest.Count; i++)
+                {
+                    var o = rest[i];
+                    if (Vector3.Dot(o.outN, cur.outN) < 0.98f || Mathf.Abs(Vector3.Dot(o.along, cur.along)) < 0.98f) continue;
+                    if (Mathf.Abs(Vector3.Dot(o.left - origin, cur.outN)) > 0.05f) continue;                    // the same wall plane
+                    if (Mathf.Abs(o.h - cur.h) > 0.05f) continue;                                               // same height...
+                    float at = Vector3.Dot(o.left - origin, cur.along);
+                    if (Mathf.Abs(o.left.y - cur.left.y) > 0.05f) continue;                                     // ...and the same sill
+                    float lo = at, hi = at + o.w;
+                    if (lo > end + 0.12f || hi < start - 0.12f) continue;                                       // not right next to the group
+                    start = Mathf.Min(start, lo); end = Mathf.Max(end, hi);
+                    members.Add((at, o));
+                    rest.RemoveAt(i); grew = true; break;
+                }
+            }
+            members.Sort((a, b) => a.at.CompareTo(b.at));
+            var splits = new List<float>();
+            float W = end - start;
+            for (int i = 0; i < members.Count; i++)
+            {
+                var (at, req) = members[i];
+                foreach (float s in req.splitsM) splits.Add((at - start + s) / W);
+                if (i > 0) splits.Add((at - start) / W);   // the seam between two merged anchors - drawn as a post, same as a real mullion
+            }
+            Vector3 groupLeft = origin + cur.along * start;
+            AddWindowFrame(visual, layer, groupLeft, cur.along, cur.outN, W, cur.h, splits);
+        }
     }
 
     static readonly Color FrameColor = new Color(0.62f, 0.42f, 0.22f);   // door frame: the saturated brown
@@ -286,9 +344,70 @@ public class WalkDoors
     /// start side, 'far' on the other, at the bottom and top - and which way the room is.</summary>
     struct WinFrame { public bool on; public float near, far, bottom, top; public Vector3 interior; }
 
+    /// <summary>Which windows MRUK split from one physical window (same wall plane, same sill/head height, within a
+    /// few cm of each other - a real mullion, not a gap to an unrelated window) touch another one on their left /
+    /// right edge - so that edge's sash gets a narrow mullion-width inset instead of the full outer-frame one
+    /// (BuildWindowFrames does the same grouping for the outer frame itself; this runs first because the sash is
+    /// built before the frame, in the same pass over all doors).</summary>
+    static Dictionary<string, (bool left, bool right)> WindowSharedEdges(List<DoorInfo> allDoors, HouseEdits edits, List<MRUKRoom> rooms, Quaternion g, Vector3 center)
+    {
+        var result = new Dictionary<string, (bool, bool)>();
+        var uuids = new List<string>();
+        var geo = new List<(Vector3 left, Vector3 along, Vector3 outN, float w, float h)>();
+        foreach (var d in allDoors)
+        {
+            if (!d.isWindow) continue;
+            var e = DoorCatalog.FindEdit(edits, d, rooms);
+            if (e == null || e.kind == DoorKind.Wall || e.kind == DoorKind.Fixed || e.kind == DoorKind.Opening) continue;
+            DoorCatalog.LeftFrame(d, e, out var left, out var toRight, out var swing);
+            Vector3 leftM = g * (left - center), rM = g * toRight, sM = g * swing;
+            float w = d.width, h = d.height - 0.01f;
+            if (e.widthMm > 0f && e.heightMm > 0f)
+            {
+                float cw = e.widthMm / 1000f, ch = e.heightMm / 1000f;
+                leftM += rM * ((d.width - cw) / 2f) + Vector3.up * (ch < 2.0f ? 0.03f : 0f);
+                w = cw; h = ch;
+            }
+            uuids.Add(d.uuid);
+            geo.Add((leftM, rM, sM, w, h));
+        }
+        var rest = Enumerable.Range(0, geo.Count).ToList();
+        while (rest.Count > 0)
+        {
+            int curIdx = rest[0]; rest.RemoveAt(0);
+            var cur = geo[curIdx];
+            Vector3 origin = cur.left;
+            float start = 0f, end = cur.w;
+            var members = new List<(int idx, float at)> { (curIdx, 0f) };
+            bool grew = true;
+            while (grew)
+            {
+                grew = false;
+                for (int i = 0; i < rest.Count; i++)
+                {
+                    var o = geo[rest[i]];
+                    if (Vector3.Dot(o.outN, cur.outN) < 0.98f || Mathf.Abs(Vector3.Dot(o.along, cur.along)) < 0.98f) continue;
+                    if (Mathf.Abs(Vector3.Dot(o.left - origin, cur.outN)) > 0.05f) continue;
+                    if (Mathf.Abs(o.h - cur.h) > 0.05f) continue;
+                    if (Mathf.Abs(o.left.y - cur.left.y) > 0.05f) continue;
+                    float at = Vector3.Dot(o.left - origin, cur.along);
+                    float lo = at, hi = at + o.w;
+                    if (lo > end + 0.12f || hi < start - 0.12f) continue;
+                    start = Mathf.Min(start, lo); end = Mathf.Max(end, hi);
+                    members.Add((rest[i], at));
+                    rest.RemoveAt(i); grew = true; break;
+                }
+            }
+            members.Sort((a, b) => a.at.CompareTo(b.at));
+            for (int i = 0; i < members.Count; i++)
+                result[uuids[members[i].idx]] = (i > 0, i < members.Count - 1);
+        }
+        return result;
+    }
+
     /// <summary>A window as its parts side by side (fixed panes, tilt-turn/casement sashes, tilt sashes, HS sliding
     /// sash in front of its neighbour), each opening part with its own handle.</summary>
-    void BuildWindow(GameObject visual, int layer, DoorInfo d, DoorEdit e, Quaternion g, Vector3 center, List<Vector3> wasOpen)
+    void BuildWindow(GameObject visual, int layer, DoorInfo d, DoorEdit e, Quaternion g, Vector3 center, List<Vector3> wasOpen, bool sharedLeft, bool sharedRight)
     {
         Vector3 M(Vector3 p) => g * (p - center);
         DoorCatalog.LeftFrame(d, e, out var left, out var toRight, out var swing);
@@ -313,7 +432,10 @@ public class WalkDoors
         WinFrame WF(float f0, float f1, bool nearLeft)
         {
             if (!frames) return default;
-            float li = f0 < 0.01f ? fwOuter : MullionW / 2f, ri = f1 > 0.99f ? fwOuter : MullionW / 2f;
+            // At this window's own outer edge (f0=0 / f1=1): the full frame inset, UNLESS that edge is shared with
+            // another anchor MRUK split from the same physical window - then it is really an internal mullion.
+            float li = f0 < 0.01f ? (sharedLeft ? MullionW / 2f : fwOuter) : MullionW / 2f;
+            float ri = f1 > 0.99f ? (sharedRight ? MullionW / 2f : fwOuter) : MullionW / 2f;
             return new WinFrame { on = true, near = nearLeft ? li : ri, far = nearLeft ? ri : li, bottom = fwOuter, top = fwOuter, interior = sM };
         }
         foreach (var (s, f0, f1) in DoorCatalog.Sections(e))
@@ -351,7 +473,14 @@ public class WalkDoors
             }
             doors.Add(door);
         }
-        if (frames) AddWindowFrame(visual, layer, leftM, rM, sM, W, h, DoorCatalog.Sections(e).Select(x => x.f1).ToList());
+        if (frames)
+        {
+            // MRUK sometimes scans one physical window as two (or more) adjacent anchors (a wide window next to a
+            // narrow one, split by a mullion it treated as a wall) - queued and merged by BuildWindowFrames so they
+            // get ONE continuous outer frame with a shared post between them, not two full frames with a seam.
+            var splitsM = DoorCatalog.Sections(e).Select(x => x.f1 * W).Where(f => f > 0.01f && f < W - 0.01f).ToList();
+            winFrameReqs.Add(new WinFrameReq { left = leftM, along = rM, outN = sM, w = W, h = h, splitsM = splitsM });
+        }
         bool exterior = d.roomFront == null || d.roomBack == null;
         if (exterior && d.height > 0.3f && Furniture.StyleFlag(scanName, "blinds"))
         {
@@ -719,7 +848,7 @@ public class WalkDoors
 
     public void Clear()
     {
-        blinds.Clear(); blindReqs.Clear();
+        blinds.Clear(); blindReqs.Clear(); winFrameReqs.Clear();
         foreach (var r in Suppressed) if (r) r.enabled = true;
         Suppressed.Clear();
         foreach (var c in suppressedColliders) if (c) c.enabled = true;

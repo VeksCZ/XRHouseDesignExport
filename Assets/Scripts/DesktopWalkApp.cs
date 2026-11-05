@@ -26,7 +26,7 @@ public partial class DesktopWalkApp : MonoBehaviour
     int selected = -1;
     string loadedScan;
     string status = "";
-    bool menuOpen = true, busy, showHelp = true;
+    bool menuOpen = true, busy, showHelp = true, sidebarOpen;
     Vector2 scroll;
     string floorInfo = "";
 
@@ -173,11 +173,34 @@ public partial class DesktopWalkApp : MonoBehaviour
     void SetMenu(bool open)
     {
         menuOpen = open;
-        bool look = !open && walk && walk.IsOn;
+        if (open) sidebarOpen = false;
+        bool look = !open && !sidebarOpen && walk && walk.IsOn;
         Cursor.lockState = look ? CursorLockMode.Locked : CursorLockMode.None;
         Cursor.visible = !look;
         if (rig) rig.InputEnabled = look;
     }
+
+    /// <summary>The clickable sidebar (Tab): every toggle/action a key already does, for the mouse. Takes focus like
+    /// the Esc menu (look/move off, cursor free) while open; closing it goes straight back to walking.</summary>
+    void SetSidebar(bool open)
+    {
+        sidebarOpen = open;
+        bool look = !open && !menuOpen && walk && walk.IsOn;
+        Cursor.lockState = look ? CursorLockMode.Locked : CursorLockMode.None;
+        Cursor.visible = !look;
+        if (rig) rig.InputEnabled = look;
+    }
+
+    void ToggleRoutes() { WallOverlays.ShowRoutes = !WallOverlays.ShowRoutes; floorInfo = WallOverlays.ShowRoutes ? $"Routes on ({RouteStore.Routes.Count})" : "Routes off"; }
+    void TogglePhotosOnWalls() { WallOverlays.ShowPhotos = !WallOverlays.ShowPhotos; floorInfo = WallOverlays.ShowPhotos ? "Photos on walls on" : "Photos on walls off"; }
+    void ToggleSunKey() => floorInfo = walk.ToggleSun() ?? "";
+    void NextFloorKey() => floorInfo = walk.NextFloor() ?? "";
+    void CycleModelKey() => _ = CycleModel();
+    void ExportWallDrawingsKey() => floorInfo = ExportWallDrawings(true);
+    void DetectRoutesKey() => floorInfo = DetectRoutes();
+    void ReloadKey() { if (loadedScan != null) _ = Load(loadedScan); }
+    void ToggleFinishedKey() { Furniture.Finished = !Furniture.Finished; floorInfo = Furniture.Finished ? "Model: finished floors + suspended ceilings" : "Model: rough shell as scanned"; ReloadKey(); }
+    void ToggleBlindsKey() { WalkDoors.BlindsDown = !WalkDoors.BlindsDown; floorInfo = WalkDoors.BlindsDown ? "Blinds: going down" : "Blinds: going up"; }
 
     void Update()
     {
@@ -186,7 +209,8 @@ public partial class DesktopWalkApp : MonoBehaviour
         if (kb == null) return;
 
         if (kb.escapeKey.wasPressedThisFrame) SetMenu(!(menuOpen && walk.IsOn)); // nothing loaded = the menu stays
-        if (menuOpen || busy || !walk.IsOn) return;
+        if (!menuOpen && !busy && walk.IsOn && kb.tabKey.wasPressedThisFrame) SetSidebar(!sidebarOpen);
+        if (menuOpen || sidebarOpen || busy || !walk.IsOn) return;
 
         // Alt-tab etc. releases the cursor without opening the menu - a click takes it back.
         if (Cursor.lockState != CursorLockMode.Locked)
@@ -211,18 +235,18 @@ public partial class DesktopWalkApp : MonoBehaviour
         if (kb.fKey.wasPressedThisFrame || kb.pageUpKey.wasPressedThisFrame) floorInfo = walk.NextFloor() ?? "";
         if (kb.tKey.wasPressedThisFrame) floorInfo = walk.MeasureClick(CenterRay()) ?? "Measure: nothing there";
         if (kb.deleteKey.wasPressedThisFrame) { walk.ClearMeasure(); floorInfo = ""; }
-        if (kb.uKey.wasPressedThisFrame) floorInfo = walk.ToggleSun() ?? "";
+        if (kb.uKey.wasPressedThisFrame) ToggleSunKey();
         if (kb.leftBracketKey.wasPressedThisFrame) floorInfo = walk.SunStep(-0.5, 0) ?? "";
         if (kb.rightBracketKey.wasPressedThisFrame) floorInfo = walk.SunStep(0.5, 0) ?? "";
         if (kb.commaKey.wasPressedThisFrame) floorInfo = walk.SunStep(0, -1) ?? "";
         if (kb.periodKey.wasPressedThisFrame) floorInfo = walk.SunStep(0, 1) ?? "";
-        if (kb.mKey.wasPressedThisFrame) _ = CycleModel();
+        if (kb.mKey.wasPressedThisFrame) CycleModelKey();
         if (kb.hKey.wasPressedThisFrame) showHelp = !showHelp;
-        if (kb.kKey.wasPressedThisFrame) { WallOverlays.ShowRoutes = !WallOverlays.ShowRoutes; floorInfo = WallOverlays.ShowRoutes ? $"Routes on ({RouteStore.Routes.Count})" : "Routes off"; }
-        if (kb.pKey.wasPressedThisFrame) { WallOverlays.ShowPhotos = !WallOverlays.ShowPhotos; floorInfo = WallOverlays.ShowPhotos ? "Photos on walls on" : "Photos on walls off"; }
-        if (kb.eKey.wasPressedThisFrame) floorInfo = ExportWallDrawings(true);
-        if (kb.dKey.wasPressedThisFrame) floorInfo = DetectRoutes();
-        if (kb.f5Key.wasPressedThisFrame && loadedScan != null) _ = Load(loadedScan);
+        if (kb.kKey.wasPressedThisFrame) ToggleRoutes();
+        if (kb.pKey.wasPressedThisFrame) TogglePhotosOnWalls();
+        if (kb.eKey.wasPressedThisFrame) ExportWallDrawingsKey();
+        if (kb.dKey.wasPressedThisFrame) DetectRoutesKey();
+        if (kb.f5Key.wasPressedThisFrame) ReloadKey();
     }
 
     /// <summary>E: the walls/routes drawings (WallDrawings) of the loaded scan, into its folder; opens them.</summary>
@@ -299,7 +323,49 @@ public partial class DesktopWalkApp : MonoBehaviour
             DrawHud(h);
             // crosshair: shows where a click opens/closes a door
             GUI.Label(new Rect(w / 2 - 6, h / 2 - 13, 20, 26), "+", label);
+            if (sidebarOpen) DrawSidebar(w, h);
+            else if (GUI.Button(new Rect(w - 46, 12, 34, 34), "☰", button)) SetSidebar(true);
         }
+    }
+
+    /// <summary>Tab: every toggle/action a key already does, as clickable buttons - the key still works too, and
+    /// shows next to its label the way the Quest menu shows a key cap. Stays open after a click (jump between a
+    /// few toggles with the mouse) until Tab or the X closes it.</summary>
+    void DrawSidebar(float w, float h)
+    {
+        const float sw = 300f;
+        GUILayout.BeginArea(new Rect(w - sw - 12, 12, sw, h - 24), box);
+        GUILayout.BeginHorizontal();
+        GUILayout.Label("Menu", title);
+        GUILayout.FlexibleSpace();
+        if (GUILayout.Button("✕", button, GUILayout.Width(36))) SetSidebar(false);
+        GUILayout.EndHorizontal();
+        GUILayout.Label("Tab otevře/zavře · klávesy fungují i dál", small);
+        GUILayout.Space(10);
+
+        void Item(string text, string key, Action act)
+        {
+            GUILayout.BeginHorizontal();
+            if (GUILayout.Button(text, button, GUILayout.Height(38))) act();
+            GUILayout.Label(key, small, GUILayout.Width(28));
+            GUILayout.EndHorizontal();
+        }
+
+        Item(WallOverlays.ShowRoutes ? "Trasy: zapnuto" : "Trasy: vypnuto", "K", ToggleRoutes);
+        Item(WallOverlays.ShowPhotos ? "Fotky na zdi: zapnuto" : "Fotky na zdi: vypnuto", "P", TogglePhotosOnWalls);
+        Item("Trasy z fotek (detekce)", "D", DetectRoutesKey);
+        Item("Nákresy stěn (export + otevřít)", "E", ExportWallDrawingsKey);
+        Item(Furniture.Finished ? "Podlahy: hotové" : "Podlahy: surové", "–", ToggleFinishedKey);
+        Item(WalkDoors.BlindsDown ? "Žaluzie: dole" : "Žaluzie: nahoře", "–", ToggleBlindsKey);
+        Item("Další patro", "F", NextFloorKey);
+        Item("Model (cyklus)", "M", CycleModelKey);
+        Item(walk.SunOn ? "Slunce: zapnuto" : "Slunce: vypnuto", "U", ToggleSunKey);
+        Item(showHelp ? "Nápověda: schovat" : "Nápověda: zobrazit", "H", () => showHelp = !showHelp);
+        GUILayout.Space(10);
+        Item("Znovu načíst scan", "F5", ReloadKey);
+        Item("Seznam scanů...", "Esc", () => SetMenu(true));
+        Item("Konec", "", Application.Quit);
+        GUILayout.EndArea();
     }
 
     void DrawMenu(float w, float h)
@@ -338,7 +404,7 @@ public partial class DesktopWalkApp : MonoBehaviour
     {
         string text = $"{loadedScan}  ·  {walk.ModelLabel.Replace("Walk: ", "")}" + (floorInfo != "" ? "  ·  " + floorInfo : "");
         if (showHelp)
-            text += "\nWASD move · mouse look · Shift run · Ctrl slow · click door open/close · G move furniture· R turn it· T measure (Del clear)· U sun [ ] time , . month· F next floor · K routes · P photos on walls · D routes from photos · E wall drawings · M model · F5 reload · Esc menu · H hide";
+            text += "\nWASD move · mouse look · Shift run · Ctrl slow · click door open/close · G move furniture· R turn it· T measure (Del clear)· U sun [ ] time , . month· F next floor · K routes · P photos on walls · D routes from photos · E wall drawings · M model · F5 reload · Esc menu · Tab sidebar menu · H hide";
         float bh = showHelp ? 74 : 44;
         GUI.Box(new Rect(12, h - bh - 12, 1100, bh), GUIContent.none, box);
         GUI.Label(new Rect(26, h - bh - 4, 1080, bh), text, small);

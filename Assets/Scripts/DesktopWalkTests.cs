@@ -61,6 +61,7 @@ public partial class DesktopWalkApp
                     "wallview" => await TestWallView(Arg("-wall"), outDir),
                     "menu" => await TestMenu(outDir),
                     "niches" => await TestNiches(outDir),
+                    "walkperf" => await TestWalkPerf(),
                     _ => false,
                 };
             }
@@ -636,6 +637,34 @@ public partial class DesktopWalkApp
 
     /// <summary>-grab "x,y,z,dx,dy,dz" picks the furniture that ray hits, -to "..." drags it along that ray, then
     /// drops it (saved) - or -turn turns it instead. GLB axes. NB writes the scan's furniture file.</summary>
+    /// <summary>Diagnostic, not a pass/fail check: average frame time standing still vs. walking forward (ForcedMove),
+    /// 2 s each, logged as a single TEST line - to tell whether moving (root.transform.position changes every
+    /// frame, forcing Physics.SyncTransforms) is itself the cost behind a "stutters while walking" report, separate
+    /// from whatever a fixed viewpoint already costs.</summary>
+    async Task<bool> TestWalkPerf()
+    {
+        async Task<(float avg, float max, int n)> Measure(float seconds)
+        {
+            int n = 0; float sum = 0f, max = 0f; float t0 = Time.realtimeSinceStartup;
+            while (Time.realtimeSinceStartup - t0 < seconds)
+            {
+                float f0 = Time.realtimeSinceStartup;
+                await Task.Yield();
+                float ms = (Time.realtimeSinceStartup - f0) * 1000f;
+                sum += ms; max = Mathf.Max(max, ms); n++;
+            }
+            return (n > 0 ? sum / n : 0f, max, n);
+        }
+        await Frames(60); // let shader compilation / first-frame hitches settle before measuring
+        var still = await Measure(2f);
+        rig.ForcedMove = new Vector2(0f, 1f);
+        var moving = await Measure(2f);
+        rig.ForcedMove = null;
+        Debug.Log($"TEST walkperf: still avg {still.avg:0.0} ms max {still.max:0.0} ms ({still.n} frames) | " +
+                  $"walking avg {moving.avg:0.0} ms max {moving.max:0.0} ms ({moving.n} frames)");
+        return true;
+    }
+
     async Task<bool> TestMove()
     {
         if (!walk.TryGetModelFrame(out var root, out _, out _)) return false;
