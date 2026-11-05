@@ -151,17 +151,22 @@ public partial class DesktopWalkApp
         MRUKAnchor wall = null; MRUKRoom owner = null;
         foreach (var r in rooms)
         {
-            var w = r.WallAnchors.FirstOrDefault(a => a != null && a.Anchor.Uuid.ToString().StartsWith(wallPrefix, StringComparison.OrdinalIgnoreCase));
+            // WallAnchors first (wall panels); fall back to any anchor (windows/doors have their own anchor, not a wall panel)
+            var w = r.WallAnchors.FirstOrDefault(a => a != null && a.Anchor.Uuid.ToString().StartsWith(wallPrefix, StringComparison.OrdinalIgnoreCase))
+                ?? r.Anchors.FirstOrDefault(a => a != null && a.PlaneRect.HasValue && a.Anchor.Uuid.ToString().StartsWith(wallPrefix, StringComparison.OrdinalIgnoreCase));
             if (w != null) { wall = w; owner = r; break; }
         }
         if (wall == null || !wall.PlaneRect.HasValue) { Debug.Log($"TEST wallview: wall {wallPrefix} not found"); return false; }
         var rc = wall.PlaneRect.Value; var t = wall.transform;
-        Vector3 center = t.TransformPoint(new Vector3((rc.xMin + rc.xMax) / 2f, rc.yMin, 0f));
+        // The anchor's own rect centre (its local y runs bottom..top, not necessarily from the floor) - stand back far
+        // enough to fit it in frame and pitch to actually look at it (a high window needs looking up, not a fixed -15).
+        Vector3 center = t.TransformPoint(new Vector3((rc.xMin + rc.xMax) / 2f, (rc.yMin + rc.yMax) / 2f, 0f));
         float floorY = owner.FloorAnchors.Count > 0 ? owner.FloorAnchors.Min(f => f.transform.position.y) : center.y - 1.5f;
-        Vector3 standPos = center + t.forward * 1.2f;   // wall anchors face into their own room (WallScan's convention)
+        Vector3 standPos = center + t.forward * 2.2f;   // wall anchors face into their own room (WallScan's convention)
         standPos.y = floorY + 1.2f;
-        Vector3 lookDir = new Vector3(center.x - standPos.x, 0f, center.z - standPos.z);
-        await StandAt(standPos, Yaw(lookDir), -15f);
+        Vector3 lookDir = center - standPos;
+        float pitch = Mathf.Atan2(lookDir.y, new Vector2(lookDir.x, lookDir.z).magnitude) * Mathf.Rad2Deg;
+        await StandAt(standPos, Yaw(lookDir), pitch);
         await Shot(Path.Combine(outDir, $"wall_{wallPrefix}.png"));
         return true;
 #else

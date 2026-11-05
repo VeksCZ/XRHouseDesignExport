@@ -109,13 +109,16 @@ public partial class DesktopWalkApp : MonoBehaviour
     }
 
     /// <summary>The Standalone XR settings (shared with Editor play mode for Link testing) start OpenXR on launch -
-    /// the desktop app is a flat window, so shut it down if it came up.</summary>
+    /// the desktop app is a flat window, so shut it down if it came up. A registered OpenXR runtime on the PC (e.g.
+    /// Virtual Desktop) makes the attempt itself slow even when it then fails (XR_ERROR_FORM_FACTOR_UNAVAILABLE) -
+    /// that failed attempt still leaves a loader assigned (isInitializationComplete false, activeLoader not null),
+    /// so clean that up too instead of only handling the fully-succeeded case.</summary>
     static void StopXR()
     {
         var settings = XRGeneralSettings.Instance;
         var mgr = settings ? settings.Manager : null;
-        if (mgr == null || !mgr.isInitializationComplete) return;
-        mgr.StopSubsystems();
+        if (mgr == null || mgr.activeLoader == null) return;
+        if (mgr.isInitializationComplete) mgr.StopSubsystems();
         mgr.DeinitializeLoader();
         Debug.Log("[DesktopWalkApp] XR was running - stopped, desktop mode.");
     }

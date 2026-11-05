@@ -50,6 +50,7 @@ public class CarDrive : MonoBehaviour
     float carPitch, carRoll;
     bool driving;
     bool built;
+    bool noCarStart;    // this scan's spec has no "site.car_start" - never place the car at the model origin (could be inside the house)
     WalkThroughMode walk;
     DesktopWalkRig desktop;
     float lastEnterPressTime = -10f;
@@ -63,6 +64,7 @@ public class CarDrive : MonoBehaviour
         walk = WalkThroughMode.Active;
         if (walk == null || !walk.IsOn) { if (built) DestroyCar(); driving = false; return; }
         if (!walk.TryGetModelFrame(out var root, out _, out _) || root == null) return;
+        if (noCarStart) return;
         if (!built) BuildCar(root);
         if (car.parent != root) car.SetParent(root, false);
 
@@ -231,7 +233,15 @@ public class CarDrive : MonoBehaviour
             carPos = new Vector3((float)cs[0], 0f, -(float)cs[1]);
             carYaw = cs.Count >= 3 ? -(float)cs[2] : 0f;
         }
-        else carPos = Vector3.zero;
+        else
+        {
+            // No "site.car_start" in this scan's spec - the model origin is inside the house (near the entrance
+            // room), never a safe fallback spot for the car. Skip it rather than spawning it indoors.
+            built = false;
+            noCarStart = true;
+            Destroy(go);
+            return;
+        }
 
         var bodyGo = GameObject.CreatePrimitive(PrimitiveType.Cube);
         bodyGo.name = "CarBody";

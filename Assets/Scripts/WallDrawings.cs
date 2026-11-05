@@ -92,13 +92,17 @@ public static class WallDrawings
             if (RouteStore.WorldPoints(r, allRooms, pts) && pts.Count > 0) routes.Add(new RouteLine { route = r, pts = pts });
         }
         var openings = CollectOpenings(rooms);
+        // The future finished floor (floor_buildup), regardless of the live Finished toggle - shown as a reference
+        // line on the rough-floor elevation so it's clear how far above the current bare slab every opening (doors,
+        // balcony doors, HS portals alike) will end up sitting once the floor is built up.
+        var buildupFn = Furniture.AlwaysBuildupFunc(Furniture.Load(HouseEditsStore.CurrentScan), rooms);
         var markers = new List<MarkerAt>();
         foreach (var m in RouteStore.Current.markers)
             if ((kinds == null || kinds.Contains(m.kind)) && RouteStore.WorldMarker(m, allRooms, out var mp, out var mn)) markers.Add(new MarkerAt { m = m, p = mp, n = mn });
         if (kinds != null) photos = photos.Where(ph => ph.route != null && kinds.Contains(ph.route.kind)).ToList();
 
         var sb = new StringBuilder();
-        Head(sb, trade == null ? title : $"{trade} – {title}", routes, markers.Count, trade != null);
+        Head(sb, trade == null ? title : $"{trade} – {title}", routes, markers.Count, trade != null, buildupFn != null);
         if (trade != null) Lists(sb, allRooms.Where(r => r != null).ToList(), routes, markers);
         foreach (var room in rooms.OrderBy(r => MRUKDataProcessor.GetRoomLabel(r), StringComparer.CurrentCulture))
         {
@@ -111,15 +115,16 @@ public static class WallDrawings
             int nMarks = markers.Count(mk => mk.m.roomUuid == rid || room.IsPositionInRoom(mk.p + mk.n * 0.05f, true));
             if (trade != null && nRoutes == 0 && nMarks == 0) continue; // a trade sheet: only rooms with its work
             sb.Append($"<section><h2>{Esc(MRUKDataProcessor.GetRoomLabel(room))} <small>{walls.Count} stěn{(nRoutes > 0 ? $", {nRoutes} tras" : "")}</small></h2>\n<div class=grid>\n");
+            float buildup = buildupFn?.Invoke(floorY) ?? 0f;
             Plan(sb, room, walls, routes, markers, floorY, g, center);
-            for (int i = 0; i < walls.Count; i++) Elevation(sb, room, walls[i], i + 1, routes, markers, openings, floorY, photos, trade != null);
+            for (int i = 0; i < walls.Count; i++) Elevation(sb, room, walls[i], i + 1, routes, markers, openings, floorY, photos, trade != null, buildup);
             sb.Append("</div></section>\n");
         }
         sb.Append("</body></html>\n");
         return sb.ToString();
     }
 
-    static void Head(StringBuilder sb, string title, List<RouteLine> routes, int nMarkers, bool tradeSheet)
+    static void Head(StringBuilder sb, string title, List<RouteLine> routes, int nMarkers, bool tradeSheet, bool hasBuildup)
     {
         sb.Append("<!doctype html><html lang=cs><head><meta charset=utf-8><meta name=viewport content=\"width=device-width,initial-scale=1\">");
         sb.Append($"<title>Stěny a trasy – {Esc(title)}</title><style>");
@@ -131,7 +136,7 @@ public static class WallDrawings
         sb.Append("text{font-family:system-ui,Arial,sans-serif}.dim{fill:#333}.lbl{fill:#000;font-weight:600}");
         sb.Append("body.noroutes .route{display:none}body.nodims .dim{display:none}");
         foreach (var k in RouteStyle.Kinds) sb.Append($"body.nok{(int)k} .k{(int)k}{{display:none}}");
-        sb.Append("body.noprop .prop{display:none}body.nomark .mark{display:none}body.nophoto .photo{display:none}body.nowallphoto .wp{display:none}");
+        sb.Append("body.noprop .prop{display:none}body.nomark .mark{display:none}body.nophoto .photo{display:none}body.nowallphoto .wp{display:none}body.nofin .finfloor{display:none}");
         sb.Append("table{border-collapse:collapse;margin:6px 0 14px;font-size:13px}td,th{border:1px solid #ccc;padding:3px 7px;text-align:left;vertical-align:top}th{background:#f0f0f0}td.n{text-align:right;white-space:nowrap}");
         sb.Append(".photo{cursor:pointer}.photo:hover rect{stroke:#06c;stroke-width:2}");
         sb.Append("@page{size:A4 landscape;margin:10mm}@media print{.bar{display:none}.card{break-inside:avoid}section{break-before:page}h2{margin-top:0}a{color:inherit;text-decoration:none}}</style></head><body>\n");
@@ -151,7 +156,9 @@ public static class WallDrawings
         if (wallPhotos != null && wallPhotos.Count > 0)
             sb.Append("<label><input type=checkbox checked onchange=\"document.body.classList.toggle('nowallphoto',!this.checked)\"> Fotka stěny (3D scan)</label>");
         if (nProp > 0) sb.Append($"<label><input type=checkbox checked onchange=\"document.body.classList.toggle('noprop',!this.checked)\"> Návrhy z fotek ({nProp}, čárkovaně)</label>");
-        sb.Append("<label><input type=checkbox checked onchange=\"document.body.classList.toggle('nodims',!this.checked)\"> Kóty</label></div>\n");
+        sb.Append("<label><input type=checkbox checked onchange=\"document.body.classList.toggle('nodims',!this.checked)\"> Kóty</label>");
+        if (hasBuildup) sb.Append("<label><input type=checkbox checked onchange=\"document.body.classList.toggle('nofin',!this.checked)\"> <span class=sw style=\"background:#2f855a\"></span>Hotová podlaha</label>");
+        sb.Append("</div>\n");
     }
 
     // ---------- trade sheets: lists ----------
@@ -349,7 +356,7 @@ public static class WallDrawings
         return list;
     }
 
-    static void Elevation(StringBuilder sb, MRUKRoom room, MRUKAnchor wall, int number, List<RouteLine> routes, List<MarkerAt> markers, List<Opening> openings, float floorY, List<PhotoAt> photos, bool onlyWithWork)
+    static void Elevation(StringBuilder sb, MRUKRoom room, MRUKAnchor wall, int number, List<RouteLine> routes, List<MarkerAt> markers, List<Opening> openings, float floorY, List<PhotoAt> photos, bool onlyWithWork, float buildup)
     {
         Vector3 c = wall.transform.position, f = wall.transform.forward;
         f.y = 0; f.Normalize();
@@ -388,6 +395,13 @@ public static class WallDrawings
             sb.Append($"<image class=wp href=\"{Esc(wallHref)}\" x=\"{N(ix)}\" y=\"{N(iy)}\" width=\"{N(iw)}\" height=\"{N(ih)}\" preserveAspectRatio=\"none\" filter=\"url(#wpa)\"{flip}/>");
         }
         sb.Append($"<text class=dim x=\"{N(X(0) - 4)}\" y=\"{N(Y(0) + 3)}\" font-size=\"9\" text-anchor=\"end\">±0 HP</text>");
+        if (buildup > 0.005f)
+        {
+            // Where the finished floor will reach, above today's bare slab - so it's clear which openings (any door,
+            // not just a balcony one with its own raised threshold) will end up sitting above it once built up.
+            sb.Append($"<g class=finfloor><line x1=\"{N(X(0))}\" y1=\"{N(Y(buildup))}\" x2=\"{N(X(W))}\" y2=\"{N(Y(buildup))}\" stroke=\"#2f855a\" stroke-width=\"1.5\" stroke-dasharray=\"6 4\"/>");
+            sb.Append($"<text x=\"{N(X(W) + 4)}\" y=\"{N(Y(buildup) + 3)}\" font-size=\"9\" fill=\"#2f855a\">hotová podlaha +{Cm(buildup)}</text></g>");
+        }
         sb.Append($"<text class=dim x=\"{N(X(W) / 2 + padL / 2)}\" y=\"{N(Y(0) + 30)}\" font-size=\"11\" text-anchor=\"middle\">{Cm(W)}</text>");
         sb.Append($"<text class=dim x=\"{N(X(0) - 4)}\" y=\"{N(Y(hL) + 3)}\" font-size=\"9\" text-anchor=\"end\">{Cm(hL)}</text>");
         if (Mathf.Abs(hR - hL) > 0.02f) sb.Append($"<text class=dim x=\"{N(X(W) + 4)}\" y=\"{N(Y(hR) + 3)}\" font-size=\"9\">{Cm(hR)}</text>");

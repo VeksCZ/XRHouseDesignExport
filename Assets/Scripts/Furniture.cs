@@ -26,6 +26,11 @@ public static class Furniture
     public static JObject Load(string scanName)
     {
         string path = MRUKSceneCache.FurniturePath(scanName);
+        // A caller may pass the display name with the "Scan_" folder prefix already stripped (e.g. the batch export
+        // test names a scan from its own folder via MRUKPathUtility.ScanNameFromFolder) - in FolderMode that name
+        // alone resolves to a folder that doesn't exist, so fall back to the folder it actually came from.
+        if ((string.IsNullOrEmpty(path) || !File.Exists(path)) && !string.IsNullOrEmpty(scanName) && !scanName.StartsWith(MRUKSceneCache.ScanFolderPrefix))
+            path = MRUKSceneCache.FurniturePath(MRUKSceneCache.ScanFolderPrefix + scanName);
         if (string.IsNullOrEmpty(path) || !File.Exists(path)) return null;
         try
         {
@@ -444,9 +449,14 @@ public static class Furniture
     /// <summary>The spec's "floor_buildup": [m per storey, bottom storey first] (e.g. [0.23, 0.12]) as rough floor height
     /// (world y) -> build-up. Storeys are the rooms' floor levels, a new storey from 1.2 m higher; a storey past the
     /// list takes the last value. Null when the spec has none.</summary>
-    public static Func<float, float> BuildupFunc(JObject spec, List<MRUKRoom> rooms)
+    public static Func<float, float> BuildupFunc(JObject spec, List<MRUKRoom> rooms) => Finished ? AlwaysBuildupFunc(spec, rooms) : null;
+
+    /// <summary>Same as <see cref="BuildupFunc"/> but independent of the live Finished toggle - for reports that want
+    /// to show the future finished-floor level (e.g. as a reference line) regardless of what the 3D model currently
+    /// shows.</summary>
+    public static Func<float, float> AlwaysBuildupFunc(JObject spec, List<MRUKRoom> rooms)
     {
-        if (!Finished || spec?["floor_buildup"] is not JArray arr || arr.Count == 0 || rooms == null) return null;
+        if (spec?["floor_buildup"] is not JArray arr || arr.Count == 0 || rooms == null) return null;
         var t = arr.Select(v => v.Type == JTokenType.Float || v.Type == JTokenType.Integer ? (float)v : 0f).ToList();
         var levels = new List<float>();
         foreach (var y in rooms.Where(r => r != null && r.FloorAnchors.Count > 0)

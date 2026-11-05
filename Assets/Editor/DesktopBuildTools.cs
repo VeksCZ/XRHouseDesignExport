@@ -171,7 +171,10 @@ public static class DesktopBuildTools
         try
         {
             // Must be on disk: the build reads the settings asset, an in-memory change alone doesn't reach the player.
-            if (xr != null) { xr.InitManagerOnStart = false; EditorUtility.SetDirty(xr); AssetDatabase.SaveAssets(); }
+            // Refresh (not just SaveAssets) so the player build reads the just-written false back, not a cached true -
+            // a registered OpenXR runtime on the PC (e.g. Virtual Desktop) otherwise still gets probed at every launch,
+            // which is slow (the desktop app is a flat window and never needs XR at all).
+            if (xr != null) { xr.InitManagerOnStart = false; EditorUtility.SetDirty(xr); AssetDatabase.SaveAssets(); AssetDatabase.Refresh(ImportAssetOptions.ForceSynchronousImport); }
             report = BuildPipeline.BuildPlayer(new BuildPlayerOptions
             {
                 scenes = new[] { ScenePath },
