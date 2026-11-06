@@ -483,7 +483,10 @@ return model;
         return false;
     }
 
-    private static float EstimateWallThickness(MRUKRoom room, List<MRUKRoom> allRooms, Vector3 wallWorldPos, Vector3 outwardNormal, float extentAlongWall, Vector3 wallDir, float fallback, out float shift, float height = 2.5f)
+    /// <summary>Same estimate used to build the wall itself - callers outside this file (the walk-through's window
+    /// frame/reveal) need the REAL thickness of the one wall a window sits in, not the global exterior fallback,
+    /// since an interior partition can be much thinner.</summary>
+    internal static float EstimateWallThickness(MRUKRoom room, List<MRUKRoom> allRooms, Vector3 wallWorldPos, Vector3 outwardNormal, float extentAlongWall, Vector3 wallDir, float fallback, out float shift, float height = 2.5f)
     {
         const float minGap = -0.15f, maxThickness = 0.5f, thin = 0.02f;
         float best = float.MaxValue;

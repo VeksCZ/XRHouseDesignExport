@@ -163,7 +163,8 @@ public partial class DesktopWalkApp
         // enough to fit it in frame and pitch to actually look at it (a high window needs looking up, not a fixed -15).
         Vector3 center = t.TransformPoint(new Vector3((rc.xMin + rc.xMax) / 2f, (rc.yMin + rc.yMax) / 2f, 0f));
         float floorY = owner.FloorAnchors.Count > 0 ? owner.FloorAnchors.Min(f => f.transform.position.y) : center.y - 1.5f;
-        Vector3 standPos = center + t.forward * 2.2f;   // wall anchors face into their own room (WallScan's convention)
+        float dist = float.TryParse(Arg("-dist"), NumberStyles.Float, CultureInfo.InvariantCulture, out var dd) ? dd : 2.2f;
+        Vector3 standPos = center + t.forward * dist;   // wall anchors face into their own room (WallScan's convention)
         standPos.y = floorY + 1.2f;
         Vector3 lookDir = center - standPos;
         float pitch = Mathf.Atan2(lookDir.y, new Vector2(lookDir.x, lookDir.z).magnitude) * Mathf.Rad2Deg;
