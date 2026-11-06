@@ -111,7 +111,8 @@ public static class XRModelFactory
                                 Vector3 lp = Quaternion.Inverse(wallRot) * (OPos(h) - wallPos);
                                 float hw = OW(h)/2f, hh = h.PlaneRect.Value.height/2f;
                                 return midX > lp.x-hw+0.01f && midX < lp.x+hw-0.01f && midY > lp.y-hh+0.01f && midY < lp.y+hh-0.01f;
-                            }) || cuts.Any(k => midX > k.cx - k.hw && midX < k.cx + k.hw && midY > k.cy - k.hh && midY < k.cy + k.hh);
+                            }) || cuts.Any(k => midX > k.cx - k.hw && midX < k.cx + k.hw && midY > k.cy - k.hh && midY < k.cy + k.hh)
+                               || InWindowSeam(wallHoles, wallPos, wallRot, midX, midY);
                             if (!isHole) AddWallCell(rm, wallPos, wallRot, midX, midY, x2-x1, y2-y1, wallShift - wallThickness, wallShift, niches, center, rotation);
                         }
                     }
@@ -506,10 +507,16 @@ return model;
                 float along = Vector3.Dot(delta, wallDir), half = a.PlaneRect.Value.width / 2f;
                 if (along - half > extentAlongWall / 2f - 0.15f || along + half < -extentAlongWall / 2f + 0.15f) continue;
 
-                // Two faces of one physical wall overlap in height (by at least half a metre) - centres alone
-                // differ when one side is a double-height room (a 4 m living room against 2.9 m rooms); an
-                // unrelated wall on another storey doesn't overlap.
-                if (Mathf.Abs(a.transform.position.y - wallWorldPos.y) > (height + a.PlaneRect.Value.height) / 2f - 0.5f) continue;
+                // Two faces of one physical wall overlap in height over most of the shorter one - centres alone
+                // differ when one side is a double-height room (a 4 m living room against 2.9 m rooms: the whole
+                // 2.9 m overlaps). An unrelated wall on another storey overlaps only by a strip: the double-height
+                // living room's wall reaches ~0.8 m above the upstairs floor right under the upstairs gable wall,
+                // and a fixed 0.5 m overlap test took it for that 50 cm outer wall's other face (-> 18 cm wall,
+                // window blinds hanging outside it).
+                float oh = a.PlaneRect.Value.height;
+                float overlap = Mathf.Min(wallWorldPos.y + height / 2f, a.transform.position.y + oh / 2f)
+                              - Mathf.Max(wallWorldPos.y - height / 2f, a.transform.position.y - oh / 2f);
+                if (overlap < Mathf.Max(0.5f, 0.5f * Mathf.Min(height, oh))) continue;
 
                 best = gap;
             }
@@ -542,6 +549,38 @@ return model;
     static readonly Dictionary<MRUKAnchor, Vector3> openingPos = new Dictionary<MRUKAnchor, Vector3>();
     static Vector3 OPos(MRUKAnchor a) => openingPos.TryGetValue(a, out var p) ? p : a.transform.position;
     static float OW(MRUKAnchor a) => a.PlaneRect.Value.width;
+
+    /// <summary>MRUK sometimes scans one physical window as two anchors side by side with a few cm between them
+    /// (the mullion it took for wall). The walk-through draws them as ONE window (WalkDoors.BuildWindowFrames), so
+    /// the sliver of wall between the two holes must go too - left in, it showed as a full-thickness wall pier
+    /// through the middle of the window. True for a cell in the gap (under WindowSeamGap) between two windows of
+    /// this wall whose heights overlap there.</summary>
+    const float WindowSeamGap = 0.12f;
+    static bool InWindowSeam(List<MRUKAnchor> holes, Vector3 wallPos, Quaternion wallRot, float midX, float midY)
+    {
+        Quaternion inv = Quaternion.Inverse(wallRot);
+        for (int i = 0; i < holes.Count; i++)
+        {
+            var a = holes[i];
+            if (!a.Label.ToString().Contains("WINDOW")) continue;
+            Vector3 la = inv * (OPos(a) - wallPos);
+            float aw = OW(a) / 2f, ah = a.PlaneRect.Value.height / 2f;
+            for (int j = 0; j < holes.Count; j++)
+            {
+                if (j == i) continue;
+                var b = holes[j];
+                if (!b.Label.ToString().Contains("WINDOW")) continue;
+                Vector3 lb = inv * (OPos(b) - wallPos);
+                float bw = OW(b) / 2f, bh = b.PlaneRect.Value.height / 2f;
+                float gapL = la.x + aw, gapR = lb.x - bw;           // a on the left, b on the right
+                if (gapR < gapL - 0.005f || gapR - gapL > WindowSeamGap) continue;
+                if (midX < gapL - 0.005f || midX > gapR + 0.005f) continue;
+                float y0 = Mathf.Max(la.y - ah, lb.y - bh), y1 = Mathf.Min(la.y + ah, lb.y + bh);
+                if (midY > y0 && midY < y1) return true;
+            }
+        }
+        return false;
+    }
 
     /// <summary>Two anchors for one opening: the rooms on either side each scan it on their own face of the wall -
     /// parallel, at most a wall's thickness apart and a few cm off along it (DoorCatalog matches them the same way).</summary>

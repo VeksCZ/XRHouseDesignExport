@@ -44,6 +44,15 @@ public class StairRailing
         Vector3 M(Vector3 p) => g * (p - center);   // scan world -> model space
         Vector3 Md(Vector3 d) => g * d;
 
+        // Doorways count as wall: a stair side running along a wall that has a door in it found no wall collider
+        // in the opening and stood a slat right in the door's frame / trim.
+        doorways.Clear();
+        foreach (var d in DoorCatalog.Build(rooms))
+        {
+            if (d.isWindow) continue;
+            doorways.Add((M(d.center), Md(d.right).normalized, Md(d.normal).normalized, d.width, d.FloorY - center.y, d.height));
+        }
+
         // the floor openings (model space rectangles) and their floor height
         var holes = new List<(Rect r, float y)>();
         foreach (var h in edits.holes)
@@ -166,9 +175,17 @@ public class StairRailing
         var run = new List<(float t, Vector3 p)>();
         void Flush()
         {
+            // A lone slat (one sample between two blocked ones - typically in a doorway or a wall's end) gets no
+            // handrail and is never a real railing: leave it out.
             if (run.Count >= 2)
             {
                 var (t0, p0) = run[0]; var (t1, p1) = run[run.Count - 1];
+                foreach (var (t, p) in run)
+                {
+                    float f = foot(t), tp = top(t);
+                    if (recordSlats) stairSlats.Add((p, tp));
+                    AddBox(new Vector3(p.x, (f + tp) / 2f, p.z), Quaternion.LookRotation(d, Vector3.up), new Vector3(Slat, tp - f, Slat));
+                }
                 AddBeam(new Vector3(p0.x, top(t0), p0.z), new Vector3(p1.x, top(t1), p1.z), Rail, 0.045f);
                 if (bottomRail) AddBeam(new Vector3(p0.x, foot(t0) + 0.08f, p0.z), new Vector3(p1.x, foot(t1) + 0.08f, p1.z), Slat, 0.03f);
             }
@@ -178,14 +195,28 @@ public class StairRailing
         {
             float t = len * k / n;
             Vector3 p = a + d * t;
-            bool blocked = (skip != null && skip(p)) || WallAt(p, foot(t), outward);
+            bool blocked = (skip != null && skip(p)) || WallAt(p, foot(t), outward) || DoorwayAt(p, foot(t));
             if (blocked) { Flush(); continue; }
             run.Add((t, p));
-            float f = foot(t), tp = top(t);
-            if (recordSlats) stairSlats.Add((p, tp));
-            AddBox(new Vector3(p.x, (f + tp) / 2f, p.z), Quaternion.LookRotation(d, Vector3.up), new Vector3(Slat, tp - f, Slat));
         }
         Flush();
+    }
+
+    readonly List<(Vector3 c, Vector3 right, Vector3 normal, float w, float floorY, float h)> doorways = new List<(Vector3, Vector3, Vector3, float, float, float)>();
+
+    /// <summary>The slat would stand in a doorway or its frame/trim (model space): within the opening's width plus
+    /// the trim, within a wall's thickness of its plane (either face), at a height the door spans.</summary>
+    bool DoorwayAt(Vector3 modelP, float footY)
+    {
+        foreach (var (c, right, normal, w, floorY, h) in doorways)
+        {
+            if (footY < floorY - 0.4f || footY > floorY + h) continue;
+            Vector3 rel = modelP - c; rel.y = 0f;
+            if (Mathf.Abs(Vector3.Dot(rel, right)) > w / 2f + 0.12f) continue;
+            if (Mathf.Abs(Vector3.Dot(rel, normal)) > 0.45f) continue;
+            return true;
+        }
+        return false;
     }
 
     /// <summary>A wall already stands where a slat would (checked at knee and chest height).</summary>

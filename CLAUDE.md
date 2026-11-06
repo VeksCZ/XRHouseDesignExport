@@ -165,7 +165,8 @@ and exports 3D models, floor plans and reports from the scan.
   the shower has the real Hansgrohe set (`ShowerSet`: thermostat plate, 450 mm arm, 300 x 300 head, elbow + holder, hose loop, hand shower; `"set_u"` moves it) and the built-in oven / microwave of
   `kitchen_tall` have steel surrounds, black glass, handles, knobs and displays. A `rooms[]` entry whose `"room"` is the NAME of an `extra_rooms` entry (e.g. `"Satna"`) furnishes that room.
 - **House-specific switches**: the furniture spec's `"house_style": {"blinds", "entrance_door", "window_frames"}` turns on things that belong to the new build only (exterior blinds - one per window group,
-  the Aluprof entrance door for a 1.35-1.70 m single door, white / anthracite window frames); without the key a scan (e.g. the flat) gets none of them. `Tools/apply_proposed_to_scan.py <scan folder>`
+  the Aluprof entrance door for a 1.35-1.70 m single door, white / anthracite window frames); without the key a scan (e.g. the flat) gets none of them. `"no_blinds": ["fb2b7e45"]` (window uuid
+  prefixes) leaves the blind out of those windows (the upstairs WC window has none); a blind sits in the window's own wall thickness (`WindowWallThickness`). Desktop test flag `-blindsdown` (views) lowers them for the shots. `Tools/apply_proposed_to_scan.py <scan folder>`
   copies the cloud's proposals (furniture + terrain + house_style, window edits) into a scan copy. `site.ground_cuts` lowers rectangles of the ground (a garden under a terrace).
 - **Missing wall** is its own tool (Tools > Repair the scan > Missing wall, `Tool.Walls`; `DoorEditTool` runs it without ever picking doors). **Save live scan** always switches to the saved copy.
   A rebuild of the walk-through (door added, scan reloaded) puts you back at the remembered spot (`TryGetFeetOrRemembered`, `[Walk]` log lines say what happened).

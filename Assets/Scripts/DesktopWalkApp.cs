@@ -245,7 +245,8 @@ public partial class DesktopWalkApp : MonoBehaviour
         if (kb.kKey.wasPressedThisFrame) ToggleRoutes();
         if (kb.pKey.wasPressedThisFrame) TogglePhotosOnWalls();
         if (kb.eKey.wasPressedThisFrame) ExportWallDrawingsKey();
-        if (kb.dKey.wasPressedThisFrame) DetectRoutesKey();
+        // Not "D" - that's also strafe-right, so it fired on every step while walking.
+        if (kb.nKey.wasPressedThisFrame) DetectRoutesKey();
         if (kb.f5Key.wasPressedThisFrame) ReloadKey();
     }
 
@@ -375,7 +376,7 @@ public partial class DesktopWalkApp : MonoBehaviour
 
         Item(WallOverlays.ShowRoutes ? "Trasy: zapnuto" : "Trasy: vypnuto", "K", ToggleRoutes);
         Item(WallOverlays.ShowPhotos ? "Fotky na zdi: zapnuto" : "Fotky na zdi: vypnuto", "P", TogglePhotosOnWalls);
-        Item("Trasy z fotek (detekce)", "D", DetectRoutesKey);
+        Item("Trasy z fotek (detekce)", "N", DetectRoutesKey);
         Item("Nákresy stěn (export + otevřít)", "E", ExportWallDrawingsKey);
         Item(Furniture.Finished ? "Podlahy: hotové" : "Podlahy: surové", "–", ToggleFinishedKey);
         Item(WalkDoors.BlindsDown ? "Žaluzie: dole" : "Žaluzie: nahoře", "–", ToggleBlindsKey);
@@ -426,7 +427,7 @@ public partial class DesktopWalkApp : MonoBehaviour
     {
         string text = $"{loadedScan}  ·  {walk.ModelLabel.Replace("Walk: ", "")}" + (floorInfo != "" ? "  ·  " + floorInfo : "");
         if (showHelp)
-            text += "\nWASD move · mouse look · Shift run · Ctrl slow · click door open/close · G move furniture· R turn it· T measure (Del clear)· U sun [ ] time , . month· F next floor · K routes · P photos on walls · D routes from photos · E wall drawings · M model · F5 reload · Esc menu · Tab sidebar menu · H hide";
+            text += "\nWASD move · mouse look · Shift run · Ctrl slow · click door open/close · G move furniture· R turn it· T measure (Del clear)· U sun [ ] time , . month· F next floor · K routes · P photos on walls · N routes from photos · E wall drawings · M model · F5 reload · Esc menu · Tab sidebar menu · H hide";
         float bh = showHelp ? 74 : 44;
         GUI.Box(new Rect(12, h - bh - 12, 1100, bh), GUIContent.none, box);
         GUI.Label(new Rect(26, h - bh - 4, 1080, bh), text, small);

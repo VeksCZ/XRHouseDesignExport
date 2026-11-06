@@ -262,56 +262,29 @@ public class WalkDoors
                 }
             }
             members.Sort((a, b) => a.at.CompareTo(b.at));
-            var splits = new List<float>();
+            var splits = new List<(float f, float w)>();
             float W = end - start;
             for (int i = 0; i < members.Count; i++)
             {
                 var (at, req) = members[i];
-                foreach (float s in req.splitsM) splits.Add((at - start + s) / W);
-                if (i > 0) splits.Add((at - start) / W);   // the seam between two merged anchors - drawn as a post, same as a real mullion
+                foreach (float s in req.splitsM) splits.Add(((at - start + s) / W, MullionW));
+                if (i > 0)
+                {
+                    // the seam between two merged anchors - drawn as a post, same as a real mullion, but covering the
+                    // whole gap MRUK left between them (the sashes stop MullionW/2 short of each anchor's own edge,
+                    // so a post at only one edge left a see-through slit of the gap's width beside it)
+                    var (pat, preq) = members[i - 1];
+                    float prevEnd = pat - start + preq.w, nextStart = at - start;
+                    float gap = Mathf.Max(0f, nextStart - prevEnd);
+                    splits.Add(((prevEnd + nextStart) / 2f / W, MullionW + gap));
+                }
             }
             Vector3 groupLeft = origin + cur.along * start;
             AddWindowFrame(visual, layer, groupLeft, cur.along, cur.outN, W, cur.h, splits);
-            if (cur.wallT > 0.001f)
-            {
-                // groupLeft sits at the wall's middle (same shift every member got) - back up to the room-side
-                // face along the interior direction (outN) to get the reveal's own starting point.
-                Vector3 groupLeftInterior = groupLeft + cur.outN * (cur.wallT / 2f);
-                AddWindowReveal(visual, layer, groupLeftInterior, cur.along, -cur.outN, W, cur.h, cur.wallT);
-            }
+            // No extra reveal lining here: the wall around the hole is already built in its full thickness
+            // (XRModelFactory wall cells), so its own faces ARE the reveal - a 2 cm lining ring on each side of the
+            // frame only added stray white stripes (and showed outside as a second, unexplained frame).
         }
-    }
-
-    /// <summary>The sides of the real opening left exposed once the frame sits at the middle of the wall instead of
-    /// flush with the room-side face: a thin lining (left/right/top/bottom), room-side and outside-side of the
-    /// frame (never overlapping its own WinFrameD depth - that already showed as a stray white slab doubling the
-    /// frame when this used to span the whole thickness through it). 'leftInterior' is the room-side wall face,
-    /// 'outward' points from there to the outside.</summary>
-    void AddWindowReveal(GameObject visual, int layer, Vector3 leftInterior, Vector3 along, Vector3 outward, float W, float h, float wallThickness)
-    {
-        float side = (wallThickness - WinFrameD) / 2f;
-        if (side < 0.01f) return;   // the frame alone already reaches both wall faces - nothing left to line
-        Quaternion rot = Quaternion.LookRotation(along, Vector3.up);
-        var parts = new List<XRMeshPart>();
-        const float Lining = 0.02f;
-        void Box(Vector3 c, Vector3 size) { var p = XRModelFactory.CreateBoxPart("WINDOW_REVEAL", c, rot, size, "DOORLEAF", Vector3.zero, 0f); p.color = WhiteColor; parts.Add(p); }
-        void Ring(float depthCenter)
-        {
-            Vector3 mid = leftInterior + outward * depthCenter;
-            Box(mid + Vector3.up * (h / 2f), new Vector3(side, h, Lining));                       // left jamb
-            Box(mid + along * W + Vector3.up * (h / 2f), new Vector3(side, h, Lining));           // right jamb
-            Box(mid + along * (W / 2f) + Vector3.up * h, new Vector3(side, Lining, W));           // head
-            Box(mid + along * (W / 2f), new Vector3(side, Lining, W));                            // sill
-        }
-        Ring(side / 2f);                        // between the room face and the frame
-        Ring(wallThickness - side / 2f);        // between the frame and the outside face
-        if (parts.Count == 0) return;
-        var model = new XRHouseModel();
-        model.rooms.Add(new XRRoomModel { roomName = "WindowReveal", parts = parts });
-        var go = UnityModelLoader.LoadToScene(model, shaded: true);
-        go.transform.SetParent(visual.transform, false);
-        foreach (var t in go.GetComponentsInChildren<Transform>()) t.gameObject.layer = layer;
-        created.Add(go);
     }
 
     static readonly Color FrameColor = new Color(0.62f, 0.42f, 0.22f);   // door frame: the saturated brown
@@ -502,8 +475,8 @@ public class WalkDoors
         // The scan's own window plane sits at the room-side wall face - a frame built right there (as before) reads
         // as a thin plate stuck to the inside of a wall of any thickness, with nothing filling the rest of the
         // opening (the real wall's reveal) around it. Move the frame/sash assembly to the middle of the real wall
-        // thickness instead, and fill what is left on each side with wall material (AddWindowReveal) - openLeftM
-        // (blinds; already offset from this same face by the full thickness) is captured above this and stays as is.
+        // thickness instead (the wall's own cells around the hole are the reveal on both sides) - openLeftM
+        // (blinds; offset from this same face by the wall's thickness) is captured above this and stays as is.
         float wallT = 0f;
         if (frames)
         {
@@ -565,16 +538,19 @@ public class WalkDoors
             winFrameReqs.Add(new WinFrameReq { left = leftM, along = rM, outN = sM, w = W, h = h, wallT = wallT, splitsM = splitsM });
         }
         bool exterior = d.roomFront == null || d.roomBack == null;
-        if (exterior && d.height > 0.3f && Furniture.StyleFlag(scanName, "blinds"))
+        if (exterior && d.height > 0.3f && Furniture.StyleFlag(scanName, "blinds") && !Furniture.StyleListHas(scanName, "no_blinds", d.uuid))
         {
             Vector3 nM = g * d.normal;                      // points into the front room
-            blindReqs.Add(new BlindReq { left = openLeftM, along = rM, outN = d.roomFront != null ? -nM : nM, w = d.width, h = d.height });
+            // the blind sits at the outer end of THIS wall's reveal - the real thickness of the wall the window is in,
+            // not the spec's global exterior value (a thinner wall left the rails / head box floating outside it)
+            float bt = wallT > 0.001f ? wallT : WindowWallThickness(d, rooms);
+            blindReqs.Add(new BlindReq { left = openLeftM, along = rM, outN = d.roomFront != null ? -nM : nM, w = d.width, h = d.height, wallT = bt });
         }
     }
 
     const float BlindBox = 0.17f, BlindRail = 0.03f, BlindDepth = 0.12f;
 
-    struct BlindReq { public Vector3 left, along, outN; public float w, h; }
+    struct BlindReq { public Vector3 left, along, outN; public float w, h, wallT; }
     readonly List<BlindReq> blindReqs = new List<BlindReq>();
 
     /// <summary>One blind over a whole window: the windows (anchors) of one wall that stand next to each other - a balcony door and its fixed
@@ -607,7 +583,7 @@ public class WalkDoors
                 }
             }
             Vector3 left = origin + cur.along * start; left.y = bottom;
-            AddBlind(visual, layer, left, cur.along, cur.outN, end - start, top - bottom);
+            AddBlind(visual, layer, left, cur.along, cur.outN, end - start, top - bottom, cur.wallT);
         }
     }
 
@@ -615,9 +591,9 @@ public class WalkDoors
     /// the head box is hidden in the lintel above the opening (the space left there for it; it is inside the solid wall, so only
     /// the curtain comes out of the slot), two anthracite guide rails stand at the outer end of the reveal and the curtain slides
     /// down to the sill (<see cref="BlindsDown"/>). 'outN' points to the outside.</summary>
-    void AddBlind(GameObject visual, int layer, Vector3 openLeftM, Vector3 rM, Vector3 outN, float openW, float openH)
+    void AddBlind(GameObject visual, int layer, Vector3 openLeftM, Vector3 rM, Vector3 outN, float openW, float openH, float wallT)
     {
-        float wall = Mathf.Max(0.2f, XRModelFactory.ExteriorWallThickness);
+        float wall = wallT > 0.15f ? wallT : Mathf.Max(0.2f, XRModelFactory.ExteriorWallThickness);
         Vector3 baseP = openLeftM + outN * (wall - BlindDepth / 2f - 0.01f);   // at the outer end of the reveal, left jamb, sill
         Quaternion rot = Quaternion.LookRotation(rM, Vector3.up);
         float railH = openH;                                   // the rails and the curtain use the whole opening - the box is up in the lintel
@@ -655,7 +631,7 @@ public class WalkDoors
 
     /// <summary>The window's frame: the outer profile and a post between the parts, white on the room side (RAL 9016) and
     /// anthracite on the outside (Veka Softline 82, "Bila / Antracit hladky"). 'interiorM' points into the room.</summary>
-    void AddWindowFrame(GameObject visual, int layer, Vector3 leftM, Vector3 rM, Vector3 interiorM, float W, float h, List<float> splits)
+    void AddWindowFrame(GameObject visual, int layer, Vector3 leftM, Vector3 rM, Vector3 interiorM, float W, float h, List<(float f, float w)> splits)
     {
         Quaternion rot = Quaternion.LookRotation(rM, Vector3.up);
         Vector3 face = Vector3.Cross(Vector3.up, rM);
@@ -673,7 +649,7 @@ public class WalkDoors
         float fw = Mathf.Min(WinFrameW, Mathf.Min(W / 4f, h / 4f));
         Span(0f, fw, 0f, h); Span(W - fw, W, 0f, h);          // jambs
         Span(fw, W - fw, h - fw, h); Span(fw, W - fw, 0f, fw); // head, sill
-        foreach (float f in splits) if (f > 0.01f && f < 0.99f) Span(f * W - MullionW / 2f, f * W + MullionW / 2f, fw, h - fw);
+        foreach (var (f, sw) in splits) if (f > 0.01f && f < 0.99f) Span(f * W - sw / 2f, f * W + sw / 2f, fw, h - fw);
         if (parts.Count == 0) return;
         var model = new XRHouseModel();
         model.rooms.Add(new XRRoomModel { roomName = "WindowFrame", parts = parts });

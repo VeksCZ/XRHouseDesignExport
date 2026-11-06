@@ -20,6 +20,7 @@ using Meta.XR.MRUtilityKit;
 public partial class DesktopWalkApp
 {
     const float EyeHeight = 1.65f;
+    bool? restoreBlinds;
 
     async Task<bool> RunTests()
     {
@@ -67,6 +68,7 @@ public partial class DesktopWalkApp
             }
         }
         catch (Exception ex) { Debug.LogException(ex); }
+        if (restoreBlinds.HasValue) WalkDoors.BlindsDown = restoreBlinds.Value;
         Debug.Log($"TEST {test}: {(ok ? "PASSED" : "FAILED")}");
         await Frames(3);
         Application.Quit(ok ? 0 : 3);
@@ -352,6 +354,13 @@ public partial class DesktopWalkApp
         var list = (Arg("-views") ?? "").Split(new[] { ';' }, StringSplitOptions.RemoveEmptyEntries);
         int i = 0;
         if (Environment.GetCommandLineArgs().Contains("-opendoors")) { walk.SetAllDoors(true); await Frames(90); } // swing time
+        if (Environment.GetCommandLineArgs().Contains("-blindsdown"))
+        {
+            restoreBlinds = WalkDoors.BlindsDown;   // a saved preference, shared with the app you use - put back after the test
+            WalkDoors.BlindsDown = true;   // the curtains take ~3 s to come down
+            float t0 = Time.time;
+            while (Time.time - t0 < 4f) await Frames(1);
+        }
         // -ustair "x,y,z,hx,hz,side,width" (GLB axes): adds a U stair (StairGeometry.UShape) from bottom-step middle
         // (x,y,z) heading (hx,hz) to the edits - NB saved to the scan's edits file like any edit
         if (Arg("-ustair") != null && walk.TryGetModelFrame(out _, out float uy, out var uc))

@@ -463,6 +463,20 @@ public static class Furniture
         catch { return false; }
     }
 
+    /// <summary>The spec's "house_style" list 'key' (e.g. "no_blinds": ["fb2b7e45"]) names this anchor - by a uuid
+    /// prefix, so the short ids from the logs / docs work.</summary>
+    public static bool StyleListHas(string scanName, string key, string uuid)
+    {
+        try
+        {
+            if (string.IsNullOrEmpty(uuid) || !(Load(scanName)?["house_style"]?[key] is JArray list)) return false;
+            foreach (var t in list)
+                if (t.Type == JTokenType.String && ((string)t).Length >= 4 && uuid.StartsWith((string)t, System.StringComparison.OrdinalIgnoreCase)) return true;
+            return false;
+        }
+        catch { return false; }
+    }
+
     const string FinishedPref = "Model.Finished";
     /// <summary>On: the model shows the finished floors ("floor_buildup") and the suspended ceilings
     /// ("suspended_ceilings"). Off (default): the rough shell as scanned - what pipes in the floor and cables above the
