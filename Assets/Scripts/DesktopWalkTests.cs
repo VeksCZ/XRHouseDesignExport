@@ -641,14 +641,16 @@ public partial class DesktopWalkApp
     {
         if (!walk.TryGetModelFrame(out var root, out float yaw, out var center)) return false;
         Quaternion g = Quaternion.Euler(0, yaw, 0), gi = Quaternion.Inverse(g);
-        Vector3 ToWorld(Vector3 glb) => root.TransformPoint(new Vector3(glb.x, glb.y, -glb.z));
-        Vector3 Glb(Vector3 w) { var m = root.InverseTransformPoint(w); return new Vector3(m.x, m.y, -m.z); }
+        // -scanframe: the ray points are in the scan's own frame (the coordinates doorinfo / [WallT] print), not GLB
+        bool scanFrame = Environment.GetCommandLineArgs().Contains("-scanframe");
+        Vector3 ToWorld(Vector3 glb) => scanFrame ? root.TransformPoint(g * (glb - center)) : root.TransformPoint(new Vector3(glb.x, glb.y, -glb.z));
+        Vector3 Glb(Vector3 w) { var m = root.InverseTransformPoint(w); return scanFrame ? gi * m + center : new Vector3(m.x, m.y, -m.z); }
         foreach (var r in rays.Split(new[] { ';' }, StringSplitOptions.RemoveEmptyEntries))
         {
             var f = r.Split(',').Select(s => float.Parse(s.Trim(), CultureInfo.InvariantCulture)).ToArray();
             Vector3 o = ToWorld(new Vector3(f[0], f[1], f[2])), d = (ToWorld(new Vector3(f[0] + f[3], f[1] + f[4], f[2] + f[5])) - o).normalized;
             var hits = Physics.RaycastAll(o, d, 10f, ~0, QueryTriggerInteraction.Ignore).OrderBy(h => h.distance).Take(6);
-            Debug.Log($"TEST ray {r}: " + string.Join(" | ", hits.Select(h => { var p = Glb(h.point); return $"{h.collider.name}@({p.x:0.00},{p.y:0.00},{p.z:0.00})"; })));
+            Debug.Log($"TEST ray {r}: " + string.Join(" | ", hits.Select(h => { var p = Glb(h.point); return $"{h.collider.transform.parent?.name}/{h.collider.name}@({p.x:0.00},{p.y:0.00},{p.z:0.00})"; })));
             // renderers without a collider (doors, panes...) whose bounds the ray crosses
             var ray = new Ray(o, d);
             foreach (var mr in root.GetComponentsInChildren<MeshRenderer>())

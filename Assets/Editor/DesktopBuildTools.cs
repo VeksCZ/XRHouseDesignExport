@@ -159,6 +159,35 @@ public static class DesktopBuildTools
     {
         if (!File.Exists(ScenePath)) CreateScene();
         PlayerSettings.SetScriptingBackend(NamedBuildTarget.Standalone, ScriptingImplementation.Mono2x);
+        // The app icon inside the exe - what Windows shows in the window's title bar and on the taskbar (a shortcut's
+        // own .ico only changes the shortcut). Standalone only; the Quest keeps its own Android icons.
+        // From its own copy imported as a plain readable RGBA texture: the shared XRHouseIcon.png's import settings (old,
+        // alpha-only format) gave a solid black exe icon.
+        const string WinIcon = "Assets/Branding/XRHouseIconWindows.png";
+        if (!File.Exists(WinIcon) && File.Exists("Assets/Branding/XRHouseIcon.png"))
+        {
+            File.Copy("Assets/Branding/XRHouseIcon.png", WinIcon);
+            AssetDatabase.ImportAsset(WinIcon, ImportAssetOptions.ForceSynchronousImport);
+        }
+        if (AssetImporter.GetAtPath(WinIcon) is TextureImporter ti &&
+            (!ti.isReadable || ti.textureCompression != TextureImporterCompression.Uncompressed || ti.textureType != TextureImporterType.Default || ti.alphaSource != TextureImporterAlphaSource.FromInput))
+        {
+            ti.textureType = TextureImporterType.Default;
+            ti.isReadable = true;
+            ti.textureCompression = TextureImporterCompression.Uncompressed;
+            ti.alphaSource = TextureImporterAlphaSource.FromInput;
+            ti.mipmapEnabled = false;
+            ti.SaveAndReimport();
+        }
+        var icon = AssetDatabase.LoadAssetAtPath<Texture2D>(WinIcon);
+        if (icon != null)
+        {
+            int n = PlayerSettings.GetIconSizes(NamedBuildTarget.Standalone, IconKind.Application).Length;
+            var icons = new Texture2D[n];
+            for (int i = 0; i < n; i++) icons[i] = icon;
+            PlayerSettings.SetIcons(NamedBuildTarget.Standalone, icons, IconKind.Application);
+        }
+        else Debug.LogWarning("[DesktopBuildTools] Assets/Branding/XRHouseIcon.png not found - the exe keeps Unity's icon");
         Directory.CreateDirectory(Path.GetDirectoryName(exe));
         // Native plugins left over from an earlier build would otherwise stay next to the exe.
         string plugins = Path.Combine(Path.GetDirectoryName(exe), Path.GetFileNameWithoutExtension(exe) + "_Data", "Plugins");

@@ -55,6 +55,7 @@ public partial class DesktopWalkApp : MonoBehaviour
         }
         Application.targetFrameRate = -1;
         QualitySettings.vSyncCount = Array.IndexOf(Environment.GetCommandLineArgs(), "-novsync") >= 0 ? 0 : 1;
+        XRModelFactory.LogWalls = Array.IndexOf(Environment.GetCommandLineArgs(), "-logwalls") >= 0;
         // Big flat-coloured surfaces: edges stair-step badly without MSAA. Not in the Editor (it'd be saved to the asset).
         if (!Application.isEditor && UnityEngine.Rendering.GraphicsSettings.currentRenderPipeline is UnityEngine.Rendering.Universal.UniversalRenderPipelineAsset urp)
         {

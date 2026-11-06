@@ -234,6 +234,31 @@ public static class StairGeometry
         return list;
     }
 
+    /// <summary>World boxes for XRModelFactory.HoleCuts: under every drawn floor opening (Hole tool), the top 60 cm of the
+    /// storey below, inset 3 cm from the opening's edges. The opening is a rectangle in the model's frame (as the
+    /// railings and the floor cut use it), so the boxes turn with the model's yaw.</summary>
+    public static List<(Vector3 c, Quaternion r, Vector3 half)> StairwellCuts(HouseEdits edits, List<MRUKRoom> rooms, float yaw, Vector3 center)
+    {
+        var list = new List<(Vector3, Quaternion, Vector3)>();
+        if (edits?.holes == null || rooms == null) return list;
+        Quaternion g = Quaternion.Euler(0, yaw, 0), gi = Quaternion.Inverse(g);
+        const float depth = 0.6f, inset = 0.03f;
+        foreach (var h in edits.holes)
+        {
+            if (!HoleWorld(h, rooms, out var a, out var b)) continue;
+            var room = rooms.FirstOrDefault(r => DoorCatalog.RoomId(r) == h.roomUuid);
+            float fy = room != null && room.FloorAnchors.Any(f => f != null) ? room.FloorAnchors.Where(f => f != null).Min(f => f.transform.position.y) : a.y;
+            Vector3 ma = g * (a - center), mb = g * (b - center);
+            float hx = Mathf.Abs(mb.x - ma.x) / 2f - inset, hz = Mathf.Abs(mb.z - ma.z) / 2f - inset;
+            if (hx < 0.05f || hz < 0.05f) continue;
+            Vector3 c = gi * new Vector3((ma.x + mb.x) / 2f, 0f, (ma.z + mb.z) / 2f) + center;
+            float y0 = fy - depth, y1 = fy + 0.005f;
+            c.y = (y0 + y1) / 2f;
+            list.Add((c, gi, new Vector3(hx, (y1 - y0) / 2f, hz)));
+        }
+        return list;
+    }
+
     public static Resolved Resolve(StairEdit s, List<MRUKRoom> rooms)
     {
         var pts = WorldPoints(s, rooms);

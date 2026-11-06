@@ -204,8 +204,13 @@ public static class Furniture
                 float a = wl.Type == JTokenType.Object ? F((JObject)wl, "from", lo) : lo;
                 float b = wl.Type == JTokenType.Object ? F((JObject)wl, "to", hi) : hi;
                 float t = F(er.spec, "wall_t", 0.25f);
-                if (Mathf.Abs(a - lo) < 0.01f) a -= t;   // close the outer corner with the perpendicular wall
-                if (Mathf.Abs(b - hi) < 0.01f) b += t;
+                // close the outer corner with the perpendicular wall - only where that wall is one of this room's
+                // own listed walls: at an end that meets a scanned neighbour's wall (Satna's -x wall at the bedroom
+                // side) the extra half metre ran on through the bedroom's outer wall and into its window reveal
+                var listed = (er.spec["walls"] as JArray ?? new JArray()).Select(x => x.Type == JTokenType.String ? (string)x : (string)x["side"]).ToList();
+                string loSide = alongX ? "-x" : "-z", hiSide = alongX ? "+x" : "+z";
+                if (Mathf.Abs(a - lo) < 0.01f && listed.Contains(loSide)) a -= t;
+                if (Mathf.Abs(b - hi) < 0.01f && listed.Contains(hiSide)) b += t;
                 float y0 = er.floor - slab;
                 Func<float, float, float> bot = (x, z) => y0, top = (x, z) => ceilAt(x, z) + slab;
                 // a wall piece between p0..p1 along the wall, bottom / top given as functions

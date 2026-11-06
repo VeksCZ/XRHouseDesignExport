@@ -36,6 +36,9 @@ public static class XRModelFactory
                 uniqueOpenings.Add(o);
         FitOpenings(allOpenings, uniqueOpenings);
         var openingsPlacedAnywhere = new HashSet<MRUKAnchor>();
+        // every scanned floor's height: a wall whose top stops just under the next storey's floor is carried up to it
+        var floorLevels = rooms.SelectMany(r => r.FloorAnchors).Where(f => f != null).Select(f => f.transform.position.y).ToList();
+        ComputeExteriorExtra(rooms, rotation);
 
         foreach (var room in rooms) {
             var rm = new XRRoomModel { roomName = MRUKDataProcessor.GetRoomLabel(room) };
@@ -75,14 +78,32 @@ public static class XRModelFactory
                         if (top < bottom + wH && top > bottom + 0.5f) { wH = top - bottom; wallPos.y = bottom + wH / 2f; }
                     }
                 }
+                {
+                    // A ground-floor wall is scanned up to its own ceiling, the storey above starts at its floor - the
+                    // slab between them (~15-30 cm) was left open: from outside a dark/brown band ran round the house
+                    // between the storeys (seeing into the gap). Carry the wall up to the floor just above it.
+                    float topY = wallPos.y + wH / 2f, next = float.MaxValue;
+                    foreach (float fy in floorLevels) if (fy > topY - 0.02f && fy - topY < 0.6f && fy < next) next = fy;
+                    if (next != float.MaxValue && next > topY) { float add = next - topY; wH += add; wallPos.y += add / 2f; }
+                }
+                // ...and down past the floor: a room's floor outline stops a little short of its walls, and through that slit
+                // (with the wall ending exactly at floor level) the ground outside showed - a green line along the garage wall.
+                float capTop = wallPos.y + wH / 2f - floorY;   // the wall's top above the floor, for the sloped cap below
+                const float BelowFloor = 0.3f;
+                wH += BelowFloor; wallPos.y -= BelowFloor / 2f;
                 // wallRot*forward points into this room, so the opposite room (if scanned) is on the -forward side.
                 float wallThickness = EstimateWallThickness(room, rooms, wallPos, -(wallRot * Vector3.forward), wW, wallRot * Vector3.right, ExteriorWallThickness, out float wallShift, wH);
+                if (lastEstimateFallback) wallThickness += ExteriorExtra(w);   // outer walls: out to their facade's common outer face
+                if (LogWalls) { Vector3 fw = wallRot * Vector3.forward; Debug.Log($"[WallT] room {room.Anchor.Uuid.ToString().Substring(0, 4)} wall {w.Anchor.Uuid.ToString().Substring(0, 8)} c ({wallPos.x:0.00},{wallPos.y:0.00},{wallPos.z:0.00}) in ({fw.x:0.00},{fw.z:0.00}) w {wW:0.00} h {wH:0.00} t {wallThickness:0.00} shift {wallShift:0.00}"); }
                 Vector3 wallOff = WallBoxOffset(wallThickness, wallShift, 1f); // behind the face, not centred on it
                 var wallHoles = uniqueOpenings.Where(o => {
                     Vector3 lp = Quaternion.Inverse(wallRot) * (OPos(o) - wallPos);
-                    return Mathf.Abs(lp.z) < 0.25f && Mathf.Abs(lp.x) < (wW / 2f + 0.1f) && Mathf.Abs(lp.y) < (wH / 2f + 0.1f);
+                    // a doorway's hole sits at its two anchors' average - the middle of the wall, ~25 cm off either face of a 50 cm wall
+                    return Mathf.Abs(lp.z) < 0.35f && Mathf.Abs(lp.x) < (wW / 2f + 0.1f) && Mathf.Abs(lp.y) < (wH / 2f + 0.1f);
                 }).ToList();
                 var cuts = CutRects(wallPos, wallRot, wW, wH);   // where a stair passes through this wall
+                if (HoleCuts != null && !WallContinuesAbove(rooms, room, wallPos, wallRot, wW, wH))
+                    cuts.AddRange(CutRects(wallPos, wallRot, wW, wH, HoleCuts));   // a stub standing up into the stairwell
                 // local +Z points into the room here: the box spans shift - t .. shift
                 var niches = NichesOn(wallPos, wallRot, wW, wH, wallShift - wallThickness, wallShift);
 
@@ -90,10 +111,9 @@ public static class XRModelFactory
                     var xC = new List<float> { -wW/2f - oL, wW/2f + oR };
                     var yC = new List<float> { -wH/2f, wH/2f };
                     foreach(var h in wallHoles) {
-                        Vector3 lp = Quaternion.Inverse(wallRot) * (OPos(h) - wallPos);
-                        float hw = OW(h)/2f, hh = h.PlaneRect.Value.height/2f;
-                        xC.Add(Mathf.Clamp(lp.x - hw, -wW/2f, wW/2f)); xC.Add(Mathf.Clamp(lp.x + hw, -wW/2f, wW/2f));
-                        yC.Add(Mathf.Clamp(lp.y - hh, -wH/2f, wH/2f)); yC.Add(Mathf.Clamp(lp.y + hh, -wH/2f, wH/2f));
+                        HoleRect(h, wallPos, wallRot, out float hx, out float hy, out float hw, out float hh);
+                        xC.Add(Mathf.Clamp(hx - hw, -wW/2f, wW/2f)); xC.Add(Mathf.Clamp(hx + hw, -wW/2f, wW/2f));
+                        yC.Add(Mathf.Clamp(hy - hh, -wH/2f, wH/2f)); yC.Add(Mathf.Clamp(hy + hh, -wH/2f, wH/2f));
                     }
                     foreach (var k in cuts) {
                         xC.Add(Mathf.Clamp(k.cx - k.hw, -wW/2f, wW/2f)); xC.Add(Mathf.Clamp(k.cx + k.hw, -wW/2f, wW/2f));
@@ -108,9 +128,8 @@ public static class XRModelFactory
                             if (x2-x1 < 0.01f || y2-y1 < 0.01f) continue;
                             float midX = (x1+x2)/2f, midY = (y1+y2)/2f;
                             bool isHole = wallHoles.Any(h => {
-                                Vector3 lp = Quaternion.Inverse(wallRot) * (OPos(h) - wallPos);
-                                float hw = OW(h)/2f, hh = h.PlaneRect.Value.height/2f;
-                                return midX > lp.x-hw+0.01f && midX < lp.x+hw-0.01f && midY > lp.y-hh+0.01f && midY < lp.y+hh-0.01f;
+                                HoleRect(h, wallPos, wallRot, out float hx, out float hy, out float hw, out float hh);
+                                return midX > hx-hw+0.01f && midX < hx+hw-0.01f && midY > hy-hh+0.01f && midY < hy+hh-0.01f;
                             }) || cuts.Any(k => midX > k.cx - k.hw && midX < k.cx + k.hw && midY > k.cy - k.hh && midY < k.cy + k.hh)
                                || InWindowSeam(wallHoles, wallPos, wallRot, midX, midY);
                             if (!isHole) AddWallCell(rm, wallPos, wallRot, midX, midY, x2-x1, y2-y1, wallShift - wallThickness, wallShift, niches, center, rotation);
@@ -127,13 +146,13 @@ public static class XRModelFactory
                 Vector3 wallFloorCenter = new Vector3(wallPos.x, floorY, wallPos.z);
                 Vector3 leftFloor = wallFloorCenter - tangent * (wW / 2f);
                 Vector3 rightFloor = wallFloorCenter + tangent * (wW / 2f);
-                float fallbackTop = floorY + wH;
-                float h1 = Mathf.Max(wH, SampleCeilingHeight(room.CeilingAnchors, leftFloor, fallbackTop) - floorY);
-                float h2 = Mathf.Max(wH, SampleCeilingHeight(room.CeilingAnchors, rightFloor, fallbackTop) - floorY);
-                if (Mathf.Max(h1, h2) - wH > 0.03f)
-                    rm.parts.Add(CreateSlopedCapPart(leftFloor + wallRot * wallOff, rightFloor + wallRot * wallOff, wH, h1, h2, wallThickness, "WALL", center, rotation));
+                float fallbackTop = floorY + capTop;
+                float h1 = Mathf.Max(capTop, SampleCeilingHeight(room.CeilingAnchors, leftFloor, fallbackTop) - floorY);
+                float h2 = Mathf.Max(capTop, SampleCeilingHeight(room.CeilingAnchors, rightFloor, fallbackTop) - floorY);
+                if (Mathf.Max(h1, h2) - capTop > 0.03f)
+                    rm.parts.Add(CreateSlopedCapPart(leftFloor + wallRot * wallOff, rightFloor + wallRot * wallOff, capTop, h1, h2, wallThickness, "WALL", center, rotation));
 
-                AddWallLengthLabel(model.dimensions, wallPos, wallRot, wW, wH, wallThickness, center, gRotForLabels);
+                AddWallLengthLabel(model.dimensions, wallPos, wallRot, wW, capTop, wallThickness, center, gRotForLabels);
                 AddWallHeightLabels(model.dimensions, wallPos, wallRot, wW, h1, h2, floorY, wallThickness, center, gRotForLabels);
 
                 // Each hole's own box is built in this exact wall's rotation and plane, not re-derived from the
@@ -533,6 +552,7 @@ return model;
                 if (Mathf.Abs(pos.y - wallWorldPos.y) > height / 2f + 0.5f) continue;
                 best = gap;
             }
+        lastEstimateFallback = best == float.MaxValue;
         if (best == float.MaxValue) return fallback;
         if (best >= thin) return best;
         shift = Mathf.Max(0f, -best) / 2f;
@@ -543,12 +563,71 @@ return model;
     /// scan but drawn from the spec (Furniture.ExtraFaces). Set by the walk-through around building its model.</summary>
     public static List<(Vector3 pos, Vector3 inward, float width)> ExtraFaces;
 
+    /// <summary>Desktop test flag -logwalls: one [WallT] line per wall the walk model builds (thickness diagnosis).</summary>
+    public static bool LogWalls;
+
+    /// <summary>Whether the last EstimateWallThickness found no facing room (an outer wall: the fallback thickness).</summary>
+    static bool lastEstimateFallback;
+
+    /// <summary>Per outer wall, how much thicker than the exterior thickness it is drawn so that every outer wall of one
+    /// facade (parallel, outer faces within 30 cm of each other, either storey) ends in the same outer plane - rooms
+    /// scanned a few cm in or out, or a recess inside (the lower bedroom's 21 cm step), left the outside stepped
+    /// ("the wall by the terrace is triple"). The inside faces stay where they were scanned. Read by the walk-through's
+    /// windows (frame / blind depth) through <see cref="ExteriorExtra"/>.</summary>
+    static readonly Dictionary<MRUKAnchor, float> exteriorExtra = new Dictionary<MRUKAnchor, float>();
+    public static float ExteriorExtra(MRUKAnchor wall) => wall != null && exteriorExtra.TryGetValue(wall, out var e) ? e : 0f;
+
+    static void ComputeExteriorExtra(List<MRUKRoom> rooms, float rotation)
+    {
+        exteriorExtra.Clear();
+        var outer = new List<(MRUKAnchor a, Vector3 n, float o, float y0, float y1)>();
+        foreach (var room in rooms)
+            foreach (var w in room.Anchors.Where(a => a != null && a.PlaneRect.HasValue && MRUKDataProcessor.IsStructuralWall(a)))
+            {
+                Quaternion rot = SnapToPerpendicular(w.transform.rotation, rotation);
+                Vector3 outward = -(rot * Vector3.forward);
+                float wW = w.PlaneRect.Value.width, wH = w.PlaneRect.Value.height;
+                EstimateWallThickness(room, rooms, w.transform.position, outward, wW, rot * Vector3.right, ExteriorWallThickness, out _, wH);
+                if (!lastEstimateFallback) continue;
+                outer.Add((w, outward, Vector3.Dot(w.transform.position, outward) + ExteriorWallThickness, w.transform.position.y - wH / 2f, w.transform.position.y + wH / 2f));
+            }
+        foreach (var (a, n, o, _, _) in outer)
+        {
+            float best = o;
+            foreach (var (b, n2, o2, _, _) in outer)
+                if (Vector3.Dot(n, n2) > 0.99f && o2 > best && o2 - o < 0.3f) best = o2;
+            if (best - o > 0.005f) exteriorExtra[a] = best - o;
+        }
+    }
+
     // Where each (de-duplicated) opening's hole really goes: a doorway between two scanned rooms has an anchor on
     // each face, a few cm apart along the wall - the walk-through's door leaf (DoorCatalog) sits at their average,
     // so the hole does too, or a slit stayed open beside the closed leaf.
     static readonly Dictionary<MRUKAnchor, Vector3> openingPos = new Dictionary<MRUKAnchor, Vector3>();
     static Vector3 OPos(MRUKAnchor a) => openingPos.TryGetValue(a, out var p) ? p : a.transform.position;
     static float OW(MRUKAnchor a) => a.PlaneRect.Value.width;
+
+    /// <summary>Set by the walk-through around building its model: the hole a door really needs - its leaf plus the frame
+    /// lining, as (world centre on the floor, width, world top), the same numbers its frame is built from, so the two always
+    /// meet (a doorway's two anchors can differ by a few cm). The scanned rough opening is often bigger (2.33 m high for a
+    /// 2.05 m leaf); that rest is wall, not a tall brown frame. Null for an opening that keeps its scanned size.</summary>
+    public static System.Func<MRUKAnchor, (Vector3 floorCentre, float width, float topY)?> DoorHoleSize;
+
+    /// <summary>An opening's hole in this wall's local frame: centre, half width, half height (for a door with a
+    /// <see cref="DoorHoleSize"/>: that rectangle, standing on the opening's bottom).</summary>
+    static void HoleRect(MRUKAnchor h, Vector3 wallPos, Quaternion wallRot, out float cx, out float cy, out float hw, out float hh)
+    {
+        Quaternion inv = Quaternion.Inverse(wallRot);
+        Vector3 lp = inv * (OPos(h) - wallPos);
+        cx = lp.x; cy = lp.y; hw = OW(h) / 2f; hh = h.PlaneRect.Value.height / 2f;
+        var s = DoorHoleSize?.Invoke(h);
+        if (!s.HasValue) return;
+        float bottom = cy - hh;
+        float top = s.Value.topY - wallPos.y;                 // walls only turn about the vertical: world y -> local y
+        cx = (inv * (s.Value.floorCentre - wallPos)).x;
+        hw = s.Value.width / 2f;
+        if (top > bottom + 0.5f) { hh = (top - bottom) / 2f; cy = bottom + hh; }
+    }
 
     /// <summary>MRUK sometimes scans one physical window as two anchors side by side with a few cm between them
     /// (the mullion it took for wall). The walk-through draws them as ONE window (WalkDoors.BuildWindowFrames), so
@@ -592,7 +671,8 @@ return model;
         Vector3 na = a.transform.rotation * Vector3.forward, nb = b.transform.rotation * Vector3.forward;
         if (Mathf.Abs(Vector3.Dot(na, nb)) < 0.9f) return false;
         Vector3 ra = a.transform.rotation * Vector3.right;
-        return Mathf.Abs(Vector3.Dot(d, na)) < 0.45f && Mathf.Abs(Vector3.Dot(d, ra)) < 0.25f && Mathf.Abs(d.y) < 0.25f;
+        // across the wall: up to a 50 cm wall plus a little (the same 0.6 m DoorCatalog.SameDoorway allows)
+        return Mathf.Abs(Vector3.Dot(d, na)) < 0.6f && Mathf.Abs(Vector3.Dot(d, ra)) < 0.25f && Mathf.Abs(d.y) < 0.25f;
     }
 
     static void FitOpenings(List<MRUKAnchor> all, List<MRUKAnchor> unique)
@@ -711,14 +791,47 @@ return model;
     /// it passes over a wall (StairGeometry.WallCuts). Set by the walk-through around building its model.</summary>
     public static List<(Vector3 c, Quaternion r, Vector3 half)> WallCuts;
 
-    /// <summary>The wall-local rectangles (centre x/y, half width/height) of every WallCuts box this wall's plane
-    /// runs through - only boxes that really cross it, not ones that merely touch its face (a stair along a wall).</summary>
-    static List<(float cx, float cy, float hw, float hh)> CutRects(Vector3 wallPos, Quaternion wallRot, float wW, float wH)
+    /// <summary>Set by the walk-through: the open stairwell under each drawn floor opening, from 60 cm below that floor up
+    /// to it (world boxes). A wall of the storey below that stands inside it, with no wall of the storey above on the same
+    /// line, is cut down there - it ends at about the landing instead of rising as a stub between the stairs and the
+    /// floor above ("the wall is wider downstairs than upstairs" seen from the top of the stairs).</summary>
+    public static List<(Vector3 c, Quaternion r, Vector3 half)> HoleCuts;
+
+    /// <summary>A structural wall of another room starts right where this one ends (its bottom at this wall's top), in the
+    /// same plane and overlapping along it - the wall goes on up through the storey above.</summary>
+    static bool WallContinuesAbove(List<MRUKRoom> rooms, MRUKRoom self, Vector3 wallPos, Quaternion wallRot, float wW, float wH)
+    {
+        float topY = wallPos.y + wH / 2f;
+        Vector3 n = wallRot * Vector3.forward, right = wallRot * Vector3.right;
+        foreach (var r in rooms)
+        {
+            if (r == self) continue;
+            foreach (var a in r.Anchors)
+            {
+                if (a == null || !a.PlaneRect.HasValue || !MRUKDataProcessor.IsStructuralWall(a)) continue;
+                var rc = a.PlaneRect.Value;
+                float bottom = a.transform.position.y - rc.height / 2f;
+                if (Mathf.Abs(bottom - topY) > 0.4f) continue;
+                Vector3 n2 = Vector3.ProjectOnPlane(a.transform.forward, Vector3.up).normalized;
+                if (Mathf.Abs(Vector3.Dot(n2, n)) < 0.98f) continue;
+                Vector3 d = a.transform.position - wallPos;
+                if (Mathf.Abs(Vector3.Dot(d, n)) > 0.15f) continue;
+                if (Mathf.Abs(Vector3.Dot(d, right)) > (wW + rc.width) / 2f - 0.1f) continue;
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /// <summary>The wall-local rectangles (centre x/y, half width/height) of every box (WallCuts, or the given list) this
+    /// wall's plane runs through - only boxes that really cross it, not ones that merely touch its face (a stair along a wall).</summary>
+    static List<(float cx, float cy, float hw, float hh)> CutRects(Vector3 wallPos, Quaternion wallRot, float wW, float wH, List<(Vector3 c, Quaternion r, Vector3 half)> boxes = null)
     {
         var res = new List<(float, float, float, float)>();
-        if (WallCuts == null) return res;
+        boxes ??= WallCuts;
+        if (boxes == null) return res;
         Quaternion inv = Quaternion.Inverse(wallRot);
-        foreach (var (c, r, half) in WallCuts)
+        foreach (var (c, r, half) in boxes)
         {
             float x0 = float.MaxValue, x1 = float.MinValue, y0 = float.MaxValue, y1 = float.MinValue, z0 = float.MaxValue, z1 = float.MinValue;
             for (int k = 0; k < 8; k++)

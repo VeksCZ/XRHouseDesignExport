@@ -569,8 +569,10 @@ public class WalkThroughMode : MonoBehaviour
             XRModelFactory.ExtraFaces = Furniture.ExtraFaces(Furniture.Load(HouseEditsStore.CurrentScan), walkRooms, yaw, center);
             XRModelFactory.WallCuts = StairGeometry.WallCuts(HouseEditsStore.Current, walkRooms);   // walls stop under the stairs
             stairSig = StairSignature();
+            XRModelFactory.DoorHoleSize = WalkDoors.HoleSizes(walkRooms, HouseEditsStore.Current);   // a door's hole = leaf + frame, the rest stays wall
+            XRModelFactory.HoleCuts = StairGeometry.StairwellCuts(HouseEditsStore.Current, walkRooms, yaw, center);   // no wall stubs up into the stairwell
             try { model = XRModelFactory.CreateAnchorAnalytical(walkRooms, yaw, center); }
-            finally { XRModelFactory.ExtraFaces = null; XRModelFactory.WallCuts = null; }
+            finally { XRModelFactory.ExtraFaces = null; XRModelFactory.WallCuts = null; XRModelFactory.DoorHoleSize = null; XRModelFactory.HoleCuts = null; }
             XRModelFactory.AddCeilings(model, walkRooms); // walking inside, a ceiling is what tells you you're indoors
         }
         else if (walkModel == WalkModel.Mesh) model = await XRModelFactory.CreateMeshAnalytical(walkRooms, yaw, center, forDollhouse: false);

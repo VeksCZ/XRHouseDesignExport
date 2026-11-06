@@ -151,8 +151,9 @@ and exports 3D models, floor plans and reports from the scan.
   (V2 face / V1 entity inserted in `wallUuids`); the walk-through keeps your spot over a reload (`TryGetFeetInRoom`, room + room-local point).
 - **Sliding furniture parts** (shower doors, spec glass `{"side":"front","sliding":true}`): parts named `@slide...`
   move in the walk-through (WalkDoors.SetFurnitureSliders) - open when you come close or on the trigger.
-- **Door leaves in the walk-through** (`WalkDoors`): a single door gets a standard 80 cm leaf (70 / 90 in a narrow / wide opening, 205 high) inside the scanned rough opening
-  with a frame filling the rest; hinged leaves open as wide as a sphere sweep allows (up to 120 deg, `FreeSwing`); frames leave out the jamb at a room corner. A single
+- **Door leaves in the walk-through** (`WalkDoors`): a single door gets a standard 80 cm leaf (70 / 90 in a narrow / wide opening, 205 high) inside the scanned rough opening:
+  the wall is built only up to leaf + 3 cm lining (`WalkDoors.HoleSizes` -> `XRModelFactory.DoorHoleSize`), the leaf hangs in the middle of the wall's
+  thickness and a lining frame (obložková zárubeň, `AddLiningFrame`) covers the reveal with a trim 5 cm over both faces; hinged leaves open as wide as a sphere sweep allows (up to 120 deg, `FreeSwing`); frames leave out the jamb at a room corner. A single
   door 1.35-1.70 m wide is the **entrance door** (`BuildEntrance`, Aluprof 1480 x 2195: fixed 400 mm matte sidelight + leaf, anthracite outside / white inside (like the windows), inox bar,
   opens OUTWARD whatever the edit says).
 - **Windows** (walk-through): outer frame + posts white inside / anthracite outside (`AddWindowFrame`) and each opening part has its own SASH FRAME of the same two colours that opens with the glass (`WinFrame` in `MakeLeaf`) ( Veka Softline 82 from the contract in `docs/novostavba/OKNA_RYZI.md`); window parts can have
@@ -195,6 +196,19 @@ and exports 3D models, floor plans and reports from the scan.
   Scripted checks (DesktopWalkTests.cs), screenshots + `TEST`/`TRACE` log lines, exit 0 = passed:
   `-scan <folder> -test views|doors|windows|stairs|fall|holes -out <dir> [-views "x,y,z,yaw,pitch;..."]`
   (scan-frame floor points). Use these to verify walk-through changes before asking the user to try the headset.
+  Diagnosis flags: `-logwalls` (one `[WallT]` line per wall: room, centre, inward normal, size, thickness),
+  `-test probe -rays "x,y,z,dx,dy,dz;..." [-scanframe]` (what each ray passes through, in GLB or scan-frame coordinates;
+  NB a ray reports a wall box's far face), `-glbviews` works outside the house too (`-views` snaps into a room).
+  Ground-floor walls are carried up to the storey floor just above them (no open band between the storeys from outside);
+  an extra room's wall closes a corner only where the perpendicular wall is one of its own listed walls.
+- **Wall thickness / room placement**: the scan can't measure a wall - `EstimateWallThickness` takes the gap to the facing room
+  (most partitions come out 2-15 cm because the rooms' scans touch). The house: 50 cm outer walls + two load-bearing walls on both
+  storeys (garage | hall/stairs and living room | the middle rooms) - compare wall positions by distance along the wall normal
+  (walls are ~6.4 deg off the axes). Where the headset placed a room too close, `Tools/shift_rooms.py <src> <dst> ROOM=dx,dz ...`
+  moves whole rooms on a COPY of a scan (anchors + that room's door/stair/hole edits; routes / wall photos are not moved).
+  `Scan_Novostavba Osove_clean_v5` = v4 with the garage moved 35 cm and the living room 33 cm away from the middle and every
+  room face on the two load-bearing lines (both storeys) snapped to one plane each, so both walls are 50 cm (+-1 cm); its
+  furniture spec's roofs, terrace, paving, study and walk-in wardrobe moved with them. Doorway anchors on both faces of a 50 cm wall still pair up (`SameOpening` 0.6 m, hole search 0.35 m off the face).
 - **Stairs on a moved room**: `StairGeometry.WorldPoints` puts a stair back on the nearest floor under its first point when it is
   > 35 cm off every floor there (`StairFloorSnap`, stored on a saved scan); `Reanchor` (room pose stamped in the edit) keeps
   it on its spot after a re-scan. The stair panel has Move (10 cm forward/back/left/right) and Turn (5 deg) for what is left. A selected opening has Move (10 cm away/closer/left/right of your view).

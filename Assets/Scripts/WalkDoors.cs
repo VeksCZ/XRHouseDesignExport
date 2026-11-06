@@ -172,10 +172,20 @@ public class WalkDoors
                         entranceDone = true;
                         break;
                     }
-                    // the scan measures the rough opening; the leaf is a standard one inside a frame that fills the rest
+                    // The scan measures the rough opening; the leaf is a standard one. The wall around it is built only up to
+                    // the leaf + frame lining (HoleSizes -> XRModelFactory.DoorHoleSize), so the rest of the opening is wall;
+                    // the leaf hangs in the middle of the wall's thickness in a lining frame that covers the reveal and laps
+                    // TrimOver onto both wall faces.
                     LeafSize(w, h, out float lw, out float lh);
-                    frameInset = (w - lw) / 2f; frameDrop = h - lh;
-                    door.leaves.Add(Hinged(visual, layer, door, hingeM + toOtherM * frameInset, toOtherM, swingM, lw, lh, handleH));
+                    float inset = (w - lw) / 2f;
+                    WallFaces(d, rooms, out float f0, out float f1);
+                    Vector3 nM = g * d.normal;
+                    Vector3 mid = nM * ((f0 + f1) / 2f);
+                    door.leaves.Add(Hinged(visual, layer, door, hingeM + toOtherM * inset + mid, toOtherM, swingM, lw, lh, handleH));
+                    bool cH = DoorCatalog.JambAtCorner(rooms, d, hinge, -toOther, 0.08f);
+                    bool cO = DoorCatalog.JambAtCorner(rooms, d, hinge + toOther * w, toOther, 0.08f);
+                    AddLiningFrame(visual, layer, hingeM + toOtherM * inset, toOtherM, nM, f0, f1, lw, lh, !cH, !cO);
+                    entranceDone = true;   // its own frame - not the generic one below
                     break;
                 }
                 case DoorKind.Double:
@@ -313,6 +323,94 @@ public class WalkDoors
         AddFrame(visual, layer, left, rightIn, w, h, true, true, 0f, h - lh, AnthraciteColor, SidelightW, -outward);
     }
 
+    const float Lining = 0.03f, TrimOver = 0.05f, TrimT = 0.012f;
+
+    /// <summary>The hole each single door really needs in its wall (leaf + lining, from the opening's bottom - the
+    /// finished floor's build-up included), by every anchor of that doorway, for XRModelFactory.DoorHoleSize.
+    /// Other kinds (double, sliding, garage, the entrance door, a plain opening) keep the scanned opening.</summary>
+    public static System.Func<MRUKAnchor, (Vector3 floorCentre, float width, float topY)?> HoleSizes(List<MRUKRoom> rooms, HouseEdits edits)
+    {
+        if (rooms == null || edits == null) return null;
+        var map = new Dictionary<MRUKAnchor, (Vector3, float, float)>();
+        bool entranceStyle = Furniture.StyleFlag(HouseEditsStore.CurrentScan, "entrance_door");
+        foreach (var d in DoorCatalog.Build(rooms))
+        {
+            if (d.isWindow) continue;
+            var e = DoorCatalog.FindEdit(edits, d, rooms);
+            if (e == null || e.kind != DoorKind.Single) continue;
+            bool exterior = d.roomFront == null || d.roomBack == null;
+            if (exterior && entranceStyle && d.width >= EntranceMinW && d.width <= EntranceMaxW) continue;
+            float lift = Mathf.Max(0f, XRModelFactory.FloorBuildupAt?.Invoke(d.FloorY) ?? 0f);
+            float h = d.height - 0.01f;
+            if (lift > 0.005f) h = Mathf.Max(1.2f, h - lift);
+            LeafSize(d.width, h, out float lw, out float lh);
+            // exactly where the frame goes: centred on d.center along the wall, from d.FloorY (+ build-up) up to the head
+            var size = (d.center - Vector3.up * (d.height / 2f), lw + 2f * Lining + 0.004f, d.FloorY + lift + lh + Lining + 0.004f);
+            foreach (var a in d.anchors) if (a) map[a] = size;
+            if (d.anchor) map[d.anchor] = size;
+        }
+        return a => a != null && map.TryGetValue(a, out var s) ? s : ((Vector3, float, float)?)null;
+    }
+
+    /// <summary>The two faces of the wall a door is in, as offsets along d.normal from d.center: from the anchors on
+    /// both faces when the doorway was scanned from both rooms, else the one face plus the wall's estimated thickness
+    /// behind it (away from its room).</summary>
+    static void WallFaces(DoorInfo d, List<MRUKRoom> rooms, out float f0, out float f1)
+    {
+        float lo = float.MaxValue, hi = float.MinValue;
+        MRUKAnchor any = null;
+        foreach (var a in d.anchors)
+        {
+            if (!a) continue;
+            any ??= a;
+            float o = Vector3.Dot(a.transform.position - d.center, d.normal);
+            lo = Mathf.Min(lo, o); hi = Mathf.Max(hi, o);
+        }
+        if (any != null && d.anchors.Count(a => a) >= 2)
+        {
+            if (hi - lo < 0.03f) { float m = (lo + hi) / 2f; lo = m - 0.015f; hi = m + 0.015f; }
+            f0 = lo; f1 = hi; return;
+        }
+        any ??= d.anchor;
+        float o0 = lo == float.MaxValue ? 0f : lo;
+        float t = WindowWallThickness(d, rooms);
+        float s = any ? Mathf.Sign(Vector3.Dot(Vector3.ProjectOnPlane(any.transform.forward, Vector3.up), d.normal)) : 1f;   // its room's side
+        f0 = Mathf.Min(o0, o0 - s * t); f1 = Mathf.Max(o0, o0 - s * t);
+    }
+
+    /// <summary>A lining door frame (obložková zárubeň): the jambs and head cover the reveal through the whole wall
+    /// (f0..f1 along nM, a little proud of both faces) round the leaf (lw x lh from 'leafLeft' along toOtherM), and a
+    /// trim laps TrimOver onto each wall face. No trim on a side that meets a room corner (it would poke into that wall).</summary>
+    void AddLiningFrame(GameObject visual, int layer, Vector3 leafLeft, Vector3 toOtherM, Vector3 nM, float f0, float f1, float lw, float lh, bool trimL, bool trimR)
+    {
+        Quaternion rot = Quaternion.LookRotation(toOtherM, Vector3.up);
+        var parts = new List<XRMeshPart>();
+        void Box(float a0, float a1, float y0, float y1, float n0, float n1)   // along, height, across the wall
+        {
+            if (a1 - a0 < 0.002f || y1 - y0 < 0.002f || n1 - n0 < 0.002f) return;
+            Vector3 c = leafLeft + toOtherM * ((a0 + a1) / 2f) + Vector3.up * ((y0 + y1) / 2f) + nM * ((n0 + n1) / 2f);
+            var p = XRModelFactory.CreateBoxPart("DOOR_FRAME", c, rot, new Vector3(n1 - n0, y1 - y0, a1 - a0), "DOORLEAF", Vector3.zero, 0f);
+            p.color = FrameColor; parts.Add(p);
+        }
+        float back = f0 - TrimT / 2f, front = f1 + TrimT / 2f, top = lh + Lining;
+        Box(-Lining, 0f, 0f, top, back, front);                 // jambs, through the wall
+        Box(lw, lw + Lining, 0f, top, back, front);
+        Box(-Lining, lw + Lining, lh, top, back, front);        // head
+        float l0 = trimL ? -Lining - TrimOver : -Lining, l1 = trimR ? lw + Lining + TrimOver : lw + Lining;
+        foreach (var (a, b) in new[] { (f0 - TrimT, f0), (f1, f1 + TrimT) })   // the trim on each face
+        {
+            if (trimL) Box(-Lining - TrimOver, 0f, 0f, top + TrimOver, a, b);
+            if (trimR) Box(lw, lw + Lining + TrimOver, 0f, top + TrimOver, a, b);
+            Box(l0, l1, lh, top + TrimOver, a, b);
+        }
+        var model = new XRHouseModel();
+        model.rooms.Add(new XRRoomModel { roomName = "Frame", parts = parts });
+        var go = UnityModelLoader.LoadToScene(model, shaded: true);
+        go.transform.SetParent(visual.transform, false);
+        foreach (var t in go.GetComponentsInChildren<Transform>()) t.gameObject.layer = layer;
+        created.Add(go);
+    }
+
     /// <summary>The leaf of a single door in a rough opening of this size: a standard 80 cm one (70 cm in a narrow opening, 90 cm in a wide
     /// one), 205 cm high - never bigger than the opening less a frame.</summary>
     static void LeafSize(float openW, float openH, out float leafW, out float leafH)
@@ -448,8 +546,11 @@ public class WalkDoors
         }
         if (host == null) return fallback;
         Vector3 outward = -Vector3.ProjectOnPlane(host.transform.forward, Vector3.up).normalized;
-        return XRModelFactory.EstimateWallThickness(room, rooms, host.transform.position, outward,
+        float t = XRModelFactory.EstimateWallThickness(room, rooms, host.transform.position, outward,
             host.PlaneRect.Value.width, host.transform.right, fallback, out _, host.PlaneRect.Value.height);
+        // an outer wall is drawn out to its facade's common outer face (XRModelFactory.ExteriorExtra) - the frame / blind follow it
+        if (Mathf.Abs(t - fallback) < 1e-4f) t += XRModelFactory.ExteriorExtra(host);
+        return t;
     }
 
     void BuildWindow(GameObject visual, int layer, DoorInfo d, DoorEdit e, Quaternion g, Vector3 center, List<Vector3> wasOpen, bool sharedLeft, bool sharedRight, List<MRUKRoom> rooms)
