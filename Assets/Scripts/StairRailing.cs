@@ -191,7 +191,10 @@ public class StairRailing
     /// <summary>A wall already stands where a slat would (checked at knee and chest height).</summary>
     bool WallAt(Vector3 modelP, float footY, Vector3 outward)
     {
-        static bool IsWall(Collider c) { string nm = c.name; return nm == "WALL" || nm == "WallSeg" || nm == "WallCap" || nm.EndsWith("_wall") || nm.Contains("attic"); }
+        // Unity renames every sibling after the first "WallSeg"/"WallCap" (one wall is many boxes, one per cell
+        // around its holes/niches) to "WallSeg (1)", "WallSeg (2)"... - an exact name match only ever caught the
+        // first one, so most real walls were invisible to this check.
+        static bool IsWall(Collider c) { string nm = c.name; return nm == "WALL" || nm.StartsWith("WallSeg") || nm.StartsWith("WallCap") || nm.EndsWith("_wall") || nm.Contains("attic"); }
         Vector3 outW = model.TransformDirection(outward).normalized;
         foreach (float h in new[] { 0.3f, 0.6f, 0.9f })
         {

@@ -765,6 +765,30 @@ return model;
     /// A floor slab that follows the room's real outline (PlaneBoundary2D) - the anchor's PlaneRect is only the bounding
     /// rectangle, which sticks out of every L-shaped or notched room. Its top face is at the floor plane.
     /// </summary>
+    /// <summary>Pushes every vertex of a 2D polygon outward (away from its centroid) by 'margin', along the average
+    /// of its two edge normals - a simple, good-enough dilation for a room's roughly convex floor outline.</summary>
+    static List<Vector2> OffsetOutline2D(List<Vector2> pts, float margin)
+    {
+        int n = pts.Count;
+        if (n < 3 || margin <= 0f) return pts;
+        Vector2 centroid = Vector2.zero;
+        foreach (var p in pts) centroid += p;
+        centroid /= n;
+        var result = new List<Vector2>(n);
+        for (int i = 0; i < n; i++)
+        {
+            Vector2 prev = pts[(i - 1 + n) % n], cur = pts[i], next = pts[(i + 1) % n];
+            Vector2 e1 = (cur - prev).normalized, e2 = (next - cur).normalized;
+            Vector2 n1 = new Vector2(e1.y, -e1.x), n2 = new Vector2(e2.y, -e2.x);
+            Vector2 dir = n1 + n2;
+            if (dir.sqrMagnitude < 1e-6f) dir = n1;
+            dir.Normalize();
+            if (Vector2.Dot(dir, cur - centroid) < 0f) dir = -dir;
+            result.Add(cur + dir * margin);
+        }
+        return result;
+    }
+
     private static XRMeshPart CreateFloorSlab(MRUKAnchor floor, Vector3 center, float globalRot)
     {
         var outline = floor.PlaneBoundary2D;
@@ -780,8 +804,14 @@ return model;
         Quaternion gRot = Quaternion.Euler(0, globalRot, 0);
         var part = new XRMeshPart { name = "FLOOR", materialName = "FLOOR", color = GetColorForMaterial("FLOOR") };
 
-        var top = new List<Vector3>(outline.Count);
-        foreach (var p in outline) top.Add(gRot * (floor.transform.position + floor.transform.rotation * new Vector3(p.x, p.y, 0) - center) + Vector3.up * buildup);
+        // MRUK's floor outline is trimmed a little inside the walls (and doesn't know a doorway should be solid
+        // floor at all) - invisible on the rough floor itself, but once raised by the build-up that small gap
+        // becomes a visible pit, worst right at a doorway where there is no wall to hide it under. Push the outline
+        // out a bit so the finished slab always reaches past the wall face / all the way across a doorway; a plain
+        // wall still covers the small overhang elsewhere.
+        var outlineOut = buildup > 0.005f ? OffsetOutline2D(outline, 0.12f) : outline;
+        var top = new List<Vector3>(outlineOut.Count);
+        foreach (var p in outlineOut) top.Add(gRot * (floor.transform.position + floor.transform.rotation * new Vector3(p.x, p.y, 0) - center) + Vector3.up * buildup);
         int n = top.Count;
         foreach (var v in top) part.vertices.Add(v);
         foreach (var v in top) part.vertices.Add(v + Vector3.down * thickness);

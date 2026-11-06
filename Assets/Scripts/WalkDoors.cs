@@ -160,10 +160,15 @@ public class WalkDoors
             {
                 case DoorKind.Single:
                 {
-                    if (!d.isWindow && w >= EntranceMinW && w <= EntranceMaxW && Furniture.StyleFlag(HouseEditsStore.CurrentScan, "entrance_door"))
+                    bool exterior = d.roomFront == null || d.roomBack == null;
+                    if (!d.isWindow && exterior && w >= EntranceMinW && w <= EntranceMaxW && Furniture.StyleFlag(HouseEditsStore.CurrentScan, "entrance_door"))
                     {
-                        // an entrance door (about 1.48 m wide): fixed sidelight + leaf, opening OUTWARD (the edit says inward -> the other way)
-                        BuildEntrance(visual, layer, door, door.center, -swingM, w, h);
+                        // an entrance door (about 1.48 m wide): fixed sidelight + leaf, opening the way the edit says
+                        // (some real entrance doors open in, not just out - that was never ours to force). White
+                        // inside / anthracite outside still follows which room is real (not which way it swings).
+                        // Width alone isn't enough - an interior door can happen to be in the same range (one is, to an office).
+                        Vector3 trueOutward = g * (d.roomFront == null ? d.normal : -d.normal);
+                        BuildEntrance(visual, layer, door, door.center, toOtherM, trueOutward, swingM, w, h);
                         entranceDone = true;
                         break;
                     }
@@ -281,13 +286,18 @@ public class WalkDoors
     /// <summary>The entrance door (1480 x 2195 mm Aluprof): a fixed 400 mm sidelight (matte triple glazing) on the left as seen from
     /// inside and the 1080 mm leaf hinged on the right, opening to the outside; anthracite inside, white outside, anthracite frame.
     /// 'outward' points from the house to the outside.</summary>
-    void BuildEntrance(GameObject visual, int layer, Door door, Vector3 floorCentre, Vector3 outward, float w, float h)
+    void BuildEntrance(GameObject visual, int layer, Door door, Vector3 floorCentre, Vector3 rightIn, Vector3 outward, Vector3 swingDir, float w, float h)
     {
         float lh = Mathf.Min(EntranceTotalH, h - 0.05f), lw = w - SidelightW - 0.01f;
-        Vector3 rightIn = Vector3.Cross(Vector3.up, outward).normalized;   // the right hand of someone inside looking out
         Vector3 left = floorCentre - rightIn * (w / 2f), right = floorCentre + rightIn * (w / 2f);
         MakeLeaf(visual, layer, door, left, rightIn, SidelightW, lh, 0f, LeafStyle.FixedPane, outward, true);
-        door.leaves.Add(Hinged(visual, layer, door, right, -rightIn, outward, lw, lh, HandleHeight, LeafStyle.Entrance));
+        // Not routed through Hinged(): that helper takes the swing direction as the leaf's own "outward" for white
+        // inside / anthracite outside too, which is only right for a door that always swings out. Here the two
+        // can differ (an edit may open it in), so the swing and the true outside are kept separate.
+        float sign = Vector3.Dot(Vector3.Cross(Vector3.up, -rightIn), swingDir) >= 0f ? 1f : -1f;
+        float open = FreeSwing(visual, layer, right, -rightIn, sign, lw, lh);
+        var pivot = MakeLeaf(visual, layer, door, right, -rightIn, lw, lh, HandleHeight, LeafStyle.Entrance, outward);
+        door.leaves.Add(new Leaf { motion = Motion.Swing, pivot = pivot, sign = sign, openDeg = open });
         AddFrame(visual, layer, left, rightIn, w, h, true, true, 0f, h - lh, AnthraciteColor, SidelightW, -outward);
     }
 
