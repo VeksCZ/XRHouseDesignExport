@@ -20,6 +20,13 @@ adds/updates only site.car_start (CarDrive won't spawn the car at all without on
 inside the house) - leaves every other part of an existing site block alone, safe to run on a scan whose terrain
 was built some other way.
 
+    python3 Tools/generate_surroundings.py "Exports/RoomData/<scan folder>" --driveway-only
+
+adds only an S-curve gravel driveway + paved apron (new "areas", from site.car_start if there is one, else the same
+point --car-start-only would compute, down to the garage door) - for a scan whose terrain was hand-authored/merged
+and already has its own barns/terrace/embankments but no long driveway up to them yet. Refuses to add a second one
+(an existing area named "driveway...") without --force.
+
 Coordinates are GLB axes (metres, y up) - the same frame SiteModel/Furniture already use for "site".
 """
 import json, math, os, sys
@@ -355,6 +362,59 @@ def inject_car_start(scan_dir, force=False):
     return path, garage["id"], garage_auto, site["car_start"]
 
 
+DRIVEWAY_MARKER = "driveway_only_v1"
+
+
+def inject_driveway(scan_dir, width=3.0, bulge=6.0, force=False):
+    """Adds an S-curve gravel driveway (+ a paved apron into the garage) as new "areas" in an EXISTING site block,
+    from site.car_start (or the same point this script would compute) down to the garage door - everything else
+    already there (terrace, barns, embankments, ground_cuts...) is left exactly as is. For a scan whose terrain was
+    hand-authored/merged and already has a short path near the house but not the long one up to the road/barn."""
+    scan_path = os.path.join(scan_dir, "92_Data_Scan.scene.json")
+    data = esg.extract(scan_path)
+    rooms = data["rooms"]
+    names = load_room_names(scan_dir)
+    garage = find_room(rooms, names, "GARAGE") or find_garage_by_door(rooms)
+    garage_auto = names.get(garage["id"] if garage else None, "").upper() != "GARAGE"
+    if garage is None:
+        raise SystemExit("Can't find the garage (no GARAGE-named room, no door wider than "
+                          f"{GARAGE_DOOR_MIN_WIDTH} m) - can't route the driveway.")
+    doorXZ, outN = garage_door(rooms, garage)
+
+    path = os.path.join(scan_dir, "95_Data_Furniture.json")
+    spec = load_spec(path)
+    site = spec.setdefault("site", {})
+    if any((a.get("name") or "").startswith("driveway") for a in site.get("areas", [])) and not force:
+        raise SystemExit(f"{path} already has \"driveway\"-named area(s) - pass --force to add another lot anyway.")
+
+    # The site's own outdoor-grade reference (SiteModel treats it as the one datum everything else - ground,
+    # buildings' eave/ridge, flat areas with no explicit "y" - is built from); a room's own floorY is NOT it (this
+    # house is split-level, so "the lowest room floor" can be ~2 m off the real outdoor grade at the garage).
+    groundY = site.get("ground_y", 0.0)
+
+    cs = site.get("car_start")
+    if cs and len(cs) >= 2:
+        driveStart = (cs[0], cs[1])
+    else:
+        driveStart = add(doorXZ, scale(outN, 26.0))
+        driveStart = add(driveStart, scale((outN[1], -outN[0]), -8.0))
+    # Stop short of the door: an existing hand-authored apron/paving right at the garage (if any) owns the last
+    # few metres - this only has to reach close enough to blend into it, not drive straight through it.
+    apron = add(doorXZ, scale(outN, 9.0))
+
+    curvePts = s_curve(driveStart, apron, bulge, 10)
+    new_areas = []
+    for i in range(len(curvePts) - 1):
+        p0, p1 = curvePts[i], curvePts[i + 1]
+        new_areas.append({"name": "driveway", "poly": band(p0, p1, width / 2, groundY, groundY),
+                           "color": "gravel", "t": 0.12})
+
+    site.setdefault("areas", []).extend(new_areas)
+    site["_driveway_marker"] = DRIVEWAY_MARKER
+    write_spec(path, spec)
+    return path, garage["id"], garage_auto, len(new_areas), driveStart
+
+
 if __name__ == "__main__":
     args = [a for a in sys.argv[1:] if not a.startswith("--")]
     force = "--force" in sys.argv
@@ -366,6 +426,12 @@ if __name__ == "__main__":
         out, garage_id, garage_auto, cs = inject_car_start(scan_dir, force)
         print(f"GARAGE room {garage_id}" + (" (found by its wide door, not a name)" if garage_auto else "") +
               f" - car_start = [{cs[0]:.2f}, {cs[1]:.2f}, {cs[2]:.1f} deg] -> {out}")
+        sys.exit(0)
+
+    if "--driveway-only" in sys.argv:
+        out, garage_id, garage_auto, n, start = inject_driveway(scan_dir, force=force)
+        print(f"GARAGE room {garage_id}" + (" (found by its wide door, not a name)" if garage_auto else "") +
+              f" - {n} driveway area(s) from ({start[0]:.2f}, {start[1]:.2f}) down to the garage door -> {out}")
         sys.exit(0)
 
     site, garage_id, kitchen_id, garage_auto = build_site(scan_dir)
