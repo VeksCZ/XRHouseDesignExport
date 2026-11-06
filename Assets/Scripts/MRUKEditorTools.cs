@@ -322,6 +322,16 @@ public static class MRUKEditorTools {
             // already exist there - the dir is shell-writable but adb's push tries (and isn't allowed) to chown
             // new files to the app's uid. Stage in the public Download folder, then `cp`/`chmod` as the shell user
             // (no chown involved) - same trick as the files the app itself already has there.
+            // Overwriting a file the app already owns (e.g. re-pushing a scan under its own name) can't be made
+            // to work this way: plain shell cp refuses it ("Permission denied" - scoped storage), and so does
+            // every uid trick tried so far - run-as cp (can't read the shell-owned staged file back), run-as rm
+            // (still refused even for the app's own uid on its own file under Android/data/<package>/ - looks
+            // like a FUSE/SELinux check on the calling PROCESS, not classic unix ownership, so even "being the
+            // same uid" via adb isn't "being the app"). Overwriting in place would need the app itself to do it
+            // at runtime, not adb from the PC. Pushing under a name already on the Quest therefore still fails
+            // this way - push the local folder under a different name (e.g. rename it "..._v2") instead, and
+            // delete the stale one in the app's own scan list if you don't want both (bin icon, press twice -
+            // that goes through the app's own process, so scoped storage doesn't block it).
             ok &= RunAdb($"push \"{local}\" \"{staged}\"");
             ok &= RunAdb($"shell \"cp '{staged}' '{final}'\"");
             ok &= RunAdb($"shell \"chmod 666 '{final}'\"");
