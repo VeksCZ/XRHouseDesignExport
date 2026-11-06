@@ -390,7 +390,10 @@ def inject_driveway(scan_dir, width=3.0, bulge=6.0, force=False):
     # The site's own outdoor-grade reference (SiteModel treats it as the one datum everything else - ground,
     # buildings' eave/ridge, flat areas with no explicit "y" - is built from); a room's own floorY is NOT it (this
     # house is split-level, so "the lowest room floor" can be ~2 m off the real outdoor grade at the garage).
-    groundY = site.get("ground_y", 0.0)
+    # +0.03 so the gravel sits a touch above the flat "ground" plane (same top y otherwise z-fights with it) -
+    # SiteModel's own default for an area with no explicit "y" is ground_y + 0.02; areas given 3D poly points (as
+    # these are) skip that default entirely, so it has to be added here instead.
+    groundY = site.get("ground_y", 0.0) + 0.03
 
     cs = site.get("car_start")
     if cs and len(cs) >= 2:

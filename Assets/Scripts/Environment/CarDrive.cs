@@ -288,6 +288,10 @@ public class CarDrive : MonoBehaviour
         // fade check, and WalkLayer colliders are for the house model, not for things that move every frame.
         foreach (var mf in car.GetComponentsInChildren<MeshFilter>()) mf.gameObject.layer = 0;
 
+        // carPos.y is still 0 (site.car_start only gives x/z) - without this the parked car sits at the model's
+        // own origin height until someone actually drives it (Drive() is the only other place that probes the
+        // ground), which can leave it floating well above (or sunk into) the real terrain at that spot.
+        if (ProbeY(root, carPos, out float y0)) carPos.y = y0;
         car.localPosition = carPos;
         car.localRotation = Quaternion.Euler(0, carYaw, 0);
     }
