@@ -10,9 +10,15 @@ writes no Unity code.
 Finds the garage on its own: the one room with a single large garage-door-width opening (>1.8 m - an interior door
 never is). A room actually named GARAGE (94_Data_RoomNames.json, pulled from the headset) is still used first if
 there is one. The terrace/pool corner needs a room named KITCHEN, though - there's nothing in the geometry alone to
-spot a kitchen by. Merges into any existing 95_Data_Furniture.json (keeps "items" etc.), and never overwrites a
-"site" that already has a "driveway_v1" marker without --force, so re-running after the user has nudged things in
-the app doesn't clobber their changes.
+spot a kitchen by. Merges into any existing 95_Data_Furniture.json (keeps "items" etc.), and refuses to touch a
+"site" that's already there without --force - whether it's one this script made before (has a "driveway_v1" marker)
+or a hand-authored/merged one (no marker), so it never silently clobbers someone else's terrain work.
+
+    python3 Tools/generate_surroundings.py "Exports/RoomData/<scan folder>" --car-start-only
+
+adds/updates only site.car_start (CarDrive won't spawn the car at all without one, rather than guess and place it
+inside the house) - leaves every other part of an existing site block alone, safe to run on a scan whose terrain
+was built some other way.
 
 Coordinates are GLB axes (metres, y up) - the same frame SiteModel/Furniture already use for "site".
 """
@@ -288,25 +294,65 @@ def build_site(scan_dir, out_garage=None, out_kitchen=None):
     return site, garage["id"], (kitchen["id"] if kitchen else None), garage_auto
 
 
-def merge_and_write(scan_dir, site, force):
-    path = os.path.join(scan_dir, "95_Data_Furniture.json")
-    spec = {}
-    if os.path.exists(path):
-        try:
-            spec = json.load(open(path, encoding="utf-8"))
-        except Exception:
-            spec = {}
-    existing = spec.get("site")
-    if existing and existing.get("_marker") == "driveway_v1" and not force:
-        raise SystemExit(f"{path} already has generated site data - pass --force to overwrite "
-                          "(this will discard any in-app tweaks to it).")
-    spec["site"] = site
+def load_spec(path):
+    if not os.path.exists(path):
+        return {}
+    try:
+        return json.load(open(path, encoding="utf-8"))
+    except Exception:
+        return {}
+
+
+def write_spec(path, spec):
     tmp = path + ".tmp"
     json.dump(spec, open(tmp, "w", encoding="utf-8"), indent=1)
     if os.path.exists(path):
         os.replace(path, path + ".bak")
     os.replace(tmp, path)
+
+
+def merge_and_write(scan_dir, site, force):
+    path = os.path.join(scan_dir, "95_Data_Furniture.json")
+    spec = load_spec(path)
+    existing = spec.get("site")
+    if existing and not force:
+        if existing.get("_marker") == "driveway_v1":
+            raise SystemExit(f"{path} already has generated site data - pass --force to overwrite "
+                              "(this will discard any in-app tweaks to it).")
+        raise SystemExit(f"{path} already has site data that wasn't made by this script (no \"driveway_v1\" "
+                          "marker - someone hand-authored or merged it) - pass --force to replace it wholesale "
+                          "anyway, or use --car-start-only to just add a car_start without touching the rest.")
+    spec["site"] = site
+    write_spec(path, spec)
     return path
+
+
+def inject_car_start(scan_dir, force=False):
+    """Adds/updates only site.car_start, leaving every other part of an existing (possibly hand-authored) site
+    block untouched - for a scan that already has its own terrain/driveway but no "site.car_start" yet (CarDrive
+    refuses to spawn the car without one, rather than guess and place it inside the house)."""
+    scan_path = os.path.join(scan_dir, "92_Data_Scan.scene.json")
+    data = esg.extract(scan_path)
+    rooms = data["rooms"]
+    names = load_room_names(scan_dir)
+    garage = find_room(rooms, names, "GARAGE") or find_garage_by_door(rooms)
+    garage_auto = names.get(garage["id"] if garage else None, "").upper() != "GARAGE"
+    if garage is None:
+        raise SystemExit("Can't find the garage (no GARAGE-named room, no door wider than "
+                          f"{GARAGE_DOOR_MIN_WIDTH} m) - can't place car_start.")
+    doorXZ, outN = garage_door(rooms, garage)
+    driveStart = add(doorXZ, scale(outN, 26.0))
+    driveStart = add(driveStart, scale((outN[1], -outN[0]), -8.0))
+    carYawDeg = math.degrees(math.atan2(-outN[0], -outN[1]))  # facing back toward the garage door
+
+    path = os.path.join(scan_dir, "95_Data_Furniture.json")
+    spec = load_spec(path)
+    site = spec.setdefault("site", {})
+    if "car_start" in site and not force:
+        raise SystemExit(f"{path} already has site.car_start = {site['car_start']} - pass --force to replace it.")
+    site["car_start"] = [driveStart[0], driveStart[1], carYawDeg]
+    write_spec(path, spec)
+    return path, garage["id"], garage_auto, site["car_start"]
 
 
 if __name__ == "__main__":
@@ -315,6 +361,13 @@ if __name__ == "__main__":
     if not args:
         print(__doc__); sys.exit(1)
     scan_dir = args[0]
+
+    if "--car-start-only" in sys.argv:
+        out, garage_id, garage_auto, cs = inject_car_start(scan_dir, force)
+        print(f"GARAGE room {garage_id}" + (" (found by its wide door, not a name)" if garage_auto else "") +
+              f" - car_start = [{cs[0]:.2f}, {cs[1]:.2f}, {cs[2]:.1f} deg] -> {out}")
+        sys.exit(0)
+
     site, garage_id, kitchen_id, garage_auto = build_site(scan_dir)
     out = merge_and_write(scan_dir, site, force)
     print(f"GARAGE room {garage_id}" + (" (found by its wide door, not a name)" if garage_auto else "") +
