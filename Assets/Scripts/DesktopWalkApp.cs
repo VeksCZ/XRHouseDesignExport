@@ -294,6 +294,28 @@ public partial class DesktopWalkApp : MonoBehaviour
 
     GUIStyle box, label, small, button, title;
 
+    /// <summary>A 4-tick reticle (gap in the middle, like a weapon sight) instead of a plain "+" - a bright colour
+    /// with a dark outline so it stays visible against light walls and dark glass alike.</summary>
+    static void DrawCrosshair(float w, float h)
+    {
+        float cx = w / 2f, cy = h / 2f;
+        const float len = 11f, gap = 5f, th = 3f;
+        var ring = new Color(0.15f, 0.95f, 0.35f);
+        void Bar(float x, float y, float bw, float bh, Color c)
+        {
+            var old = GUI.color; GUI.color = c;
+            GUI.DrawTexture(new Rect(x, y, bw, bh), Texture2D.whiteTexture);
+            GUI.color = old;
+        }
+        void Tick(float x, float y, float tw, float th2) { Bar(x - 1, y - 1, tw + 2, th2 + 2, Color.black); Bar(x, y, tw, th2, ring); }
+        Tick(cx - th / 2f, cy - gap - len, th, len);          // top
+        Tick(cx - th / 2f, cy + gap, th, len);                // bottom
+        Tick(cx - gap - len, cy - th / 2f, len, th);          // left
+        Tick(cx + gap, cy - th / 2f, len, th);                // right
+        Bar(cx - 2.5f, cy - 2.5f, 5, 5, Color.black);
+        Bar(cx - 1.5f, cy - 1.5f, 3, 3, ring);
+    }
+
     void EnsureStyles()
     {
         if (box != null) return;
@@ -322,7 +344,7 @@ public partial class DesktopWalkApp : MonoBehaviour
         {
             DrawHud(h);
             // crosshair: shows where a click opens/closes a door
-            GUI.Label(new Rect(w / 2 - 6, h / 2 - 13, 20, 26), "+", label);
+            DrawCrosshair(w, h);
             if (sidebarOpen) DrawSidebar(w, h);
             else if (GUI.Button(new Rect(w - 46, 12, 34, 34), "☰", button)) SetSidebar(true);
         }

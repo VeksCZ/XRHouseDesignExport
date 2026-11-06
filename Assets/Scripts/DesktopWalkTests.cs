@@ -168,6 +168,22 @@ public partial class DesktopWalkApp
         Vector3 lookDir = center - standPos;
         float pitch = Mathf.Atan2(lookDir.y, new Vector2(lookDir.x, lookDir.z).magnitude) * Mathf.Rad2Deg;
         await StandAt(standPos, Yaw(lookDir), pitch);
+        if (Environment.GetCommandLineArgs().Contains("-open"))
+        {
+            bool opened = false;
+            // the handle isn't dead centre - nudge the look a bit either way along the wall until the ray finds it
+            foreach (float nudge in new[] { 0f, 0.3f, -0.3f, 0.5f, -0.5f, 0.15f, -0.15f, 0.8f, -0.8f, 1.0f, -1.0f })
+            {
+                Vector3 c2 = center + t.right * nudge;
+                Vector3 look = c2 - standPos;
+                await StandAt(standPos, Yaw(look), Mathf.Atan2(look.y, new Vector2(look.x, look.z).magnitude) * Mathf.Rad2Deg);
+                await Frames(2);
+                if (walk.TryToggleDoor()) { opened = true; break; }
+            }
+            Debug.Log($"TEST wallview: -open toggled: {opened}");
+            await StandAt(standPos, Yaw(lookDir), pitch);   // back to the original framing for the shot
+            await Frames(10);
+        }
         await Shot(Path.Combine(outDir, $"wall_{wallPrefix}.png"));
         return true;
 #else

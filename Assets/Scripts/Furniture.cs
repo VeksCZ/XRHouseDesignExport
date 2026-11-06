@@ -381,6 +381,45 @@ public static class Furniture
             }
         }
         CeilingFit.ResetCache();
+        // A ceiling plane - hand-authored or fit to the noisy scanned mesh - is only ever an approximation; the roof
+        // above it is a second, independently authored plane. Where they'd overlap (or clear each other by only a
+        // couple of cm) the grey roof shows through the white ceiling at that spot. Real insulation/roof structure
+        // is normally several cm to tens of cm thick, so lower the ceiling to keep a safety margin below the roof's
+        // underside everywhere its footprint covers the room, rather than trusting both planes to already agree.
+        if (spec["roofs"] is JArray roofSpecs)
+        {
+            const float RoofClearance = 0.20f;
+            for (int i = 0; i < planes.Count; i++)
+            {
+                var (room, p) = planes[i];
+                var sample = new List<(float x, float z)>();
+                foreach (var w in room.WallAnchors) if (w != null) { var m = g * (w.transform.position - center); sample.Add((m.x, -m.z)); }
+                if (sample.Count == 0) continue;
+                float worstOver = 0f;
+                foreach (var rf in roofSpecs.OfType<JObject>())
+                {
+                    if (!TryPlane(rf["plane"], out var rp)) continue;
+                    float x0 = F(rf, "x0", 0f), x1 = F(rf, "x1", 0f), z0 = F(rf, "z0", 0f), z1 = F(rf, "z1", 0f);
+                    float xmin = Mathf.Min(x0, x1) - 0.2f, xmax = Mathf.Max(x0, x1) + 0.2f, zmin = Mathf.Min(z0, z1) - 0.2f, zmax = Mathf.Max(z0, z1) + 0.2f;
+                    foreach (var (x, z) in sample)
+                    {
+                        if (x < xmin || x > xmax || z < zmin || z > zmax) continue;
+                        float ceilY = p.a + p.bx * x + p.bz * z, roofY = rp.a + rp.bx * x + rp.bz * z;
+                        // Plan footprints can overlap between stories (a garage roof sits under an upstairs room
+                        // too) without that roof being the one actually over this ceiling - only trust a roof
+                        // that is already within a plausible single attic's reach of this ceiling, not metres off.
+                        if (roofY - ceilY > 0.8f || ceilY - roofY > 0.05f) continue;
+                        float over = (ceilY + RoofClearance) - roofY;
+                        if (over > worstOver) worstOver = over;
+                    }
+                }
+                if (worstOver > 0.001f)
+                {
+                    planes[i] = (room, (p.a - worstOver, p.bx, p.bz));
+                    Debug.Log($"[Furniture] ceiling of {DoorCatalog.RoomId(room).Substring(0, 4)} lowered {worstOver * 100:0} cm to clear the roof above it ({RoofClearance * 100:0} cm margin)");
+                }
+            }
+        }
         if (planes.Count == 0 && suspended.Count == 0) return;
         XRModelFactory.CeilingOverride = (anchors, probe) =>
         {
